@@ -167,7 +167,21 @@ export function buildUpstreamHeaders(request: Request): Headers {
   if (!headers.has('origin') && forwardedHost) {
     headers.set('origin', `${forwardedProto}://${forwardedHost}`);
   }
+  const token = internalServiceToken();
+  if (token) {
+    headers.set('x-chess404-service-token', token);
+  }
   return headers;
+}
+
+function internalServiceToken(): string {
+  return (
+    process.env.GATEWAY_INTERNAL_SERVICE_TOKEN ??
+    process.env.PLATFORM_INTERNAL_SERVICE_TOKEN ??
+    process.env.CHESS404_INTERNAL_SERVICE_TOKEN ??
+    process.env.INTERNAL_SERVICE_TOKEN ??
+    ''
+  ).trim();
 }
 
 function filterResponseHeaders(headers: Headers): Headers {

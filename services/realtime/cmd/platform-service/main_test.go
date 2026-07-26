@@ -34,6 +34,7 @@ func buildTestPlatformMux(t *testing.T, archive *platform.MatchArchiveStore, gue
 
 func buildTestPlatformMuxWithAccounts(t *testing.T, archive *platform.MatchArchiveStore, guests platform.GuestDirectory, accounts platform.AccountDirectory, claims *platform.MatchClaimStore) http.Handler {
 	t.Helper()
+	accountsCache.Invalidate()
 	friends, err := platform.NewFriendshipStore("")
 	if err != nil {
 		t.Fatalf("expected friendship store to initialize, got %v", err)
@@ -1703,8 +1704,8 @@ func TestAccountDetailIncludesDerivedGuestStats(t *testing.T) {
 	if response.Account.AccountID != accountSession.Account.AccountID || response.Account.Handle != "aurora_stats" {
 		t.Fatalf("unexpected account identity response %#v", response)
 	}
-	if response.Account.DisplayName != guestSession.Guest.DisplayName || response.Account.Rating != 1215 {
-		t.Fatalf("expected derived account display/rating=1215, got %#v", response)
+	if response.Account.DisplayName != guestSession.Guest.DisplayName || response.Account.Rating != 1229 {
+		t.Fatalf("expected derived account display/rating=1229, got %#v", response)
 	}
 	if response.Account.MatchesPlayed != 2 || response.Account.Wins != 1 || response.Account.Losses != 0 || response.Account.Draws != 1 || response.Account.GuestCount != 1 {
 		t.Fatalf("expected derived account stats, got %#v", response)
@@ -1799,20 +1800,20 @@ func TestAccountDetailIncludesDirectRatingHistory(t *testing.T) {
 	if response.Account.AccountID != whiteAccount.Account.AccountID || response.Account.Handle != "history_white" {
 		t.Fatalf("unexpected account identity response %#v", response)
 	}
-	if response.Account.Rating != 1216 || response.Account.MatchesPlayed != 1 {
+	if response.Account.Rating != 1232 || response.Account.MatchesPlayed != 1 {
 		t.Fatalf("expected direct account stats after finalize, got %#v", response.Account)
 	}
 	if len(response.Account.RatingHistory) != 1 {
 		t.Fatalf("expected direct rating history entry, got %#v", response.Account.RatingHistory)
 	}
 	expectedSeasonID := time.Now().UTC().Format("2006-01")
-	if response.Account.CurrentSeason == nil || response.Account.CurrentSeason.SeasonID != expectedSeasonID || response.Account.CurrentSeason.MatchesPlayed != 1 || response.Account.CurrentSeason.NetDelta != 16 || response.Account.CurrentSeason.RatingEnd != 1216 {
+	if response.Account.CurrentSeason == nil || response.Account.CurrentSeason.SeasonID != expectedSeasonID || response.Account.CurrentSeason.MatchesPlayed != 1 || response.Account.CurrentSeason.NetDelta != 32 || response.Account.CurrentSeason.RatingEnd != 1232 {
 		t.Fatalf("unexpected current season summary %#v", response.Account.CurrentSeason)
 	}
-	if len(response.Account.SeasonHistory) != 1 || response.Account.SeasonHistory[0].SeasonID != expectedSeasonID || response.Account.SeasonHistory[0].MatchesPlayed != 1 || response.Account.SeasonHistory[0].NetDelta != 16 {
+	if len(response.Account.SeasonHistory) != 1 || response.Account.SeasonHistory[0].SeasonID != expectedSeasonID || response.Account.SeasonHistory[0].MatchesPlayed != 1 || response.Account.SeasonHistory[0].NetDelta != 32 {
 		t.Fatalf("unexpected season history %#v", response.Account.SeasonHistory)
 	}
-	if response.Account.RatingHistory[0].MatchID != "account_history_match" || response.Account.RatingHistory[0].Queue != "rated" || response.Account.RatingHistory[0].ModeID != string(contracts.MatchModeHiddenCards) || response.Account.RatingHistory[0].Result != "win" || response.Account.RatingHistory[0].Delta != 16 || response.Account.RatingHistory[0].RatingAfter != 1216 || response.Account.RatingHistory[0].MatchesPlayed != 1 {
+	if response.Account.RatingHistory[0].MatchID != "account_history_match" || response.Account.RatingHistory[0].Queue != "rated" || response.Account.RatingHistory[0].ModeID != string(contracts.MatchModeHiddenCards) || response.Account.RatingHistory[0].Result != "win" || response.Account.RatingHistory[0].Delta != 32 || response.Account.RatingHistory[0].RatingAfter != 1232 || response.Account.RatingHistory[0].MatchesPlayed != 1 {
 		t.Fatalf("unexpected account rating history %#v", response.Account.RatingHistory[0])
 	}
 }
@@ -1890,7 +1891,7 @@ func TestAccountsListCanSortByDerivedRating(t *testing.T) {
 	if len(response.Accounts) != 2 {
 		t.Fatalf("expected two accounts in sorted list, got %#v", response)
 	}
-	if response.Accounts[0].Handle != "aurora_one" || response.Accounts[0].Rating != 1216 {
+	if response.Accounts[0].Handle != "aurora_one" || response.Accounts[0].Rating != 1232 {
 		t.Fatalf("expected highest-rated account first, got %#v", response.Accounts)
 	}
 	if response.Accounts[1].Handle != "aurora_two" || response.Accounts[1].Rating != 1200 {
@@ -1970,11 +1971,11 @@ func TestAccountsListIncludesCurrentSeasonForDirectAccountHistory(t *testing.T) 
 	if len(response.Accounts) != 2 {
 		t.Fatalf("expected two accounts in sorted list, got %#v", response)
 	}
-	if response.Accounts[0].Handle != "rank_history_white" || response.Accounts[0].Rating != 1216 {
+	if response.Accounts[0].Handle != "rank_history_white" || response.Accounts[0].Rating != 1232 {
 		t.Fatalf("expected direct-history winner to rank first, got %#v", response.Accounts)
 	}
 	expectedSeasonID := time.Now().UTC().Format("2006-01")
-	if response.Accounts[0].CurrentSeason == nil || response.Accounts[0].CurrentSeason.SeasonID != expectedSeasonID || response.Accounts[0].CurrentSeason.MatchesPlayed != 1 || response.Accounts[0].CurrentSeason.NetDelta != 16 {
+	if response.Accounts[0].CurrentSeason == nil || response.Accounts[0].CurrentSeason.SeasonID != expectedSeasonID || response.Accounts[0].CurrentSeason.MatchesPlayed != 1 || response.Accounts[0].CurrentSeason.NetDelta != 32 {
 		t.Fatalf("expected direct-history account to expose current season, got %#v", response.Accounts[0])
 	}
 }
@@ -2687,10 +2688,12 @@ func TestGuestResultsRejectNonRatedMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	defer func() { _ = archive.Close() }()
 	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
 	if err != nil {
 		t.Fatalf("expected guest store to initialize, got %v", err)
 	}
+	defer func() { _ = guests.Close() }()
 	claims := platform.NewMatchClaimStore()
 
 	now := time.Date(2026, 5, 6, 16, 0, 0, 0, time.UTC)
@@ -2747,10 +2750,12 @@ func TestGuestResultsFinalizeRatedMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	defer func() { _ = archive.Close() }()
 	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
 	if err != nil {
 		t.Fatalf("expected guest store to initialize, got %v", err)
 	}
+	defer func() { _ = guests.Close() }()
 	claims := platform.NewMatchClaimStore()
 
 	now := time.Date(2026, 5, 6, 16, 30, 0, 0, time.UTC)
@@ -2796,7 +2801,7 @@ func TestGuestResultsFinalizeRatedMatches(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected successful guest result response to decode, got %v", err)
 	}
-	if !response.Changed || response.White.Rating != 1216 || response.Black.Rating != 1184 {
+	if !response.Changed || response.White.Rating != 1232 || response.Black.Rating != 1168 {
 		t.Fatalf("expected rated room to update ratings, got %#v", response)
 	}
 }
@@ -2807,10 +2812,12 @@ func TestGuestResultsRejectUnauthenticated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	defer func() { _ = archive.Close() }()
 	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
 	if err != nil {
 		t.Fatalf("expected guest store to initialize, got %v", err)
 	}
+	defer func() { _ = guests.Close() }()
 	claims := platform.NewMatchClaimStore()
 
 	now := time.Date(2026, 5, 6, 17, 0, 0, 0, time.UTC)
@@ -2866,10 +2873,12 @@ func TestGuestResultsRejectUnfinishedRatedMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	defer func() { _ = archive.Close() }()
 	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
 	if err != nil {
 		t.Fatalf("expected guest store to initialize, got %v", err)
 	}
+	defer func() { _ = guests.Close() }()
 	claims := platform.NewMatchClaimStore()
 
 	now := time.Date(2026, 5, 6, 17, 30, 0, 0, time.UTC)
@@ -2915,14 +2924,17 @@ func TestAccountResultsFinalizeRatedMatchesWithLinkedGuestFallback(t *testing.T)
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	defer func() { _ = archive.Close() }()
 	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
 	if err != nil {
 		t.Fatalf("expected guest store to initialize, got %v", err)
 	}
+	defer func() { _ = guests.Close() }()
 	accounts, err := platform.NewAccountStore(filepath.Join(tempDir, "accounts.json"))
 	if err != nil {
 		t.Fatalf("expected account store to initialize, got %v", err)
 	}
+	defer func() { _ = accounts.Close() }()
 	claims := platform.NewMatchClaimStore()
 
 	whiteSession, err := guests.EnsureGuest("guest_white", "")
@@ -2979,13 +2991,13 @@ func TestAccountResultsFinalizeRatedMatchesWithLinkedGuestFallback(t *testing.T)
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected successful account result response to decode, got %v", err)
 	}
-	if !response.Changed || response.White.Rating != 1216 || response.Black.Rating != 1184 {
+	if !response.Changed || response.White.Rating != 1232 || response.Black.Rating != 1168 {
 		t.Fatalf("expected account result to update guest ratings, got %#v", response)
 	}
-	if response.WhiteAccount.AccountID != whiteAccountSession.Account.AccountID || response.WhiteAccount.Rating != 1216 || response.WhiteAccount.Wins != 1 || response.WhiteAccount.MatchesPlayed != 1 {
+	if response.WhiteAccount.AccountID != whiteAccountSession.Account.AccountID || response.WhiteAccount.Rating != 1232 || response.WhiteAccount.Wins != 1 || response.WhiteAccount.MatchesPlayed != 1 {
 		t.Fatalf("expected white account summary to reflect finalized result, got %#v", response.WhiteAccount)
 	}
-	if response.BlackAccount.AccountID != blackAccountSession.Account.AccountID || response.BlackAccount.Rating != 1184 || response.BlackAccount.Losses != 1 || response.BlackAccount.MatchesPlayed != 1 {
+	if response.BlackAccount.AccountID != blackAccountSession.Account.AccountID || response.BlackAccount.Rating != 1168 || response.BlackAccount.Losses != 1 || response.BlackAccount.MatchesPlayed != 1 {
 		t.Fatalf("expected black account summary to reflect finalized result, got %#v", response.BlackAccount)
 	}
 }
@@ -2996,14 +3008,17 @@ func TestAccountResultsRejectUnauthorized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	defer func() { _ = archive.Close() }()
 	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
 	if err != nil {
 		t.Fatalf("expected guest store to initialize, got %v", err)
 	}
+	defer func() { _ = guests.Close() }()
 	accounts, err := platform.NewAccountStore(filepath.Join(tempDir, "accounts.json"))
 	if err != nil {
 		t.Fatalf("expected account store to initialize, got %v", err)
 	}
+	defer func() { _ = accounts.Close() }()
 	claims := platform.NewMatchClaimStore()
 
 	whiteSession, err := guests.EnsureGuest("guest_white", "")
@@ -3074,10 +3089,12 @@ func TestInternalFinalizeRatedMatchRequiresServiceToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	defer func() { _ = archive.Close() }()
 	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
 	if err != nil {
 		t.Fatalf("expected guest store to initialize, got %v", err)
 	}
+	defer func() { _ = guests.Close() }()
 	claims := platform.NewMatchClaimStore()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/platform/internal/finalize-rated-match", strings.NewReader(`{"matchId":"rated_room"}`))
@@ -3096,14 +3113,17 @@ func TestInternalFinalizeRatedMatchFinalizesArchivedRatedMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	defer func() { _ = archive.Close() }()
 	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
 	if err != nil {
 		t.Fatalf("expected guest store to initialize, got %v", err)
 	}
+	defer func() { _ = guests.Close() }()
 	accounts, err := platform.NewAccountStore(filepath.Join(tempDir, "accounts.json"))
 	if err != nil {
 		t.Fatalf("expected account store to initialize, got %v", err)
 	}
+	defer func() { _ = accounts.Close() }()
 	claims := platform.NewMatchClaimStore()
 
 	whiteSession, err := guests.EnsureGuest("guest_white", "")
@@ -3161,13 +3181,13 @@ func TestInternalFinalizeRatedMatchFinalizesArchivedRatedMatch(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected internal finalizer response to decode, got %v", err)
 	}
-	if !response.Changed || response.White.Rating != 1216 || response.Black.Rating != 1184 {
+	if !response.Changed || response.White.Rating != 1232 || response.Black.Rating != 1168 {
 		t.Fatalf("expected internal finalizer to update guest ratings, got %#v", response)
 	}
-	if response.WhiteAccount.AccountID != whiteAccountSession.Account.AccountID || response.WhiteAccount.Rating != 1216 {
+	if response.WhiteAccount.AccountID != whiteAccountSession.Account.AccountID || response.WhiteAccount.Rating != 1232 {
 		t.Fatalf("expected internal finalizer to update white account, got %#v", response.WhiteAccount)
 	}
-	if response.BlackAccount.AccountID != blackAccountSession.Account.AccountID || response.BlackAccount.Rating != 1184 {
+	if response.BlackAccount.AccountID != blackAccountSession.Account.AccountID || response.BlackAccount.Rating != 1168 {
 		t.Fatalf("expected internal finalizer to update black account, got %#v", response.BlackAccount)
 	}
 }
@@ -3261,10 +3281,10 @@ func TestPlatformMatchesSyncRejectsSnapshotWithoutPlayerSecrets(t *testing.T) {
 	now := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
 	snapshot := contracts.MatchSnapshotResponse{
 		Match: contracts.MatchState{
-			MatchID:     "naked_snapshot",
-			Status:      "waiting",
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			MatchID:   "naked_snapshot",
+			Status:    "waiting",
+			CreatedAt: now,
+			UpdatedAt: now,
 		},
 	}
 	payload, err := json.Marshal(snapshot)

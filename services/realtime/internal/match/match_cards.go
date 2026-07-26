@@ -773,17 +773,17 @@ func applySelectTarget(state *contracts.MatchState, intent contracts.PlayerInten
 		}
 		nextBoard := cloneBoard(state.Board)
 		nextBoard[intent.Target.Row][intent.Target.Col] = &contracts.Piece{
-			Type:           sourcePiece.Type,
-			Color:          sourcePiece.Color,
-			Shielded:       sourcePiece.Shielded,
-			ShieldTurn:     sourcePiece.ShieldTurn,
-			Frozen:         sourcePiece.Frozen,
-			Borrowed:       sourcePiece.Borrowed,
-			Bomb:           sourcePiece.Bomb,
-			Invisible:      sourcePiece.Invisible,
-			InvisibleTurn:  sourcePiece.InvisibleTurn,
-			InvisibleOver:  sourcePiece.InvisibleOver,
-			FusedWith:      sourcePiece.FusedWith,
+			Type:          sourcePiece.Type,
+			Color:         sourcePiece.Color,
+			Shielded:      sourcePiece.Shielded,
+			ShieldTurn:    sourcePiece.ShieldTurn,
+			Frozen:        sourcePiece.Frozen,
+			Borrowed:      sourcePiece.Borrowed,
+			Bomb:          sourcePiece.Bomb,
+			Invisible:     sourcePiece.Invisible,
+			InvisibleTurn: sourcePiece.InvisibleTurn,
+			InvisibleOver: sourcePiece.InvisibleOver,
+			FusedWith:     sourcePiece.FusedWith,
 		}
 		if !kingsRemainSafe(nextBoard, state.FortressZones) {
 			return nil, errors.New("clone destination is not safe")
@@ -2011,11 +2011,24 @@ func evaluateAutomaticMatchFinish(state *contracts.MatchState) (string, string) 
 	if isStale {
 		return "draw", "stalemate"
 	}
-	if insufficientMaterial(state.Board) {
+	if insufficientMaterialForState(state) {
 		return "draw", "insufficient_material"
 	}
 
 	return "", ""
+}
+
+func insufficientMaterialForState(state *contracts.MatchState) bool {
+	if state.InvisiblePiece == nil {
+		return insufficientMaterial(state.Board)
+	}
+	board := cloneBoard(state.Board)
+	invisible := state.InvisiblePiece
+	if inBounds(invisible.Row, invisible.Col) {
+		piece := invisible.Piece
+		board[invisible.Row][invisible.Col] = &piece
+	}
+	return insufficientMaterial(board)
 }
 
 func markMatchFinished(state *contracts.MatchState, winner string, finishReason string, now time.Time) {

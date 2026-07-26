@@ -287,7 +287,7 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                       </div>
                     </div>
                     <div style={{ color: '#7ce3aa', fontSize: '15px', fontWeight: 800, textAlign: 'right' }}>
-                      #{selectedSeasonId && season ? season.ratingEnd : (account.rating ?? 1200)}
+                      {selectedSeasonId && season ? season.ratingEnd : (account.rating ?? 1200)} Elo
                     </div>
                     <div style={{ color: 'rgba(255,232,180,0.62)', fontSize: '11px', textAlign: 'right' }}>
                       {season

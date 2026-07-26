@@ -7,7 +7,7 @@ export async function proxyRealtime(request: Request, path: string): Promise<Res
   const url = `${backendBaseUrl}${path}`;
   const init: RequestInit = {
     method: request.method,
-    headers: filterHeaders(request.headers),
+    headers: buildUpstreamHeaders(request.headers),
     cache: 'no-store',
   };
 
@@ -34,6 +34,24 @@ function filterHeaders(headers: Headers): Headers {
     next.set(key, value);
   });
   return next;
+}
+
+function buildUpstreamHeaders(headers: Headers): Headers {
+  const next = filterHeaders(headers);
+  const token = internalServiceToken();
+  if (token) {
+    next.set('x-chess404-service-token', token);
+  }
+  return next;
+}
+
+function internalServiceToken(): string {
+  return (
+    process.env.MATCH_INTERNAL_SERVICE_TOKEN ??
+    process.env.CHESS404_INTERNAL_SERVICE_TOKEN ??
+    process.env.INTERNAL_SERVICE_TOKEN ??
+    ''
+  ).trim();
 }
 
 function filterResponseHeaders(headers: Headers): Headers {

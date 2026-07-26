@@ -292,6 +292,7 @@ func TestArchivedMatchReloadKeepsSecretsAndReverseHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	t.Cleanup(func() { _ = archive.Close() })
 
 	now := time.Date(2026, 5, 5, 8, 9, 0, 0, time.UTC)
 	service := NewServiceWithArchive(archive)
@@ -327,11 +328,15 @@ func TestArchivedMatchReloadKeepsSecretsAndReverseHistory(t *testing.T) {
 	if err := archive.Flush(); err != nil {
 		t.Fatalf("expected archive flush to succeed, got %v", err)
 	}
+	if err := archive.Close(); err != nil {
+		t.Fatalf("expected archive close to succeed, got %v", err)
+	}
 
 	restartedArchive, err := platform.NewMatchArchiveStore(archivePath)
 	if err != nil {
 		t.Fatalf("expected archive reload to succeed, got %v", err)
 	}
+	defer func() { _ = restartedArchive.Close() }()
 	restarted := NewServiceWithArchive(restartedArchive)
 
 	reloaded, err := restarted.GetMatch("restore_room")

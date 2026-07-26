@@ -30,7 +30,14 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 function resolveMatchServiceHttpBase(): string {
-  return (process.env.NEXT_PUBLIC_MATCH_SERVICE_HTTP_BASE ?? process.env.NEXT_PUBLIC_MATCH_SERVICE_URL ?? '/api/realtime').replace(/\/$/, '');
+  const explicit = (process.env.NEXT_PUBLIC_MATCH_SERVICE_HTTP_BASE ?? process.env.NEXT_PUBLIC_MATCH_SERVICE_URL ?? '').replace(/\/$/, '');
+  if (explicit.startsWith('/')) {
+    return explicit || '/api/realtime';
+  }
+  if (process.env.CHESS404_ALLOW_DIRECT_MATCH_HTTP === 'true') {
+    return explicit || '/api/realtime';
+  }
+  return '/api/realtime';
 }
 
 function resolveMatchServiceWsBase(): string {

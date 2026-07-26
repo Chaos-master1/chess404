@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newCSRFOkHandler() http.Handler {
@@ -165,5 +166,56 @@ func TestCSRFFirstForwardedValue(t *testing.T) {
 	CSRFMiddleware(newCSRFOkHandler(), nil, "").ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 (first forwarded wins), got %d", rr.Code)
+	}
+}
+
+func TestRateLimitMiddlewareUsesSeparateGlobalAndRouteBuckets(t *testing.T) {
+	rl := New()
+	defer rl.Close()
+	handler := GlobalIPRateLimitMiddleware(rl)(
+		MiddlewareWithTrustedBypass(rl, time.Minute, 1)(newCSRFOkHandler()),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "https://chess.example/api/platform/guest-sessions", nil)
+	req.RemoteAddr = "203.0.113.20:4123"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected first request to pass separate limiters, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "https://chess.example/api/platform/guest-sessions", nil)
+	req.RemoteAddr = "203.0.113.20:4123"
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second same-route request to hit route limit, got %d", rr.Code)
+	}
+}
+
+func TestRateLimitMiddlewareSkipsOptionsAndTrustedServiceRequests(t *testing.T) {
+	rl := New()
+	defer rl.Close()
+	handler := MiddlewareWithTrustedBypass(rl, time.Minute, 1, "internal-token")(newCSRFOkHandler())
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodOptions, "https://chess.example/api/private-matches", nil)
+		req.RemoteAddr = "203.0.113.21:4123"
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected OPTIONS request %d to bypass rate limit, got %d", i+1, rr.Code)
+		}
+	}
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "https://chess.example/api/private-matches", nil)
+		req.RemoteAddr = "203.0.113.22:4123"
+		req.Header.Set("X-Chess404-Service-Token", "internal-token")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected trusted service request %d to bypass rate limit, got %d", i+1, rr.Code)
+		}
 	}
 }

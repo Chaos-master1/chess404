@@ -30,7 +30,7 @@ function describeNotification(notification: AccountNotificationView): {
   background: string;
   actionLabel: string;
 } {
-  const handle = `@${notification.actor.handle}`;
+  const handle = notification.actor?.handle ? `@${notification.actor.handle}` : 'System';
   switch (notification.kind) {
     case 'friend_request_received':
       return {
@@ -128,11 +128,8 @@ export default function InboxPage({
   }, [accountId, onUnreadCountChange, sessionToken]);
 
   React.useEffect(() => {
-    if (busyNotificationId) {
-      return;
-    }
     void loadOverview();
-  }, [busyNotificationId, liveRefreshToken, loadOverview]);
+  }, [liveRefreshToken, loadOverview]);
 
   const markRead = React.useCallback(async (notification: AccountNotificationView) => {
     if (!accountId || !sessionToken || notification.readAt) {
@@ -354,7 +351,7 @@ export default function InboxPage({
         <div style={{ color: 'rgba(255,232,180,0.72)' }}>Loading inbox…</div>
       ) : null}
 
-      {!loading && notifications.length === 0 ? (
+      {!loading && !error && overview && notifications.length === 0 ? (
         <div style={{ padding: '24px', borderRadius: '18px', border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.03)', color: 'rgba(255,232,180,0.72)', lineHeight: 1.7 }}>
           Your inbox is clear. As friends send requests or direct challenges, this account-level feed will keep the history in one place.
         </div>

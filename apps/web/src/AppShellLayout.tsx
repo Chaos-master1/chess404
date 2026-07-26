@@ -91,7 +91,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
         setSel(null); setHints([]); setDrag(null); setDragPos(null);
         setPromo(null); setCardPromo(null);
       }
-      if (e.key === ' ' && over) {
+      if (e.key === ' ' && over && showBoardSurface) {
         e.preventDefault();
         setEngineOn(v => !v);
       }

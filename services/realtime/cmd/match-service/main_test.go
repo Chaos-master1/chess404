@@ -26,8 +26,8 @@ func TestFinalizingArchiveStoreCallsPlatformForFinishedRatedMatch(t *testing.T) 
 		if r.URL.Path != "/api/platform/internal/finalize-rated-match" {
 			t.Errorf("unexpected finalizer path %q", r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer service-secret" {
-			t.Errorf("expected service token authorization, got %q", got)
+		if got := r.Header.Get("X-Chess404-Service-Token"); got != "service-secret" {
+			t.Errorf("expected service token header, got %q", got)
 		}
 		var payload struct {
 			MatchID string `json:"matchId"`

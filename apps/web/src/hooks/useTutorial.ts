@@ -4,7 +4,7 @@ import React from 'react';
 
 const TUTORIAL_DONE_KEY = 'chess404_tutorial_done';
 
-type TutorialStep = 'welcome' | 'board' | 'cards' | 'complete';
+export type TutorialStep = 'welcome' | 'board' | 'cards' | 'mana' | 'spells' | 'complete';
 
 export interface TutorialState {
   active: boolean;
@@ -12,6 +12,7 @@ export interface TutorialState {
   dismiss: () => void;
   next: () => void;
   prev: () => void;
+  open: () => void;
 }
 
 export function useTutorial(): TutorialState {
@@ -29,18 +30,28 @@ export function useTutorial(): TutorialState {
     }
   }, []);
 
+  const open = React.useCallback(() => {
+    setStep('welcome');
+    setActive(true);
+  }, []);
+
   return {
     active,
     step,
     dismiss: finish,
+    open,
     next: () => {
       if (step === 'welcome') setStep('board');
       else if (step === 'board') setStep('cards');
-      else if (step === 'cards') finish();
+      else if (step === 'cards') setStep('mana');
+      else if (step === 'mana') setStep('spells');
+      else if (step === 'spells') finish();
     },
     prev: () => {
       if (step === 'board') setStep('welcome');
       else if (step === 'cards') setStep('board');
+      else if (step === 'mana') setStep('cards');
+      else if (step === 'spells') setStep('mana');
     },
   };
 }

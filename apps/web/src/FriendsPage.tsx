@@ -70,16 +70,17 @@ function describePresence(account: AccountProfile): {
 }
 
 function persistChallengeRoom(result: DirectChallengeLaunchResponse): void {
+  const matchSnapshot = result.match.snapshot?.match;
   writeStoredRoomMeta(result.match.matchId, {
     queue: 'direct',
-    modeId: result.modeId ?? result.match.snapshot.match.modeId ?? DEFAULT_MATCH_MODE_ID,
+    modeId: result.modeId ?? matchSnapshot?.modeId ?? DEFAULT_MATCH_MODE_ID,
     viewerSeat: result.match.seatColor,
-    whiteGuestId: result.match.snapshot.match.whiteGuestId,
-    blackGuestId: result.match.snapshot.match.blackGuestId,
-    whiteAccountId: result.match.snapshot.match.whiteAccountId,
-    blackAccountId: result.match.snapshot.match.blackAccountId,
-    whiteName: result.match.snapshot.match.whiteName,
-    blackName: result.match.snapshot.match.blackName,
+    whiteGuestId: matchSnapshot?.whiteGuestId,
+    blackGuestId: matchSnapshot?.blackGuestId,
+    whiteAccountId: matchSnapshot?.whiteAccountId,
+    blackAccountId: matchSnapshot?.blackAccountId,
+    whiteName: matchSnapshot?.whiteName,
+    blackName: matchSnapshot?.blackName,
     whitePlayerSecret: result.match.seatColor === 'white' ? result.match.claim?.playerSecret : undefined,
     blackPlayerSecret: result.match.seatColor === 'black' ? result.match.claim?.playerSecret : undefined,
     whiteClaimToken: result.match.seatColor === 'white' ? result.match.claim?.claimToken : undefined,
@@ -952,6 +953,8 @@ function DirectChallengeCard({
 
 function PresencePill({ account }: { account: AccountProfile }): React.ReactElement {
   const presence = describePresence(account);
+  const isOnline = account.presenceStatus === 'online';
+  const isRecent = account.presenceStatus === 'recently_active';
   return (
     <div
       style={{
@@ -973,8 +976,8 @@ function PresencePill({ account }: { account: AccountProfile }): React.ReactElem
         width: '7px',
         height: '7px',
         borderRadius: '999px',
-        background: account.online ? '#7cff9c' : account.recentlyActive ? '#ffd36f' : 'rgba(255,255,255,0.35)',
-        boxShadow: account.online ? '0 0 12px rgba(124,255,156,0.65)' : 'none',
+        background: isOnline ? '#7cff9c' : isRecent ? '#ffd36f' : 'rgba(255,255,255,0.35)',
+        boxShadow: isOnline ? '0 0 12px rgba(124,255,156,0.65)' : 'none',
       }} />
       {presence.label}
     </div>

@@ -122,14 +122,15 @@ func main() {
 
 	go runAnticheatRetentionLoop(anticheatStore)
 
+	internalToken := configuredInternalServiceToken()
 	addr := httputil.ListenAddr("PLATFORM_ADDR", 8083)
 	srv := &http.Server{
-		Addr:              addr,
+		Addr: addr,
 		// CORS middleware wraps CSRF so that even CSRF-rejected responses
 		// carry the proper Access-Control-Allow-* headers. Otherwise the
 		// browser reports "blocked by CORS policy" on legitimate cross-origin
 		// POSTs whose Origin happens to mismatch the same-origin self check.
-		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("platform-service", rate_limit.SecurityHeadersMiddleware(httputil.LimitBody(withCORS(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl)(rl.Middleware(rate_limit.DefaultAPIWindow, rate_limit.DefaultAPILimit)(mux)), httputil.ParseAllowedOrigins(), configuredInternalServiceToken()))))))),
+		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("platform-service", rate_limit.SecurityHeadersMiddleware(httputil.LimitBody(withCORS(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl, internalToken)(rate_limit.MiddlewareWithTrustedBypass(rl, rate_limit.DefaultAPIWindow, rate_limit.DefaultAPILimit, internalToken)(mux)), httputil.ParseAllowedOrigins(), internalToken))))))),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -755,6 +756,7 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 			return
 		}
 		recordAccountSecurityEvent(securityAudit, accountSession.Account.AccountID, platform.AccountSecurityEventKindAccountClaimed, accountSession.Account.Handle)
+		accountsCache.Invalidate()
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(accountSession)
@@ -2574,12 +2576,12 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 		}
 		restriction, restricted := moderation.GetAccountRestriction(accountID)
 		respondJSON(w, http.StatusOK, map[string]any{
-			"restricted":       restricted,
-			"restriction":      restriction,
-			"restrictionKind":  restriction.Kind,
-			"restrictionId":    restriction.RestrictionID,
-			"restrictionNote":  restriction.Reason,
-			"checkedAt":        httputil.NowUTC(),
+			"restricted":      restricted,
+			"restriction":     restriction,
+			"restrictionKind": restriction.Kind,
+			"restrictionId":   restriction.RestrictionID,
+			"restrictionNote": restriction.Reason,
+			"checkedAt":       httputil.NowUTC(),
 		})
 	})
 

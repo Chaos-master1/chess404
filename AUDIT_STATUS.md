@@ -17,7 +17,7 @@
 ### Database & Scalability (11-20)
 11. ✅ Fix match seed determinism — already uses state.RNGSeed + FullMoveNum
 12. ❌ PG connection pooling — env vars exist but not tuned
-13. ❌ Index accounts by email/handle — need DB migration
+13. ✅ Index accounts by email/handle — Postgres/SQLite migrations define unique constraints for `accounts.handle` and `account_credentials.email`
 14. ❌ Cache leaderboard in Redis — not implemented
 15. ✅ Limit match history queries — ListAccounts now paginated
 16. ❌ Archive expired tickets — background cron not implemented
@@ -79,3 +79,13 @@
 - **Resolved (code already had it or we fixed):** 58
 - **Infrastructure/config (needs env vars + Railway setup):** 0 (Postgres already deployed, Redis not needed for single-region rate limiting)
 - **New features (not bugs):** ~2 (matchmaking SSE/WS, useMatchEngineFacade split)
+
+## 2026-07-20 launch-readiness smoke pass
+
+- Resolved regression: full Go test suite was failing before this pass. The match-service finalizer test now checks the service-token header actually sent by the finalizer, platform rating tests now match the placement K-factor behavior, and Windows-sensitive file-backed test stores are closed before temp directory cleanup.
+- Resolved gameplay bug: `Invisible` no longer gets immediately cleared by automatic insufficient-material detection when the hidden piece is the only non-king material. The finish evaluator now counts the active invisible piece before declaring `insufficient_material`.
+- Resolved stale leaderboard risk: account leaderboard cache is invalidated after guest-to-account claim, and platform-service tests reset the shared cache between mux instances.
+- Resolved dependency blocker: upgraded Next.js to the patched 15.5 line and pinned Rollup to `3.30.0`; `pnpm audit --audit-level high` now exits cleanly with only low/moderate advisories remaining.
+- Re-verified account lookup indexing: current Postgres and SQLite migrations already create unique indexes through the `handle` and `email` constraints.
+- Verification passed: `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm audit --audit-level high`, and `C:\Program Files\Go\bin\go.exe test ./... -count=1` from `services/realtime`.
+- Still open from prior audit status: async ticker loop, idle WebSocket reaper/backoff synchronization, CORS origin caching, tuned Postgres pooling/index rollout checks, Redis leaderboard cache, SQLite WAL mode, matchmaking push updates, native mobile WebSocket work, and `useMatchEngineFacade` refactor completion.

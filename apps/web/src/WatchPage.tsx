@@ -70,7 +70,16 @@ export default function WatchPage({ onWatchMatch, onOpenReplay }: WatchPageProps
 
   React.useEffect(() => {
     void refresh();
-  }, [refresh]);
+    if (status !== 'active') {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void refresh();
+      }
+    }, 10000);
+    return () => window.clearInterval(interval);
+  }, [refresh, status]);
 
   React.useEffect(() => {
     setNotice('');

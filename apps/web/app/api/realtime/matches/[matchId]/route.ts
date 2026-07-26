@@ -19,7 +19,7 @@ export async function GET(
   const { matchId } = await context.params;
   const upstream = await fetch(`${matchServiceBaseUrl}/api/matches/${encodeURIComponent(matchId)}`, {
     method: 'GET',
-    headers: filterHeaders(request.headers),
+    headers: buildInternalHeaders(request.headers, 'match'),
     cache: 'no-store',
   });
   const body = await upstream.text();
@@ -148,7 +148,7 @@ async function requestOwnsMatchSeat(request: Request, matchId: string): Promise<
     try {
       const response = await fetch(`${platformServiceBaseUrl}/api/platform/match-claims`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: buildInternalHeaders(new Headers({ 'Content-Type': 'application/json', Accept: 'application/json' }), 'platform'),
         cache: 'no-store',
         body: JSON.stringify(payload),
       });
@@ -237,6 +237,27 @@ function filterHeaders(headers: Headers): Headers {
     next.set(key, value);
   });
   return next;
+}
+
+function buildInternalHeaders(headers: Headers, target: 'match' | 'platform'): Headers {
+  const next = filterHeaders(headers);
+  const token = internalServiceToken(target);
+  if (token) {
+    next.set('x-chess404-service-token', token);
+  }
+  return next;
+}
+
+function internalServiceToken(target: 'match' | 'platform'): string {
+  const specific = target === 'match'
+    ? process.env.MATCH_INTERNAL_SERVICE_TOKEN
+    : process.env.PLATFORM_INTERNAL_SERVICE_TOKEN;
+  return (
+    specific ??
+    process.env.CHESS404_INTERNAL_SERVICE_TOKEN ??
+    process.env.INTERNAL_SERVICE_TOKEN ??
+    ''
+  ).trim();
 }
 
 function filterResponseHeaders(headers: Headers): Headers {

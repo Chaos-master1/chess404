@@ -153,7 +153,7 @@ func main() {
 			httputil.WriteError(w, http.StatusServiceUnavailable, "internal service token not configured on server")
 			return
 		}
-			provided := strings.TrimSpace(r.Header.Get("X-Chess404-Service-Token"))
+		provided := strings.TrimSpace(r.Header.Get("X-Chess404-Service-Token"))
 		if provided == "" {
 			const prefix = "Bearer "
 			auth := strings.TrimSpace(r.Header.Get("Authorization"))
@@ -280,14 +280,15 @@ func main() {
 		httputil.WriteError(w, http.StatusNotFound, "route not found")
 	})
 
+	internalToken := internalServiceToken()
 	addr := httputil.ListenAddr("MATCH_SERVICE_ADDR", 8081)
 	srv := &http.Server{
-		Addr:              addr,
+		Addr: addr,
 		// CORS middleware wraps CSRF so that even CSRF-rejected responses
 		// carry the proper Access-Control-Allow-* headers. Otherwise the
 		// browser reports "blocked by CORS policy" on legitimate cross-origin
 		// POSTs whose Origin happens to mismatch the same-origin self check.
-		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("match-service", rate_limit.SecurityHeadersMiddleware(httputil.LimitBody(withCORS(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl)(rl.Middleware(rate_limit.DefaultAPIWindow, rate_limit.DefaultAPILimit)(mux)), httputil.ParseAllowedOrigins(), ""))))))),
+		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("match-service", rate_limit.SecurityHeadersMiddleware(httputil.LimitBody(withCORS(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl, internalToken)(rate_limit.MiddlewareWithTrustedBypass(rl, rate_limit.DefaultAPIWindow, rate_limit.DefaultAPILimit, internalToken)(mux)), httputil.ParseAllowedOrigins(), internalToken))))))),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

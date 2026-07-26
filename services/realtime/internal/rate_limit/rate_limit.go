@@ -22,12 +22,12 @@ const (
 	DefaultGlobalIPWindow = time.Minute
 	DefaultGlobalIPLimit  = 60
 
-	DefaultAPIWindow    = time.Minute
-	DefaultAPILimit     = 120
-	DefaultAuthWindow   = 10 * time.Minute
-	DefaultAuthLimit    = 20
-	DefaultQueueWindow  = 30 * time.Second
-	DefaultQueueLimit   = 30
+	DefaultAPIWindow   = time.Minute
+	DefaultAPILimit    = 120
+	DefaultAuthWindow  = 10 * time.Minute
+	DefaultAuthLimit   = 20
+	DefaultQueueWindow = 30 * time.Second
+	DefaultQueueLimit  = 30
 )
 
 type bucket struct {
@@ -109,33 +109,15 @@ func (l *InMemoryRateLimiter) Allow(key string, window time.Duration, limit int)
 }
 
 func (l *InMemoryRateLimiter) Middleware(window time.Duration, limit int) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := ClientIP(r)
-			key := "rl:" + ip
-			allowed, retryAfter := l.Allow(key, window, limit)
-			if !allowed {
-				seconds := int(math.Ceil(retryAfter.Seconds()))
-				if seconds < 1 {
-					seconds = 1
-				}
-				w.Header().Set("Retry-After", strconv.Itoa(seconds))
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
+	return MiddlewareWithTrustedBypass(l, window, limit)
 }
 
 // RedisRateLimiter is a Redis-backed rate limiter for distributed deployments.
 // On Redis errors it falls back to an in-memory limiter rather than allowing
 // all requests through (fail-closed semantics at runtime).
 type RedisRateLimiter struct {
-	client  *redis.Client
-	now     func() time.Time
+	client   *redis.Client
+	now      func() time.Time
 	fallback *InMemoryRateLimiter
 }
 
@@ -190,26 +172,7 @@ func (r *RedisRateLimiter) Allow(key string, window time.Duration, limit int) (b
 }
 
 func (r *RedisRateLimiter) Middleware(window time.Duration, limit int) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, rq *http.Request) {
-			ip := ClientIP(rq)
-			path := strings.TrimPrefix(rq.URL.Path, "/")
-			key := "ratelimit:" + ip + ":" + path
-			allowed, retryAfter := r.Allow(key, window, limit)
-			if !allowed {
-				seconds := int(math.Ceil(retryAfter.Seconds()))
-				if seconds < 1 {
-					seconds = 1
-				}
-				w.Header().Set("Retry-After", strconv.Itoa(seconds))
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
-				return
-			}
-			next.ServeHTTP(w, rq)
-		})
-	}
+	return MiddlewareWithTrustedBypass(r, window, limit)
 }
 
 // NewRateLimiter creates a rate limiter based on the RATE_LIMIT_BACKEND env var.
@@ -460,26 +423,80 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 // client from saturating the server regardless of which endpoint they target.
 // The key uses only the client IP (no path), so this limit is truly global per
 // IP regardless of backend (memory or Redis).
-func GlobalIPRateLimitMiddleware(rl RateLimiter) func(http.Handler) http.Handler {
+func GlobalIPRateLimitMiddleware(rl RateLimiter, trustedTokens ...string) func(http.Handler) http.Handler {
+	return rateLimitMiddleware(rl, DefaultGlobalIPWindow, DefaultGlobalIPLimit, true, trustedTokens...)
+}
+
+func MiddlewareWithTrustedBypass(rl RateLimiter, window time.Duration, limit int, trustedTokens ...string) func(http.Handler) http.Handler {
+	return rateLimitMiddleware(rl, window, limit, false, trustedTokens...)
+}
+
+func rateLimitMiddleware(rl RateLimiter, window time.Duration, limit int, global bool, trustedTokens ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions || isTrustedServiceRequest(r, trustedTokens...) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			ip := ClientIP(r)
-			key := "rl:" + ip
-			allowed, retryAfter := rl.Allow(key, DefaultGlobalIPWindow, DefaultGlobalIPLimit)
+			key := rateLimitKey(ip, r, global)
+			allowed, retryAfter := rl.Allow(key, window, limit)
 			if !allowed {
-				seconds := int(math.Ceil(retryAfter.Seconds()))
-				if seconds < 1 {
-					seconds = 1
-				}
-				w.Header().Set("Retry-After", strconv.Itoa(seconds))
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
+				writeRateLimitExceeded(w, retryAfter)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func rateLimitKey(ip string, r *http.Request, global bool) string {
+	if global {
+		return "rl:global:" + ip
+	}
+	path := "/"
+	if r != nil && r.URL != nil && r.URL.Path != "" {
+		path = r.URL.Path
+	}
+	return "rl:route:" + ip + ":" + r.Method + ":" + strings.TrimPrefix(path, "/")
+}
+
+func writeRateLimitExceeded(w http.ResponseWriter, retryAfter time.Duration) {
+	seconds := int(math.Ceil(retryAfter.Seconds()))
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
+}
+
+func isTrustedServiceRequest(r *http.Request, trustedTokens ...string) bool {
+	if r == nil || len(trustedTokens) == 0 {
+		return false
+	}
+	provided := strings.TrimSpace(r.Header.Get("X-Chess404-Service-Token"))
+	if provided == "" {
+		const prefix = "Bearer "
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		if strings.HasPrefix(auth, prefix) {
+			provided = strings.TrimSpace(strings.TrimPrefix(auth, prefix))
+		}
+	}
+	if provided == "" {
+		return false
+	}
+	for _, token := range trustedTokens {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 type headerStrippingResponseWriter struct {

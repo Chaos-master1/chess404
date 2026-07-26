@@ -481,7 +481,6 @@ function buildPresenceUrl(matchId: string, presence?: Partial<MatchPresenceReque
 
 function buildMatchFetchHeaders(): Headers {
   const headers = new Headers();
-  headers.set('Content-Type', 'application/json');
   const sides = ['white', 'black'] as const;
   for (const side of sides) {
     const identity = readStoredGuestIdentity(side);

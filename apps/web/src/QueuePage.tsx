@@ -414,7 +414,16 @@ export default function QueuePage({
       return;
     }
 
-    const interval = window.setInterval(() => {
+    let timeoutId: number | null = null;
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        // Pause polling while tab is hidden, resume when tab becomes visible again
+        return;
+      }
+
       const tasks: Promise<void>[] = [];
       if (whiteTicket?.status === 'queued') {
         tasks.push(
@@ -434,14 +443,41 @@ export default function QueuePage({
           })
         );
       }
-      void Promise.all(tasks).catch((err) => {
-        if (err instanceof RateLimitError) {
-          pollingBackoffRef.current = Math.min(pollingBackoffRef.current + 4);
-        }
-      });
-    }, 2500 * (pollingBackoffRef.current > 0 ? pollingBackoffRef.current : 1));
 
-    return () => window.clearInterval(interval);
+      try {
+        await Promise.all(tasks);
+      } catch (err) {
+        if (err instanceof RateLimitError) {
+          pollingBackoffRef.current = Math.min(pollingBackoffRef.current + 2, 8);
+        }
+      }
+
+      if (!cancelled) {
+        const nextDelay = 2500 * Math.max(1, pollingBackoffRef.current);
+        timeoutId = window.setTimeout(poll, nextDelay);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        if (timeoutId !== null) window.clearTimeout(timeoutId);
+        void poll();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+    };
   }, [whiteTicket, blackTicket, applyQueueSnapshot, restoringTickets]);
 
   const handleJoin = React.useCallback(async (side: 'white' | 'black') => {

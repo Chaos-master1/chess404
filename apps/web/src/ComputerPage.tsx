@@ -69,8 +69,13 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
         blackName: result.snapshot.match.blackName,
         whitePlayerSecret: result.seatColor === 'white' ? result.claim?.playerSecret : undefined,
         blackPlayerSecret: result.seatColor === 'black' ? result.claim?.playerSecret : undefined,
+        whiteClaimToken: result.seatColor === 'white' ? result.claim?.claimToken : undefined,
+        blackClaimToken: result.seatColor === 'black' ? result.claim?.claimToken : undefined,
+        whiteClaimExpiresAt: result.seatColor === 'white' ? result.claim?.expiresAt : undefined,
+        blackClaimExpiresAt: result.seatColor === 'black' ? result.claim?.expiresAt : undefined,
       })
       setCreated({ matchId: result.matchId })
+      window.location.assign(`/match/${encodeURIComponent(result.matchId)}`)
       return true
     } catch (err) {
       const raw = err instanceof Error ? err.message : 'Failed to create computer match.'

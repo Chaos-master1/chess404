@@ -216,10 +216,11 @@ func main() {
 		log.Fatalf("failed to initialize rate limiter: %v", err)
 	}
 
+	internalToken := gatewayInternalServiceToken()
 	addr := httputil.ListenAddr("GATEWAY_ADDR", 8080)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("gateway", rate_limit.SecurityHeadersMiddleware(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl)(rl.Middleware(rate_limit.DefaultAPIWindow, rate_limit.DefaultAPILimit)(rate_limit.ContentTypeMiddleware(mux))), httputil.ParseAllowedOrigins(), ""))))),
+		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("gateway", rate_limit.SecurityHeadersMiddleware(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl, internalToken)(rate_limit.MiddlewareWithTrustedBypass(rl, rate_limit.DefaultAPIWindow, rate_limit.DefaultAPILimit, internalToken)(rate_limit.ContentTypeMiddleware(mux))), httputil.ParseAllowedOrigins(), internalToken))))),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -1786,6 +1787,9 @@ func fetchGatewayJSONRequestWithContext(ctx context.Context, client *http.Client
 	if payload != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
+	if token := gatewayInternalServiceToken(); token != "" {
+		request.Header.Set("X-Chess404-Service-Token", token)
+	}
 	// Set the Origin header on the outgoing request to match the public
 	// origin of the incoming request. The destination service's CSRF
 	// middleware compares the Origin against its allow-list, so it needs a
@@ -1894,6 +1898,15 @@ func bootstrapMessage(status GatewaySystemStatus) string {
 	return "Gateway online, but some backend services are degraded: " + strings.Join(problems, ", ")
 }
 
+func gatewayInternalServiceToken() string {
+	for _, name := range []string{"GATEWAY_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func gatewayConfigFromEnv() GatewayConfig {
 	return GatewayConfig{
 		MatchServiceURL:       resolveInternalServiceURL("MATCH_SERVICE_INTERNAL_URL", "http://match-service:8080"),
@@ -1928,8 +1941,6 @@ func resolveInternalServiceURL(envKey string, defaultURL string) string {
 	}
 	return u
 }
-
-
 
 // sanitizeSeatClaim returns the claim with all fields the frontend
 // needs to connect to the match WebSocket. The PlayerSecret IS

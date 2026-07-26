@@ -71,6 +71,15 @@ export default function AdminModerationPage({
     if (!accountId || !sessionToken) {
       return;
     }
+    if (restriction === 'banned' && typeof window !== 'undefined' && !window.confirm('Are you sure you want to BAN this player?')) {
+      return;
+    }
+    if (restriction === 'suspended' && typeof window !== 'undefined' && !window.confirm('Are you sure you want to SUSPEND this player?')) {
+      return;
+    }
+    if (action === 'resolved_dismissed' && typeof window !== 'undefined' && !window.confirm('Are you sure you want to DISMISS this report?')) {
+      return;
+    }
     setBusyReportId(reportId);
     setError('');
     try {

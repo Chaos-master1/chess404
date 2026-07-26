@@ -1845,7 +1845,34 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
   };
 
   return (
-    <>
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {cardPending && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '8px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 20,
+            background: 'linear-gradient(180deg, rgba(30, 20, 50, 0.94) 0%, rgba(15, 10, 30, 0.96) 100%)',
+            border: '1px solid rgba(255, 190, 90, 0.5)',
+            borderRadius: '20px',
+            padding: '6px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            pointerEvents: 'auto',
+          }}
+        >
+          <span style={{ fontSize: '12px', fontWeight: 800, color: '#ffbe5a' }}>
+            🎯 Select Card Target Square
+          </span>
+          <span style={{ fontSize: '11px', color: 'rgba(244, 239, 230, 0.65)' }}>
+            (Press Esc to cancel)
+          </span>
+        </div>
+      )}
       <canvas
         ref={canvasRef}
         width={Math.round(W * dpr)}
@@ -1876,6 +1903,6 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       <div aria-live="polite" className="sr-only">
         {lastMoveAnnouncement}
       </div>
-    </>
+    </div>
   );
 });

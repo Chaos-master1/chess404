@@ -503,7 +503,7 @@ export default function AuthPage({
               </div>
 
               {activeTab === 'register' ? (
-                <div style={{ display:'grid', gap:'12px' }}>
+                <form onSubmit={(e) => { e.preventDefault(); void submitRegistration(); }} style={{ display:'grid', gap:'12px' }}>
                   <label style={{ display:'grid', gap:'6px' }}>
                     <span style={{ color:'rgba(255,232,184,0.74)', fontSize:'12px', fontWeight:700 }}>Handle</span>
                     <input
@@ -511,6 +511,8 @@ export default function AuthPage({
                       value={handle}
                       onChange={(event) => setHandle(event.target.value)}
                       placeholder="wizard404error"
+                      autoComplete="username"
+                      disabled={busy}
                     />
                   </label>
                   <label style={{ display:'grid', gap:'6px' }}>
@@ -521,6 +523,8 @@ export default function AuthPage({
                       onChange={(event) => setEmail(event.target.value)}
                       placeholder="you@example.com"
                       type="email"
+                      autoComplete="email"
+                      disabled={busy}
                     />
                   </label>
                   <label style={{ display:'grid', gap:'6px' }}>
@@ -531,19 +535,21 @@ export default function AuthPage({
                       onChange={(event) => setPassword(event.target.value)}
                       placeholder="Choose a strong password"
                       type="password"
+                      autoComplete="new-password"
+                      disabled={busy}
                     />
                   </label>
                   <button
+                    type="submit"
                     className="btn-primary"
-                    onClick={() => { void submitRegistration(); }}
                     disabled={busy}
                     style={{ padding: '13px 16px' }}
                   >
                     {busy ? 'Creating account...' : 'Create Account'}
                   </button>
-                </div>
+                </form>
               ) : activeTab === 'login' ? (
-                <div style={{ display:'grid', gap:'12px' }}>
+                <form onSubmit={(e) => { e.preventDefault(); void submitLogin(); }} style={{ display:'grid', gap:'12px' }}>
                   <label style={{ display:'grid', gap:'6px' }}>
                     <span style={{ color:'rgba(255,232,184,0.74)', fontSize:'12px', fontWeight:700 }}>Handle or email</span>
                     <input
@@ -551,6 +557,8 @@ export default function AuthPage({
                       value={loginIdentifier}
                       onChange={(event) => setLoginIdentifier(event.target.value)}
                       placeholder="wizard404error or you@example.com"
+                      autoComplete="username"
+                      disabled={busy}
                     />
                   </label>
                   <label style={{ display:'grid', gap:'6px' }}>
@@ -561,17 +569,20 @@ export default function AuthPage({
                       onChange={(event) => setLoginPassword(event.target.value)}
                       placeholder="Your account password"
                       type="password"
+                      autoComplete="current-password"
+                      disabled={busy}
                     />
                   </label>
                   <button
+                    type="submit"
                     className="btn-primary"
-                    onClick={() => { void submitLogin(); }}
                     disabled={busy}
                     style={{ padding: '13px 16px' }}
                   >
                     {busy ? 'Signing in...' : 'Sign In'}
                   </button>
                   <button
+                    type="button"
                     onClick={() => setActiveTab('reset')}
                     style={{
                       background: 'none',
@@ -589,9 +600,9 @@ export default function AuthPage({
                   >
                     Forgot password?
                   </button>
-                </div>
+                </form>
               ) : (
-                <div style={{ display:'grid', gap:'12px' }}>
+                <form onSubmit={(e) => { e.preventDefault(); void submitPasswordReset(); }} style={{ display:'grid', gap:'12px' }}>
                   <label style={{ display:'grid', gap:'6px' }}>
                     <span style={{ color:'rgba(255,232,184,0.74)', fontSize:'12px', fontWeight:700 }}>Handle or email</span>
                     <input
@@ -599,17 +610,19 @@ export default function AuthPage({
                       value={resetIdentifier}
                       onChange={(event) => setResetIdentifier(event.target.value)}
                       placeholder="wizard404error or you@example.com"
+                      autoComplete="username"
+                      disabled={busy}
                     />
                   </label>
                   <button
+                    type="submit"
                     className="btn-ghost"
-                    onClick={() => { void submitPasswordReset(); }}
                     disabled={busy}
                     style={{ padding: '13px 16px' }}
                   >
                     {busy ? 'Requesting reset...' : 'Send Password Reset'}
                   </button>
-                </div>
+                </form>
               )}
             </>
           )}

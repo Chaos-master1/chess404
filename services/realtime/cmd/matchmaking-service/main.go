@@ -245,10 +245,11 @@ func main() {
 		}
 	})
 
+	internalToken := matchmakingInternalServiceToken()
 	addr := httputil.ListenAddr("MATCHMAKING_ADDR", 8084)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("matchmaking-service", rate_limit.SecurityHeadersMiddleware(httputil.LimitBody(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl)(rl.Middleware(rate_limit.DefaultQueueWindow, rate_limit.DefaultQueueLimit)(mux)), nil, "")))))),
+		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("matchmaking-service", rate_limit.SecurityHeadersMiddleware(httputil.LimitBody(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl, internalToken)(rate_limit.MiddlewareWithTrustedBypass(rl, rate_limit.DefaultQueueWindow, rate_limit.DefaultQueueLimit, internalToken)(mux)), nil, internalToken)))))),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

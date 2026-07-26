@@ -61,4 +61,20 @@ describe("buildUpstreamHeaders", () => {
     expect(out.get("x-forwarded-proto")).toBe("http");
     expect(out.get("origin")).toBe("http://localhost:3000");
   });
+
+  it("adds the configured internal service token for backend hops", () => {
+    const previous = process.env.GATEWAY_INTERNAL_SERVICE_TOKEN;
+    process.env.GATEWAY_INTERNAL_SERVICE_TOKEN = "gateway-test-token";
+    try {
+      const req = makeRequest({ host: "web-production-9a697.up.railway.app" });
+      const out = buildUpstreamHeaders(req);
+      expect(out.get("x-chess404-service-token")).toBe("gateway-test-token");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.GATEWAY_INTERNAL_SERVICE_TOKEN;
+      } else {
+        process.env.GATEWAY_INTERNAL_SERVICE_TOKEN = previous;
+      }
+    }
+  });
 });
