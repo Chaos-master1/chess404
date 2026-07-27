@@ -777,7 +777,8 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   bootstrapFnRef.current = bootstrapAuthoritativeMatch;
 
   React.useEffect(() => {
-    if (!guestProfilesReady) return;
+    const isMatchRoute = pathnameRef.current?.startsWith('/match/');
+    if (!guestProfilesReady && !isMatchRoute) return;
     if (bootstrapInFlightRef.current) return;
     bootstrapInFlightRef.current = true;
     const pathMatch = pathnameRef.current.match(/^\/match\/([^/]+)$/);
