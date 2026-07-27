@@ -41,7 +41,8 @@ export async function GET(
 
   const requestOwnsSeat = await requestOwnsMatchSeat(request, matchId);
   const guestIdMatch = !requestOwnsSeat && ownsMatchSeatByGuestId(request, snapshot);
-  if (isLocalRequest(request) || requestOwnsSeat || guestIdMatch) {
+  const isDirectMatch = normalize(snapshot.match?.queue) === 'direct';
+  if (isLocalRequest(request) || requestOwnsSeat || guestIdMatch || isDirectMatch) {
     return Response.json(snapshot, { status: 200, headers: noStoreHeaders() });
   }
 
