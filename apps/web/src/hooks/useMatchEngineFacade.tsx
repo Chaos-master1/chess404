@@ -790,7 +790,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     openedBoardMatchRef.current = authoritativeMatchId;
     const boardRouteRequested = pathname.startsWith('/match/') || Boolean(requestedMatchIdRef.current);
     console.log('[DEBUG] effect2212: authoritativeMatchId=', authoritativeMatchId, 'pathname=', pathname, 'boardRouteRequested=', boardRouteRequested, 'hostedRuntime=', hostedRuntime, 'setting activePage to', hostedRuntime ? 'Match' : 'Play');
-    if (!hostedRuntime || boardRouteRequested) {
+    if (hostedRuntime !== null && (!hostedRuntime || boardRouteRequested)) {
       setActivePage(hostedRuntime ? 'Match' : 'Play');
     }
   }, [authoritativeMatchId, hostedRuntime, pathname, setActivePage]);
