@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { type MatchModeId, type PieceColor } from '@chess404/contracts';
 import { createPrivateMatch, type PrivateMatchIdentity } from './lib/private-match-service';
 import { writeStoredRoomMeta } from './lib/match-service';
@@ -27,6 +28,7 @@ const DIFFICULTIES: ReadonlyArray<{
 const DEFAULT_DIFFICULTY: DifficultyValue = 'medium';
 
 export default function ComputerPage({ identity, embedded = false }: ComputerPageProps): React.ReactElement {
+  const router = useRouter();
   const [selectedDifficulty, setSelectedDifficulty] = React.useState<DifficultyValue>(DEFAULT_DIFFICULTY);
   const [inflightDifficulty, setInflightDifficulty] = React.useState<DifficultyValue | null>(null);
   const [error, setError] = React.useState('');
@@ -75,7 +77,7 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
         blackClaimExpiresAt: result.seatColor === 'black' ? result.claim?.expiresAt : undefined,
       })
       setCreated({ matchId: result.matchId })
-      window.location.assign(`/match/${encodeURIComponent(result.matchId)}`)
+      router.push(`/match/${encodeURIComponent(result.matchId)}`)
       return true
     } catch (err) {
       const raw = err instanceof Error ? err.message : 'Failed to create computer match.'
@@ -98,7 +100,7 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
     } finally {
       setInflightDifficulty(null)
     }
-  }, [identity, inflightDifficulty])
+  }, [identity, inflightDifficulty, router])
 
   // Selection only — does NOT start the match
   const handleDifficultyClick = React.useCallback((difficulty: DifficultyValue) => {
@@ -111,8 +113,8 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
 
   const openMatch = React.useCallback(() => {
     if (!created?.matchId) return
-    window.location.href = `/match/${encodeURIComponent(created.matchId)}`
-  }, [created?.matchId])
+    router.push(`/match/${encodeURIComponent(created.matchId)}`)
+  }, [created?.matchId, router])
 
   if (created) {
     const matchedDifficulty = DIFFICULTIES.find((d) => d.value === selectedDifficulty)

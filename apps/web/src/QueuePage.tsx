@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import type { MatchModeId } from '@chess404/contracts';
 import { DEFAULT_MATCH_MODE_ID, OFFICIAL_MATCH_MODES } from '@chess404/contracts';
 import type { GuestProfile } from './lib/platform-service';
@@ -146,6 +147,7 @@ export default function QueuePage({
   tutorialActive = false,
 }: QueuePageProps): React.ReactElement {
   const [hostedRuntime, setHostedRuntime] = React.useState(false);
+  const router = useRouter();
   const [queue, setQueue] = React.useState<QueueName>(() => readStoredQueueSelection());
   const [modeId, setModeId] = React.useState<MatchModeId>(() => readStoredModeSelection());
   const [whiteTicket, setWhiteTicket] = React.useState<QueueTicket | null>(null);
@@ -400,8 +402,8 @@ export default function QueuePage({
     hostedAutoOpenMatchRef.current = ticket.assignedRoom;
     writeStoredRoomMeta(ticket.assignedRoom, roomMeta);
     clearStoredTicketRef('white');
-    window.location.href = `/match/${encodeURIComponent(ticket.assignedRoom)}`;
-  }, [hostedRuntime, restoringTickets, whiteTicket, whiteProfile, buildHostedAssignedRoomMeta]);
+    router.push(`/match/${encodeURIComponent(ticket.assignedRoom)}`);
+  }, [hostedRuntime, restoringTickets, whiteTicket, whiteProfile, buildHostedAssignedRoomMeta, router]);
 
   const pollingBackoffRef = React.useRef(0);
 
@@ -589,13 +591,13 @@ export default function QueuePage({
       if (!hostedRuntime) {
         clearStoredTicketRef('black');
       }
-      window.location.href = `/match/${encodeURIComponent(ticket.assignedRoom)}`;
+      router.push(`/match/${encodeURIComponent(ticket.assignedRoom)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open matched room.');
     } finally {
       setLoading(false);
     }
-  }, [queue, modeId, whiteProfile, blackProfile, hostedRuntime]);
+  }, [queue, modeId, whiteProfile, blackProfile, hostedRuntime, router]);
 
   const queueCard = (
     side: 'white' | 'black',

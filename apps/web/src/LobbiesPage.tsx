@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { DEFAULT_MATCH_MODE_ID, OFFICIAL_MATCH_MODES, type MatchModeId, type PieceColor } from '@chess404/contracts';
 import { createPrivateMatch, type PrivateMatchIdentity } from './lib/private-match-service';
 import { writeStoredRoomMeta } from './lib/match-service';
@@ -14,6 +15,7 @@ interface LobbiesPageProps {
 }
 
 export default function LobbiesPage({ identity, displayName, hostedRuntime, embedded = false }: LobbiesPageProps): React.ReactElement {
+  const router = useRouter();
   const [modeId, setModeId] = React.useState<MatchModeId>(DEFAULT_MATCH_MODE_ID);
   const [queue, setQueue] = React.useState<'direct' | 'casual' | 'rated'>('direct');
   const [preferredSeat, setPreferredSeat] = React.useState<PieceColor>('white');
@@ -78,8 +80,8 @@ export default function LobbiesPage({ identity, displayName, hostedRuntime, embe
 
   const openRoom = React.useCallback(() => {
     if (!created?.matchId) return;
-    window.location.href = `/match/${encodeURIComponent(created.matchId)}`;
-  }, [created?.matchId]);
+    router.push(`/match/${encodeURIComponent(created.matchId)}`);
+  }, [created?.matchId, router]);
 
   return (
     <div style={{ maxWidth: embedded ? 'none' : '980px', margin: '0 auto', display: 'grid', gap: '18px' }}>

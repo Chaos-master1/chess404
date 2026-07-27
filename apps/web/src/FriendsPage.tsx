@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { DEFAULT_MATCH_MODE_ID, OFFICIAL_MATCH_MODES, type MatchModeId, type PieceColor } from '@chess404/contracts';
 import { acceptDirectChallenge, sendDirectChallenge, type DirectChallengeLaunchResponse } from './lib/direct-challenge-service';
 import { modeLabel } from './lib/match-labels';
@@ -98,6 +99,7 @@ export default function FriendsPage({
   onOpenProfile,
   onOpenAccount,
 }: FriendsPageProps): React.ReactElement {
+  const router = useRouter();
   const [overview, setOverview] = React.useState<FriendOverview | null>(null);
   const [challengeOverview, setChallengeOverview] = React.useState<DirectChallengeOverview | null>(null);
   const [targetHandle, setTargetHandle] = React.useState('');
@@ -265,13 +267,13 @@ export default function FriendsPage({
         clockSeconds: 600,
       });
       persistChallengeRoom(result);
-      window.location.href = `/match/${encodeURIComponent(result.match.matchId)}`;
+      router.push(`/match/${encodeURIComponent(result.match.matchId)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send direct challenge.');
     } finally {
       setBusyRequestId(null);
     }
-  }, [accountId, challengeModeId, challengeSeat, identity, sessionToken]);
+  }, [accountId, challengeModeId, challengeSeat, identity, sessionToken, router]);
 
   const handleAcceptChallenge = React.useCallback(async (challenge: DirectChallengeView) => {
     if (!accountId || !sessionToken || !identity?.guestId) {
@@ -287,13 +289,13 @@ export default function FriendsPage({
         identity,
       });
       persistChallengeRoom(result);
-      window.location.href = `/match/${encodeURIComponent(result.match.matchId)}`;
+      router.push(`/match/${encodeURIComponent(result.match.matchId)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to accept direct challenge.');
     } finally {
       setBusyRequestId(null);
     }
-  }, [accountId, identity, sessionToken]);
+  }, [accountId, identity, sessionToken, router]);
 
   const handleDeclineChallenge = React.useCallback(async (challenge: DirectChallengeView) => {
     if (!accountId || !sessionToken) {
