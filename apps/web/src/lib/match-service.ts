@@ -494,6 +494,7 @@ function buildMatchFetchHeaders(): Headers {
       headers.set(`x-chess404-${side}-session-secret`, identity.sessionSecret.trim());
     }
   }
+  console.log('[FETCH_HEADERS]', Object.fromEntries(headers.entries()));
   return headers;
 }
 

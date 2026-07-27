@@ -45,7 +45,15 @@ export async function GET(
 
   const publicReadable = isPublicSpectatorReadable(snapshot);
   if (!publicReadable) {
-    console.error(`[MATCH_FETCH] auth failed (requestOwnsMatchSeat=false) and match is not public-readable for ${matchId}`);
+    const guestHeaders = {
+      whiteGuestId: request.headers.get('x-chess404-white-guest-id'),
+      whiteSessionToken: !!request.headers.get('x-chess404-white-session-token'),
+      whiteSessionSecret: !!request.headers.get('x-chess404-white-session-secret'),
+      blackGuestId: request.headers.get('x-chess404-black-guest-id'),
+      blackSessionToken: !!request.headers.get('x-chess404-black-session-token'),
+      blackSessionSecret: !!request.headers.get('x-chess404-black-session-secret'),
+    };
+    console.error(`[MATCH_FETCH] auth failed (requestOwnsMatchSeat=false) and match is not public-readable for ${matchId}`, JSON.stringify(guestHeaders));
     return Response.json({ error: 'match is not public' }, { status: 404, headers: noStoreHeaders() });
   }
 
