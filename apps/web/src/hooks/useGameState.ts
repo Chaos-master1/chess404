@@ -185,9 +185,12 @@ export function useGameState(
     if (hostedRuntime) {
       const matchWhiteOk = Boolean(localWhite) && match.whiteGuestId === localWhite;
       const matchBlackOk = Boolean(localBlack) && match.blackGuestId === localBlack;
-      derivedViewerSeat = matchWhiteOk ? 'white' : matchBlackOk ? 'black' : storedMeta ?? null;
+      derivedViewerSeat = matchWhiteOk ? 'white' : matchBlackOk ? 'black' : (storedMeta ?? null);
     }
     if (!derivedViewerSeat && storedMeta) derivedViewerSeat = storedMeta;
+    if (hostedRuntime && !derivedViewerSeat && match.matchId) {
+      derivedViewerSeat = 'white';
+    }
     authSetters.setViewerSeat(derivedViewerSeat);
 
     refs.authoritativeSeatSecretsRef.current = {
