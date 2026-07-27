@@ -56,6 +56,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
   const router = engineProps.router;
   const activePage = engineProps.activePage;
   const setActivePage = engineProps.setActivePage;
+  const pathname = engineProps.pathname;
 
   const {
     topSeat, bottomSeat,
@@ -349,6 +350,22 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
           />
         )
       ) : showBoardSurface && hostedRuntime && !authoritativeMatchId ? (
+        pathname?.startsWith('/match/') || engine.requestedMatchIdRef?.current ? (
+          <div style={{
+            display:'flex', flex:1, minHeight:0, alignItems:'center', justifyContent:'center',
+            background:'#0a0d16'
+          }}>
+            <div style={{
+              width:'200px', height:'4px', borderRadius:'2px',
+              background:'rgba(255,190,90,0.15)', overflow:'hidden'
+            }}>
+              <div style={{
+                width:'40%', height:'100%', borderRadius:'2px',
+                background:'#ffbe5a', animation:'loadingSlide 1.2s ease-in-out infinite'
+              }} />
+            </div>
+          </div>
+        ) : (
         <ErrorBoundary>
         <div style={{ display:'flex', flex:1, minHeight:0, alignItems:'center', justifyContent:'center', padding:'28px' }}>
           <div style={{
@@ -410,6 +427,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
           </div>
         </div>
         </ErrorBoundary>
+        )
       ) : showBoardSurface ? (
         <ErrorBoundary>
         <MatchBoardView />
