@@ -270,6 +270,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
         activeKey={activePage}
         onNavigate={(key) => {
           const k = key as string;
+          console.log('[TRACE NAV] onNavigate called with:', k, 'activePage was:', activePage);
           if (k === 'Play') router.push('/play');
           else if (k === 'Watch') router.push('/watch');
           else if (k === 'History') router.push('/history');

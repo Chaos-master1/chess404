@@ -100,13 +100,14 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
     }
   }, [identity, inflightDifficulty])
 
-  // One-click: the difficulty button immediately starts the match.
-  // The visual selected state (border highlight) follows the
-  // selectedDifficulty state, which the in-flight match carries.
+  // Selection only — does NOT start the match
   const handleDifficultyClick = React.useCallback((difficulty: DifficultyValue) => {
     setSelectedDifficulty(difficulty)
-    void createMatch(difficulty)
-  }, [createMatch])
+  }, [])
+
+  const handlePlay = React.useCallback(() => {
+    void createMatch(selectedDifficulty)
+  }, [createMatch, selectedDifficulty])
 
   const openMatch = React.useCallback(() => {
     if (!created?.matchId) return
@@ -216,6 +217,27 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
         })}
       </div>
 
+      <button
+        onClick={handlePlay}
+        disabled={creating}
+        style={{
+          width: '100%',
+          padding: '12px 16px',
+          borderRadius: '10px',
+          border: '1px solid rgba(180,130,255,0.36)',
+          background: creating
+            ? 'rgba(130,80,210,0.5)'
+            : 'linear-gradient(180deg, rgba(130,80,210,0.95) 0%, rgba(70,40,130,0.98) 100%)',
+          color: '#f7fbff',
+          fontWeight: 800,
+          fontSize: '13px',
+          cursor: creating ? 'default' : 'pointer',
+          opacity: creating ? 0.7 : 1,
+        }}
+      >
+        {creating ? 'Creating match...' : `Play vs Computer (${DIFFICULTIES.find((d) => d.value === selectedDifficulty)?.label ?? 'Medium'})`}
+      </button>
+
       {error && (
         <div style={{
           padding: '10px 12px',
@@ -227,7 +249,7 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
         }}>
           {error}
           <div style={{ marginTop: '6px', opacity: 0.7, fontSize: '11px' }}>
-            Pick a difficulty above to try again.
+            Click Play to try again.
           </div>
         </div>
       )}

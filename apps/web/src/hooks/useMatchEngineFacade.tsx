@@ -3066,6 +3066,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     clearRequestedMatchQuery();
     setGameKey(k => k + 1);
     if (hostedRuntime) {
+      console.log('[TRACE NEWGAME] hostedRuntime is true, calling setActivePage(Play)');
       setActivePage('Play');
       return;
     }

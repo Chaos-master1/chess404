@@ -23,7 +23,11 @@ export default function App({ runtimeConfig, children }: { runtimeConfig?: { mat
   } satisfies MatchServiceRuntimeConfig);
 
   const [hostedRuntime, setHostedRuntime] = React.useState<boolean | null>(null);
-  const [activePage, setActivePage] = React.useState<AppPage>('Play');
+  const [activePage, _setActivePage] = React.useState<AppPage>('Play');
+  const setActivePage = React.useCallback((page: any) => {
+    console.log('[TRACE] setActivePage called with:', page, 'at', new Error().stack?.split('\n').slice(2, 6).join(' | '));
+    _setActivePage(page);
+  }, []);
   const router = useRouter();
   const pathname = usePathname();
   const [secondaryMenuOpen, setSecondaryMenuOpen] = React.useState(false);
