@@ -490,6 +490,9 @@ function buildMatchFetchHeaders(): Headers {
     if (identity.sessionToken?.trim()) {
       headers.set(`x-chess404-${side}-session-token`, identity.sessionToken.trim());
     }
+    if (identity.sessionSecret?.trim()) {
+      headers.set(`x-chess404-${side}-session-secret`, identity.sessionSecret.trim());
+    }
   }
   return headers;
 }

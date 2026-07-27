@@ -137,6 +137,8 @@ async function requestOwnsMatchSeat(request: Request, matchId: string): Promise<
     };
     if (candidate.sessionToken) {
       payload.sessionToken = candidate.sessionToken;
+    } else if (candidate.sessionSecret) {
+      payload.sessionSecret = candidate.sessionSecret;
     } else {
       const side = resolveCandidateSide(candidate.guestId, candidates);
       const secret = side ? sideSecrets[side] : undefined;
@@ -166,16 +168,18 @@ async function requestOwnsMatchSeat(request: Request, matchId: string): Promise<
   return false;
 }
 
-function readGuestSessionCandidates(headers: Headers): Array<{ guestId: string; sessionToken?: string }> {
+function readGuestSessionCandidates(headers: Headers): Array<{ guestId: string; sessionToken?: string; sessionSecret?: string }> {
   const sides = ['white', 'black'] as const;
   const candidates = sides.map((side) => ({
     guestId: normalize(headers.get(`x-chess404-${side}-guest-id`)),
     sessionToken: normalize(headers.get(`x-chess404-${side}-session-token`)) || undefined,
+    sessionSecret: normalize(headers.get(`x-chess404-${side}-session-secret`)) || undefined,
   })).filter((candidate) => candidate.guestId);
 
   const generic = {
     guestId: normalize(headers.get('x-chess404-guest-id')),
     sessionToken: normalize(headers.get('x-chess404-session-token')) || undefined,
+    sessionSecret: normalize(headers.get('x-chess404-session-secret')) || undefined,
   };
   if (generic.guestId) {
     candidates.push(generic);

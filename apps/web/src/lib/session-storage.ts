@@ -303,7 +303,7 @@ export function syncRequestedMatchQuery(matchId: string | null): void {
   } else {
     url.searchParams.delete('match');
     if (isMatchRoute(url.pathname)) {
-      replaceUrl(PLAY_ROUTE, url.searchParams, url.hash);
+      replaceUrl(url.pathname, url.searchParams, url.hash);
       return;
     }
   }
@@ -355,7 +355,7 @@ export function syncAllQueries(params: {
   } else {
     url.searchParams.delete('match');
     if (isMatchRoute(url.pathname)) {
-      replaceUrl(PLAY_ROUTE, url.searchParams, url.hash);
+      replaceUrl(url.pathname, url.searchParams, url.hash);
       return;
     }
   }
