@@ -771,8 +771,15 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   React.useEffect(() => {
     if (!guestProfilesReady) return;
+    // Update requestedMatchIdRef from URL pathname on client-side navigation
+    const pathMatch = pathname.match(/^\/match\/([^/]+)$/);
+    if (pathMatch) {
+      requestedMatchIdRef.current = decodeURIComponent(pathMatch[1]);
+    } else {
+      requestedMatchIdRef.current = null;
+    }
     void bootstrapAuthoritativeMatch();
-  }, [guestProfilesReady, bootstrapAuthoritativeMatch]);
+  }, [guestProfilesReady, bootstrapAuthoritativeMatch, activePage, pathname, requestedMatchIdRef]);
 
   React.useEffect(() => {
     writeStoredActiveMatchId(authoritativeMatchId);
