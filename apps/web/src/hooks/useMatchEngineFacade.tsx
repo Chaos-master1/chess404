@@ -513,12 +513,13 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const allSyncReady = profileQueryReady && historyQueryReady && matchQueryReady;
   React.useEffect(() => {
     if (!allSyncReady) return;
-    console.log('[DEBUG] syncAllQueries: activePage=', activePage, 'authoritativeMatchId=', authoritativeMatchId, 'hostedRuntime=', hostedRuntime);
+    const currentMatchId = (activePage === 'Match' || (!hostedRuntime && activePage === 'Play')) ? authoritativeMatchId : null;
+    console.log('[SYNC_QUERIES] activePage=%s authoritativeMatchId=%s hostedRuntime=%s -> matchId=%s', activePage, authoritativeMatchId, hostedRuntime, currentMatchId);
     syncAllQueries({
       profileHandle: activePage === 'Profiles' ? profileFocusHandle : null,
       historyMatchId: activePage === 'History' ? historyFocusMatchId : null,
       historyGuestId: activePage === 'History' ? historyFocusGuestId : null,
-      matchId: (activePage === 'Match' || (!hostedRuntime && activePage === 'Play')) ? authoritativeMatchId : null,
+      matchId: currentMatchId,
     });
   }, [allSyncReady, activePage, profileFocusHandle, historyFocusGuestId, historyFocusMatchId, authoritativeMatchId, hostedRuntime]);
   const [authoritativeStatus, setAuthoritativeStatus] = React.useState<'waiting' | 'active' | 'finished' | null>(null);
@@ -771,11 +772,12 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   React.useEffect(() => {
     if (!guestProfilesReady) return;
-    // Update requestedMatchIdRef from URL pathname on client-side navigation
     const pathMatch = pathname.match(/^\/match\/([^/]+)$/);
     if (pathMatch) {
       requestedMatchIdRef.current = decodeURIComponent(pathMatch[1]);
+      console.log('[BOOTSTRAP_EFFECT] match route, set requestedMatchIdRef to', requestedMatchIdRef.current);
     } else {
+      console.log('[BOOTSTRAP_EFFECT] non-match route, clearing requestedMatchIdRef (was', requestedMatchIdRef.current, ')');
       requestedMatchIdRef.current = null;
     }
     void bootstrapAuthoritativeMatch();
@@ -788,15 +790,19 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   React.useEffect(() => {
     if (!authoritativeMatchId) {
+      if (openedBoardMatchRef.current) {
+        console.log('[BOARD_EFFECT] authoritativeMatchId cleared (was %s), resetting board', openedBoardMatchRef.current);
+      }
       openedBoardMatchRef.current = null;
       return;
     }
     if (openedBoardMatchRef.current === authoritativeMatchId) {
+      console.log('[BOARD_EFFECT] board already open for', authoritativeMatchId, 'pathname=', pathname, 'skipping');
       return;
     }
     openedBoardMatchRef.current = authoritativeMatchId;
     const boardRouteRequested = pathname.startsWith('/match/') || Boolean(requestedMatchIdRef.current);
-    console.log('[DEBUG] effect2212: authoritativeMatchId=', authoritativeMatchId, 'pathname=', pathname, 'boardRouteRequested=', boardRouteRequested, 'hostedRuntime=', hostedRuntime, 'setting activePage to', hostedRuntime ? 'Match' : 'Play');
+    console.log('[BOARD_EFFECT] authoritativeMatchId=%s pathname=%s boardRouteRequested=%s hostedRuntime=%s settingActivePage=%s', authoritativeMatchId, pathname, boardRouteRequested, hostedRuntime, hostedRuntime ? 'Match' : 'Play');
     if (hostedRuntime !== null && (!hostedRuntime || boardRouteRequested)) {
       setActivePage(hostedRuntime ? 'Match' : 'Play');
     }
