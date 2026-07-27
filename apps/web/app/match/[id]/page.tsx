@@ -9,19 +9,15 @@ export default function MatchRoute({ params }: { params: Promise<{ id: string }>
   const id = resolvedParams.id;
   const prevIdRef = React.useRef<string | null>(null);
 
-  React.useEffect(() => {
+React.useEffect(() => {
     if (!id) return;
     // Avoid re-processing the same match ID
     if (prevIdRef.current === id) return;
     prevIdRef.current = id;
 
     platform.requestedMatchIdRef.current = id;
-    if (!platform.authoritativeMatchId) {
-      // If not already in a match, force the ID change so App.tsx loads it
-      platform.setAuthoritativeMatchId(id);
-    }
     platform.setActivePage('Match');
-  }, [id, platform.authoritativeMatchId, platform.requestedMatchIdRef, platform.setActivePage, platform.setAuthoritativeMatchId]);
+  }, [id, platform.requestedMatchIdRef, platform.setActivePage]);
 
   return null;
 }
