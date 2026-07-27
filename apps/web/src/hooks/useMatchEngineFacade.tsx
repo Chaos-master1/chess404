@@ -777,8 +777,9 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   bootstrapFnRef.current = bootstrapAuthoritativeMatch;
 
   React.useEffect(() => {
-    const isMatchRoute = pathnameRef.current?.startsWith('/match/');
-    if (!guestProfilesReady && !isMatchRoute) return;
+    if (!guestProfilesReady) return;
+    const identity = readStoredGuestIdentity('white');
+    if (!identity.guestId) return;
     if (bootstrapInFlightRef.current) return;
     bootstrapInFlightRef.current = true;
     const pathMatch = pathnameRef.current.match(/^\/match\/([^/]+)$/);
@@ -792,7 +793,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     });
   // bootstrapFnRef intentionally omitted — stable ref, avoids re-fire when inline-object deps recreate bootstrapAuthoritativeMatch
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guestProfilesReady]);
+  }, [guestProfilesReady, whiteProfile]);
 
   React.useEffect(() => {
     writeStoredActiveMatchId(authoritativeMatchId);
