@@ -775,11 +775,11 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const bootstrapInFlightRef = React.useRef(false);
   const bootstrapFnRef = React.useRef(bootstrapAuthoritativeMatch);
   bootstrapFnRef.current = bootstrapAuthoritativeMatch;
+  const [bootstrapFallback, setBootstrapFallback] = React.useState(false);
 
   React.useEffect(() => {
     if (!guestProfilesReady) return;
-    const identity = readStoredGuestIdentity('white');
-    if (!identity.guestId) return;
+    if (!whiteProfile && !bootstrapFallback) return;
     if (bootstrapInFlightRef.current) return;
     bootstrapInFlightRef.current = true;
     const pathMatch = pathnameRef.current.match(/^\/match\/([^/]+)$/);
@@ -793,7 +793,13 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     });
   // bootstrapFnRef intentionally omitted — stable ref, avoids re-fire when inline-object deps recreate bootstrapAuthoritativeMatch
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guestProfilesReady, whiteProfile]);
+  }, [guestProfilesReady, whiteProfile, bootstrapFallback]);
+
+  React.useEffect(() => {
+    if (!guestProfilesReady || whiteProfile || bootstrapFallback) return;
+    const timer = window.setTimeout(() => setBootstrapFallback(true), 5000);
+    return () => window.clearTimeout(timer);
+  }, [guestProfilesReady, whiteProfile, bootstrapFallback]);
 
   React.useEffect(() => {
     writeStoredActiveMatchId(authoritativeMatchId);
