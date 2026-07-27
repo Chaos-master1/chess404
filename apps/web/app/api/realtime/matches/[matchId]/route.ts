@@ -17,13 +17,15 @@ export async function GET(
   context: { params: Promise<{ matchId: string }> }
 ): Promise<Response> {
   const { matchId } = await context.params;
-  const upstream = await fetch(`${matchServiceBaseUrl}/api/matches/${encodeURIComponent(matchId)}`, {
+  const upstreamUrl = `${matchServiceBaseUrl}/api/matches/${encodeURIComponent(matchId)}`;
+  const upstream = await fetch(upstreamUrl, {
     method: 'GET',
     headers: buildInternalHeaders(request.headers, 'match'),
     cache: 'no-store',
   });
   const body = await upstream.text();
   if (!upstream.ok) {
+    console.error(`[MATCH_FETCH] upstream ${upstreamUrl} returned ${upstream.status}: ${body.slice(0, 200)}`);
     return new Response(body, {
       status: upstream.status,
       headers: filterResponseHeaders(upstream.headers),
@@ -41,7 +43,9 @@ export async function GET(
     return Response.json(snapshot, { status: 200, headers: noStoreHeaders() });
   }
 
-  if (!isPublicSpectatorReadable(snapshot)) {
+  const publicReadable = isPublicSpectatorReadable(snapshot);
+  if (!publicReadable) {
+    console.error(`[MATCH_FETCH] auth failed (requestOwnsMatchSeat=false) and match is not public-readable for ${matchId}`);
     return Response.json({ error: 'match is not public' }, { status: 404, headers: noStoreHeaders() });
   }
 
