@@ -39,7 +39,9 @@ export async function GET(
     return Response.json({ error: 'invalid match service response' }, { status: 502 });
   }
 
-  if (isLocalRequest(request) || await requestOwnsMatchSeat(request, matchId)) {
+  const requestOwnsSeat = await requestOwnsMatchSeat(request, matchId);
+  const guestIdMatch = !requestOwnsSeat && ownsMatchSeatByGuestId(request, snapshot);
+  if (isLocalRequest(request) || requestOwnsSeat || guestIdMatch) {
     return Response.json(snapshot, { status: 200, headers: noStoreHeaders() });
   }
 
@@ -218,6 +220,19 @@ function resolveCandidateSide(guestId: string, candidates: Array<{ guestId: stri
     return candidates[0].guestId === guestId ? 'white' : undefined;
   }
   return undefined;
+}
+
+function ownsMatchSeatByGuestId(request: Request, snapshot: MatchSnapshotResponse): boolean {
+  const match = snapshot.match ?? {};
+  const whiteGuestId = normalize(match.whiteGuestId);
+  const blackGuestId = normalize(match.blackGuestId);
+  if (!whiteGuestId && !blackGuestId) return false;
+
+  const requestWhiteGuestId = normalize(request.headers.get('x-chess404-white-guest-id'));
+  const requestBlackGuestId = normalize(request.headers.get('x-chess404-black-guest-id'));
+
+  return (!!requestWhiteGuestId && requestWhiteGuestId === whiteGuestId) ||
+         (!!requestBlackGuestId && requestBlackGuestId === blackGuestId);
 }
 
 function isRecoverableClaimStatus(status?: string): boolean {
