@@ -602,19 +602,26 @@ export async function fetchArchivedMatch(matchId: string): Promise<MatchArchiveE
 }
 
 export async function createGuestSession(input: { guestId?: string; sessionSecret?: string; sessionToken?: string } = {}): Promise<GuestSession> {
-  const response = await fetch(`${httpBaseUrl}/guest-sessions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      guestId: input.guestId,
-      sessionSecret: input.sessionSecret,
-      sessionToken: input.sessionToken,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(`${httpBaseUrl}/guest-sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        guestId: input.guestId,
+        sessionSecret: input.sessionSecret,
+        sessionToken: input.sessionToken,
+      }),
+    });
 
-  return unwrapResponse<GuestSession>(response);
+    return unwrapResponse<GuestSession>(response);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function claimMatchSeat(input: {

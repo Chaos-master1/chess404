@@ -93,14 +93,33 @@ export async function fetchAuthToken(matchId: string, playerId: string, playerSe
   }
 }
 
-export async function fetchMatch(matchId: string): Promise<MatchSnapshotMessage> {
-  const response = await fetch(`${httpBaseUrl}/matches/${matchId}`, {
-    method: 'GET',
-    headers: buildMatchFetchHeaders(),
-    cache: 'no-store'
-  });
+export async function fetchMatch(matchId: string, signal?: AbortSignal): Promise<MatchSnapshotMessage> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  const combinedSignal = signal ? anySignal([signal, controller.signal]) : controller.signal;
+  try {
+    const response = await fetch(`${httpBaseUrl}/matches/${matchId}`, {
+      method: 'GET',
+      headers: buildMatchFetchHeaders(),
+      cache: 'no-store',
+      signal: combinedSignal,
+    });
+    return unwrapResponse<MatchSnapshotMessage>(response);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
-  return unwrapResponse<MatchSnapshotMessage>(response);
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return controller.signal;
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  }
+  return controller.signal;
 }
 
 export async function ensureMatch(input: CreateMatchInput & { matchId: string }): Promise<MatchSnapshotMessage> {

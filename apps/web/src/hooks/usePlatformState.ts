@@ -747,6 +747,13 @@ export function usePlatformState(props: UsePlatformStateProps) {
     };
   }, [applyGatewayGuestSessions, applyGatewayMatchClaims, applyGatewayAccountSessions, applyGatewayQueueRecovery, clearPrimaryAccountRestriction]);
 
+  // Safety net: force guestProfilesReady after 5s even if fetchGatewayBootstrap hangs
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const timer = window.setTimeout(() => setGuestProfilesReady(true), 5000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   // White profile ref sync
   React.useEffect(() => {
     whiteProfileRef.current = whiteProfile;

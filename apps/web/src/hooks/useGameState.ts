@@ -11,6 +11,7 @@ import {
   readStoredAccountIdentity,
   writeStoredActiveMatchId,
   readStoredActiveMatchId,
+  writeStoredGuestIdentity,
 } from '../lib/session-storage';
 import { cloneBoard, positionKey, toFEN, gameStatus, insuffMat } from '../chessEngine';
 import { OPP } from '../constants';
@@ -342,6 +343,13 @@ export function useGameState(
       let snapshot: MatchSnapshotMessage | undefined;
       if (restoredMatchId) {
         try { snapshot = await fetchMatch(restoredMatchId); } catch { snapshot = undefined; }
+        if (!snapshot && roomMeta?.whiteGuestId && roomMeta?.whitePlayerSecret) {
+          writeStoredGuestIdentity('white', roomMeta.whiteGuestId, roomMeta.whitePlayerSecret);
+          if (roomMeta.blackGuestId && roomMeta.blackPlayerSecret) {
+            writeStoredGuestIdentity('black', roomMeta.blackGuestId, roomMeta.blackPlayerSecret);
+          }
+          try { snapshot = await fetchMatch(restoredMatchId); } catch { snapshot = undefined; }
+        }
       }
       if (!snapshot) {
         authoritativeSetters.setAuthoritativeMatchId(null);

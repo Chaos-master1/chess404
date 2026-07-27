@@ -192,20 +192,27 @@ export async function fetchGatewayBootstrap(input: {
   whiteAccount?: GatewayAccountIdentity;
   blackAccount?: GatewayAccountIdentity;
 }): Promise<GatewayBootstrapPayload> {
-  const response = await fetch('/api/gateway/bootstrap', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    cache: 'no-store',
-    body: JSON.stringify(input),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch('/api/gateway/bootstrap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      signal: controller.signal,
+      body: JSON.stringify(input),
+    });
 
-  const envelope = await unwrapResponse<{ type?: string; payload?: GatewayBootstrapPayload }>(response);
-  if (envelope.type !== 'gateway.bootstrap' || !envelope.payload) {
-    throw new Error('Invalid gateway bootstrap response');
+    const envelope = await unwrapResponse<{ type?: string; payload?: GatewayBootstrapPayload }>(response);
+    if (envelope.type !== 'gateway.bootstrap' || !envelope.payload) {
+      throw new Error('Invalid gateway bootstrap response');
+    }
+    return envelope.payload;
+  } finally {
+    clearTimeout(timeout);
   }
-  return envelope.payload;
 }
 
 async function fetchJSON<T>(url: string): Promise<T> {
