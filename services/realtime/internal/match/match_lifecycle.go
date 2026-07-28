@@ -94,13 +94,22 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 
 	c := newMatchContainer(state, []contracts.ResolvedEvent{startEvent}, newMatchPresenceState(state, now))
 
-if string(req.ModeID) == "computer" {
+	if string(req.ModeID) == "computer" {
 		diff := engine.ParseDifficulty(req.Difficulty)
 		c.computer = engine.NewComputerOpponent(diff, "black")
 		state.BlackGuestID = "computer"
 		state.BlackName = computerDisplayName(req.Difficulty)
 		state.Clock.RunningFor = "white"
 		state.Clock.StartedAt = &startedAt
+		// status was computed above from the CreateMatchRequest, which never
+		// carries a blackGuestId for a computer match (the computer seat is
+		// assigned here, not by the client) -- so hasPartialSeats was true
+		// and status landed on "waiting". Every intent handler (applyMove,
+		// applyPlayCard, applyResign, ...) calls ensureActive and rejects
+		// anything but "active", so without this line no move, card, draw,
+		// resign, or abort could ever be applied to a computer match: the
+		// very first move attempt fails with "match is not active".
+		state.Status = "active"
 		s.Log.Info("match:create: computer opponent initialized", "matchID", matchID, "difficulty", diff, "color", "black")
 	}
 
