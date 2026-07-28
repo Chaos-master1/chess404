@@ -105,6 +105,13 @@ if string(req.ModeID) == "computer" {
 	}
 
 	s.matches.Store(matchID, c)
+	// Subscribe this instance to the match's Redis channel too, not only
+	// instances that hydrate it later. Without this, an instance that mutates
+	// a match it created would never learn about a mutation another instance
+	// makes for the same matchID -- the relay would be one-directional. The
+	// origin-instance check in relayRedisBroadcasts is what stops this from
+	// causing this instance to double-deliver its own broadcasts.
+	s.ensureRedisRelay(matchID)
 	c.mu.Lock()
 
 	broadcastSnap := buildSnapshotWithPresence(c.state, c.presence, len(c.events), []contracts.ResolvedEvent{startEvent}, now)

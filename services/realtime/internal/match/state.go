@@ -158,6 +158,16 @@ type Service struct {
 	Log              *logging.Logger
 	computerCh       chan computerMoveTask
 	computerWorkerWg sync.WaitGroup
+
+	// instanceID tags every snapshot this process publishes to the shared
+	// broadcaster so relayRedisBroadcasts can recognize and skip its own
+	// process's publishes -- without it, a process that both mutates a match
+	// and relays for it would deliver every broadcast to its local
+	// subscribers twice.
+	instanceID string
+
+	relayMu      sync.Mutex
+	relayStarted map[string]bool
 }
 
 type authTokenEntry struct {
@@ -217,15 +227,17 @@ func NewServiceWithStoreAndBroadcaster(archive MatchArchiver, store MatchStore, 
 
 func NewServiceWithStoreBroadcasterAndTokenStore(archive MatchArchiver, store MatchStore, broadcaster Broadcaster, tokenStore TokenStore) *Service {
 	service := &Service{
-		matches:     newMatchMap(),
-		archive:     archive,
-		store:       store,
-		broadcaster: broadcaster,
-		stopCh:      make(chan struct{}),
-		authTokens:  make(map[string]authTokenEntry),
-		tokenStore:  tokenStore,
-		Log:         logging.New("match-service"),
-		computerCh:  make(chan computerMoveTask, 100),
+		matches:      newMatchMap(),
+		archive:      archive,
+		store:        store,
+		broadcaster:  broadcaster,
+		stopCh:       make(chan struct{}),
+		authTokens:   make(map[string]authTokenEntry),
+		tokenStore:   tokenStore,
+		Log:          logging.New("match-service"),
+		computerCh:   make(chan computerMoveTask, 100),
+		instanceID:   newInstanceID(),
+		relayStarted: make(map[string]bool),
 	}
 	if loader, ok := archive.(MatchArchiveBootstrapper); ok {
 		service.restoreArchivedMatchesLocked(loader)
@@ -245,6 +257,14 @@ func NewServiceWithStoreBroadcasterAndTokenStore(archive MatchArchiver, store Ma
 	service.Log.Info("computer worker pool started", "workers", numWorkers)
 
 	return service
+}
+
+func newInstanceID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "inst-" + strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return "inst-" + hex.EncodeToString(b)
 }
 
 func (s *Service) getMatchContainer(matchID string) *matchContainer {
@@ -442,12 +462,7 @@ func (s *Service) ensureMatchLoadedLocked(matchID string) (*matchContainer, bool
 		return c, true
 	}
 
-	loader, ok := s.archive.(MatchArchiveLoader)
-	if !ok {
-		return nil, false
-	}
-
-	restored, events, ok := loader.LoadMatch(matchID)
+	restored, events, presence, ok := s.resolveMatchStateLocked(matchID)
 	if !ok {
 		return nil, false
 	}
@@ -456,7 +471,7 @@ func (s *Service) ensureMatchLoadedLocked(matchID string) (*matchContainer, bool
 		restored.History = []contracts.PositionState{capturePositionState(&restored)}
 	}
 
-	return s.loadArchivedMatchLocked(matchID, restored, events), true
+	return s.loadMatchContainerLocked(matchID, restored, events, presence), true
 }
 
 func (s *Service) restoreArchivedMatchesLocked(loader MatchArchiveBootstrapper) {
@@ -464,18 +479,74 @@ func (s *Service) restoreArchivedMatchesLocked(loader MatchArchiveBootstrapper) 
 		if _, ok := s.matches.Load(matchID); ok {
 			continue
 		}
-		restored, events, ok := loader.LoadMatch(matchID)
+		// resolveMatchStateLocked prefers Redis when it has fresher data for
+		// an ID the archive already told us is unfinished; it falls back to
+		// this same archive row when Redis has nothing (TTL'd out, or the
+		// match predates Redis being wired at all).
+		restored, events, presence, ok := s.resolveMatchStateLocked(matchID)
 		if !ok {
 			continue
 		}
 		if len(restored.History) == 0 {
 			restored.History = []contracts.PositionState{capturePositionState(&restored)}
 		}
-		s.loadArchivedMatchLocked(matchID, restored, events)
+		s.loadMatchContainerLocked(matchID, restored, events, presence)
 	}
 }
 
-func (s *Service) loadArchivedMatchLocked(matchID string, restored contracts.MatchState, events []contracts.ResolvedEvent) *matchContainer {
+// resolveMatchStateLocked tries the shared Redis store before the archive.
+// Redis is the hot cross-instance layer written on every mutation
+// (saveToRedis) with a short TTL; the archive (Postgres/SQLite/file) is
+// written on the same cadence but is slower, and for the file/sqlite backends
+// is not shared across instances at all. Preferring Redis means an instance
+// that never handled this match's mutations still sees the latest state
+// instead of a potentially-stale or entirely local-only archive row.
+func (s *Service) resolveMatchStateLocked(matchID string) (contracts.MatchState, []contracts.ResolvedEvent, *matchPresenceState, bool) {
+	if restored, events, presence, ok := s.hydrateFromRedisLocked(matchID); ok {
+		return restored, events, presence, true
+	}
+
+	loader, ok := s.archive.(MatchArchiveLoader)
+	if !ok {
+		return contracts.MatchState{}, nil, nil, false
+	}
+	restored, events, ok := loader.LoadMatch(matchID)
+	if !ok {
+		return contracts.MatchState{}, nil, nil, false
+	}
+	return restored, events, nil, true
+}
+
+// hydrateFromRedisLocked rebuilds match state from a single Redis read.
+// SaveState stores the full contracts.MatchSnapshotResponse -- Match (board,
+// hands, seat secrets, position history) plus Events -- so LoadState alone is
+// sufficient; the separate SaveHistory/SaveEvents keys and the hashed
+// SaveSecrets key are not read here (SaveSecrets stores an HMAC, not the
+// plaintext, so it cannot authenticate a caller-supplied secret and is not
+// usable for this purpose). LoadPresence is read separately because presence
+// (connection/heartbeat/rate-limit state) is not part of MatchState at all.
+func (s *Service) hydrateFromRedisLocked(matchID string) (contracts.MatchState, []contracts.ResolvedEvent, *matchPresenceState, bool) {
+	if s.store == nil {
+		return contracts.MatchState{}, nil, nil, false
+	}
+
+	var snapshot contracts.MatchSnapshotResponse
+	if err := s.store.LoadState(matchID, &snapshot); err != nil || snapshot.Match.MatchID == "" {
+		return contracts.MatchState{}, nil, nil, false
+	}
+
+	var presence *matchPresenceState
+	if data, err := s.store.LoadPresence(matchID); err == nil && len(data) > 0 {
+		var p matchPresenceState
+		if json.Unmarshal(data, &p) == nil {
+			presence = &p
+		}
+	}
+
+	return snapshot.Match, snapshot.Events, presence, true
+}
+
+func (s *Service) loadMatchContainerLocked(matchID string, restored contracts.MatchState, events []contracts.ResolvedEvent, presence *matchPresenceState) *matchContainer {
 	// Restore SeenClientMoveIDs from Redis store if available
 	if s.store != nil {
 		if data, err := s.store.LoadSeenClientMoveIDs(matchID); err == nil && len(data) > 0 {
@@ -485,8 +556,25 @@ func (s *Service) loadArchivedMatchLocked(matchID string, restored contracts.Mat
 			}
 		}
 	}
-	c := newMatchContainer(&restored, append([]contracts.ResolvedEvent{}, events...), newRecoveredMatchPresenceState(&restored))
+	if presence == nil {
+		presence = newRecoveredMatchPresenceState(&restored)
+	}
+	c := newMatchContainer(&restored, append([]contracts.ResolvedEvent{}, events...), presence)
+	if s.store != nil {
+		if seq, err := s.store.LoadSeq(matchID); err == nil {
+			c.seqNum = seq
+		}
+	}
 	s.matches.Store(matchID, c)
+
+	// This instance did not create the match (CreateMatch stores directly,
+	// bypassing this function), so it has no other way to learn about future
+	// mutations made elsewhere. Relay Redis broadcasts into this container's
+	// local subscribers so a spectator or player whose connection landed on
+	// this instance still sees a live match being played on another one.
+	// CreateMatch subscribes too, for the same reason in the other direction.
+	s.ensureRedisRelay(matchID)
+
 	return c
 }
 
@@ -611,13 +699,19 @@ func (s *Service) saveToRedis(snapshot contracts.MatchSnapshotResponse, presence
 	}
 	matchID := snapshot.Match.MatchID
 
-	stateForRedis := snapshot
-	stateForRedis.Match.WhitePlayerSecret = ""
-	stateForRedis.Match.BlackPlayerSecret = ""
-	if err := s.store.SaveState(matchID, stateForRedis); err != nil {
+	// The full snapshot -- including seat secrets -- is stored here so
+	// hydrateFromRedisLocked can rebuild a container on another instance (or
+	// after this one evicts it from memory) with intent auth still working.
+	// This is a direct point-to-point Redis read/write, not a broadcast: the
+	// same trust tier as the archive, which has always retained secrets for
+	// the same restart-recovery reason.
+	if err := s.store.SaveState(matchID, snapshot); err != nil {
 		s.Log.Error("failed to save state to redis", "matchId", matchID, "error", err)
 	}
 
+	// Kept for existing SaveSecrets/LoadSecrets callers and tests. Hydration
+	// does not use this: it stores an HMAC, not the plaintext, so it cannot
+	// authenticate a caller-supplied secret.
 	if err := s.store.SaveSecrets(matchID, hashSecret(snapshot.Match.WhitePlayerSecret), hashSecret(snapshot.Match.BlackPlayerSecret)); err != nil {
 		s.Log.Error("failed to save secrets to redis", "matchId", matchID, "error", err)
 	}
@@ -647,11 +741,29 @@ func (s *Service) saveToRedis(snapshot contracts.MatchSnapshotResponse, presence
 	}
 }
 
+// redisBroadcastEnvelope wraps a published snapshot with the id of the
+// instance that produced it, so relayRedisBroadcasts can recognize and skip
+// its own process's publishes.
+type redisBroadcastEnvelope struct {
+	OriginInstanceID string                          `json:"originInstanceId"`
+	Snapshot         contracts.MatchSnapshotResponse `json:"snapshot"`
+}
+
 func (s *Service) publishToRedis(matchID string, snapshot contracts.MatchSnapshotResponse) {
 	if s.broadcaster == nil {
 		return
 	}
-	data, err := json.Marshal(snapshot)
+	if _, ok := s.broadcaster.(NoopBroadcaster); ok {
+		return
+	}
+	// Every consumer of this data -- local subscribers via broadcastLocked,
+	// and cross-instance subscribers via relayRedisBroadcasts -- runs it
+	// through filterStateForColor before it reaches a client, which already
+	// strips secrets. Redacting here too means the plaintext secret never
+	// transits Redis pub/sub at all, even on our own private channel.
+	snapshot.Match = redactSeatSecrets(snapshot.Match)
+	envelope := redisBroadcastEnvelope{OriginInstanceID: s.instanceID, Snapshot: snapshot}
+	data, err := json.Marshal(envelope)
 	if err != nil {
 		s.Log.Error("failed to marshal snapshot for broadcast", "matchId", matchID, "error", err)
 		return
@@ -661,11 +773,94 @@ func (s *Service) publishToRedis(matchID string, snapshot contracts.MatchSnapsho
 	}
 }
 
-func (s *Service) broadcastLocked(c *matchContainer, snapshot contracts.MatchSnapshotResponse) {
-	subscribers := c.subs
+// ensureRedisRelay subscribes this instance to cross-instance broadcasts for
+// matchID, once per matchID per process. Only called for matches reached
+// through the hydrate path (loadMatchContainerLocked) -- a match created
+// locally via CreateMatch never subscribes to its own channel, which is what
+// keeps a single instance from receiving and re-delivering its own
+// broadcasts a second time.
+func (s *Service) ensureRedisRelay(matchID string) {
+	if _, ok := s.broadcaster.(NoopBroadcaster); ok {
+		return
+	}
 
+	s.relayMu.Lock()
+	if s.relayStarted == nil {
+		s.relayStarted = make(map[string]bool)
+	}
+	if s.relayStarted[matchID] {
+		s.relayMu.Unlock()
+		return
+	}
+	s.relayStarted[matchID] = true
+	s.relayMu.Unlock()
+
+	ch := s.broadcaster.Subscribe(matchID)
+	if ch == nil {
+		s.relayMu.Lock()
+		delete(s.relayStarted, matchID)
+		s.relayMu.Unlock()
+		return
+	}
+	go s.relayRedisBroadcasts(matchID, ch)
+}
+
+func (s *Service) relayRedisBroadcasts(matchID string, ch <-chan []byte) {
+	for data := range ch {
+		var envelope redisBroadcastEnvelope
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			s.Log.Error("redis relay: failed to unmarshal broadcast envelope", "matchId", matchID, "error", err)
+			continue
+		}
+		if envelope.OriginInstanceID == s.instanceID {
+			continue
+		}
+		s.deliverRelayedSnapshot(matchID, envelope.Snapshot)
+	}
+	s.relayMu.Lock()
+	delete(s.relayStarted, matchID)
+	s.relayMu.Unlock()
+}
+
+// deliverRelayedSnapshot pushes a snapshot produced by another instance to
+// this instance's local subscribers only. It does not republish (that would
+// create an infinite relay loop across instances) and does not mint a new
+// seq (the snapshot already carries the seq its origin assigned via
+// nextSeqNum) -- it only advances the local cache so ApplyIntent's staleness
+// check reflects the latest known global sequence even on instances that
+// never produced a broadcast themselves.
+func (s *Service) deliverRelayedSnapshot(matchID string, snapshot contracts.MatchSnapshotResponse) {
+	c, ok := s.matches.Load(matchID)
+	if !ok {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if snapshot.SeqNum > c.seqNum {
+		c.seqNum = snapshot.SeqNum
+	}
+	deliverToSubscribersLocked(c, snapshot)
+}
+
+// nextSeqNum assigns the sequence number for an outgoing broadcast. It uses
+// the shared store's atomic counter so seq numbers are globally monotonic
+// across every instance broadcasting for this match, not just this process --
+// MemoryMatchStore implements the same counter locally for single-instance/
+// test runs, so this is a safe default in every configuration.
+func (s *Service) nextSeqNum(c *matchContainer) int64 {
+	if s.store != nil {
+		if seq, err := s.store.IncSeq(c.state.MatchID); err == nil {
+			c.seqNum = seq
+			return seq
+		}
+		s.Log.Error("failed to increment seq via store, falling back to local counter", "matchId", c.state.MatchID)
+	}
 	c.seqNum++
-	snapshot.SeqNum = c.seqNum
+	return c.seqNum
+}
+
+func (s *Service) broadcastLocked(c *matchContainer, snapshot contracts.MatchSnapshotResponse) {
+	snapshot.SeqNum = s.nextSeqNum(c)
 
 	// Strip replay frames from periodic broadcasts to reduce bandwidth.
 	// Replay frames are still sent on initial Subscribe and via ApplyIntent
@@ -673,8 +868,11 @@ func (s *Service) broadcastLocked(c *matchContainer, snapshot contracts.MatchSna
 	snapshot.ReplayFrames = nil
 
 	s.publishToRedis(c.state.MatchID, snapshot)
+	deliverToSubscribersLocked(c, snapshot)
+}
 
-	if len(subscribers) == 0 {
+func deliverToSubscribersLocked(c *matchContainer, snapshot contracts.MatchSnapshotResponse) {
+	if len(c.subs) == 0 {
 		return
 	}
 
@@ -688,7 +886,7 @@ func (s *Service) broadcastLocked(c *matchContainer, snapshot contracts.MatchSna
 	cachedSpec.Match = filterStateForColor(snapshot.Match, "")
 	cachedSpec.Events = filterEventsForColor(snapshot.Events, "")
 
-	for ch, color := range subscribers {
+	for ch, color := range c.subs {
 		if color == "white" {
 			pushSnapshot(ch, cachedWhite)
 		} else if color == "black" {
