@@ -1,3 +1,10 @@
+// Upstream budgets for internal service calls. These exist because undici's
+// default headers timeout is 300s, which is far longer than any healthy
+// internal hop and long enough for a wedged upstream to exhaust the Next.js
+// event loop.
+const UPSTREAM_TIMEOUT_MS = 8000;
+const UPSTREAM_STREAM_TIMEOUT_MS = 15000;
+
 interface InternalServiceProxyConfig {
   explicitUrl?: string;
   fallbackUrl: string;
@@ -18,6 +25,10 @@ export async function proxyInternalService(request: Request, path: string, confi
     method: request.method,
     headers: buildUpstreamHeaders(request),
     cache: 'no-store',
+    // Without this, undici waits 300s for headers. A single wedged upstream
+    // then pins a Next handler for five minutes, and enough of them exhaust
+    // the event loop and take the whole web service down with it.
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   };
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -47,6 +58,9 @@ export async function proxyInternalServiceStream(request: Request, path: string,
     method: request.method,
     headers: buildUpstreamHeaders(request),
     cache: 'no-store',
+    // Longer than the unary path: this is a long-lived SSE stream, so the
+    // budget only needs to cover establishing it, not the stream lifetime.
+    signal: AbortSignal.timeout(UPSTREAM_STREAM_TIMEOUT_MS),
   };
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {

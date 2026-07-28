@@ -87,7 +87,31 @@ func filterEventsForColor(events []contracts.ResolvedEvent, color string) []cont
 	return filtered
 }
 
+// redactSeatSecrets clears the per-seat player secrets from a state that is
+// about to leave the process. These are bearer credentials: whoever holds a
+// seat secret can submit any intent for that seat (move, resign, play card).
+// They must never appear in an HTTP response or a WebSocket frame, not even
+// for the seat that owns them -- the client already holds its own secret, and
+// including it means every spectator frame carries both.
+//
+// Persistence paths (persistSnapshot / saveToRedis) build their snapshots
+// separately and are unaffected by this.
+func redactSeatSecrets(state contracts.MatchState) contracts.MatchState {
+	state.WhitePlayerSecret = ""
+	state.BlackPlayerSecret = ""
+	return state
+}
+
+// RedactSnapshotSecrets clears seat secrets from a snapshot that is about to be
+// written to an API response. Handlers returning a snapshot that was built for
+// internal use (create, join, apply-intent) must call this before serializing.
+func RedactSnapshotSecrets(resp contracts.MatchSnapshotResponse) contracts.MatchSnapshotResponse {
+	resp.Match = redactSeatSecrets(resp.Match)
+	return resp
+}
+
 func filterStateForColor(state contracts.MatchState, color string) contracts.MatchState {
+	state = redactSeatSecrets(state)
 	if color == "white" {
 		state.BlackHand = nil
 	} else if color == "black" {

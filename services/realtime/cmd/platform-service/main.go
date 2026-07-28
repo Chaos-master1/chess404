@@ -173,7 +173,11 @@ func withCORS(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Chess404-White-Guest-Id, X-Chess404-White-Session-Token, X-Chess404-Black-Guest-Id, X-Chess404-Black-Session-Token")
 		w.Header().Set("Access-Control-Expose-Headers", "Content-Type, X-Request-Id")
 		w.Header().Set("Access-Control-Max-Age", "600")
-		w.Header().Set("Cache-Control", "public, max-age=600")
+		// API responses are per-account and often authenticated (sessions,
+		// friends, notifications, moderation). Vary is Origin only, so a shared
+		// cache marking these "public" would serve one user's authenticated
+		// payload to another.
+		w.Header().Set("Cache-Control", "no-store")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return

@@ -514,7 +514,6 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   React.useEffect(() => {
     if (!allSyncReady) return;
     const currentMatchId = (activePage === 'Match' || (!hostedRuntime && activePage === 'Play')) ? authoritativeMatchId : null;
-    console.log('[SYNC_QUERIES] activePage=%s authoritativeMatchId=%s hostedRuntime=%s -> matchId=%s', activePage, authoritativeMatchId, hostedRuntime, currentMatchId);
     syncAllQueries({
       profileHandle: activePage === 'Profiles' ? profileFocusHandle : null,
       historyMatchId: activePage === 'History' ? historyFocusMatchId : null,
@@ -809,19 +808,14 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   React.useEffect(() => {
     if (!authoritativeMatchId) {
-      if (openedBoardMatchRef.current) {
-        console.log('[BOARD_EFFECT] authoritativeMatchId cleared (was %s), resetting board', openedBoardMatchRef.current);
-      }
       openedBoardMatchRef.current = null;
       return;
     }
     if (openedBoardMatchRef.current === authoritativeMatchId) {
-      console.log('[BOARD_EFFECT] board already open for', authoritativeMatchId, 'pathname=', pathname, 'skipping');
       return;
     }
     openedBoardMatchRef.current = authoritativeMatchId;
     const boardRouteRequested = pathname.startsWith('/match/') || Boolean(requestedMatchIdRef.current);
-    console.log('[BOARD_EFFECT] authoritativeMatchId=%s pathname=%s boardRouteRequested=%s hostedRuntime=%s settingActivePage=%s', authoritativeMatchId, pathname, boardRouteRequested, hostedRuntime, hostedRuntime ? 'Match' : 'Play');
     if (hostedRuntime !== null && (!hostedRuntime || boardRouteRequested)) {
       setActivePage(hostedRuntime ? 'Match' : 'Play');
     }
@@ -3098,7 +3092,6 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     clearRequestedMatchQuery();
     setGameKey(k => k + 1);
     if (hostedRuntime) {
-      console.log('[TRACE NEWGAME] hostedRuntime is true, calling setActivePage(Play)');
       setActivePage('Play');
       return;
     }

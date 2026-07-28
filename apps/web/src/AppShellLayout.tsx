@@ -49,6 +49,10 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
   const { messages: toastMessages, toast: showToast, dismiss: dismissToast } = useToast();
   const online = useOnlineStatus();
 
+  // The landing route renders its own content through `children`; every other
+  // route is a shim that renders null and relies on the shell's page switch.
+  const isLandingRoute = engineProps.pathname === '/';
+
   // ── Values from engine & props ─────────────────────────────────────────────
   const hostedRuntime = engineProps.hostedRuntime;
   const viewerSeat = engineProps.viewerSeat;
@@ -271,7 +275,6 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
         activeKey={activePage}
         onNavigate={(key) => {
           const k = key as string;
-          console.log('[TRACE NAV] onNavigate called with:', k, 'activePage was:', activePage);
           if (k === 'Play') router.push('/play');
           else if (k === 'Watch') router.push('/watch');
           else if (k === 'History') router.push('/history');
@@ -296,7 +299,13 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
         }}
       >
       {children}
-      {showPlayHub ? (
+      {/*
+        On '/', app/page.tsx supplies the marketing landing as `children`.
+        activePage defaults to 'Play', so without this guard the shell also
+        rendered the full Play hub directly beneath the hero -- two pages
+        stacked on one screen.
+      */}
+      {isLandingRoute ? null : showPlayHub ? (
         <ErrorBoundary>
         <PlayHubPage
           hostedRuntime={hostedRuntime}

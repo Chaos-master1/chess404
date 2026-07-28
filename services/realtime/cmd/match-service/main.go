@@ -47,12 +47,12 @@ func main() {
 	store, broadcaster := openMatchStore()
 	var tokenStore match.TokenStore
 	if redisURL := httputil.EnvOrDefault("MATCH_REDIS_URL", ""); redisURL != "" {
-		if ts, err := match.NewRedisTokenStore(redisURL); err == nil {
-			tokenStore = ts
-			log.Println("auth token store: redis backend")
-		} else {
-			log.Printf("WARNING: failed to connect to redis for auth token store, using in-memory: %v", err)
+		ts, err := match.NewRedisTokenStore(redisURL)
+		if err != nil {
+			log.Fatalf("FATAL: MATCH_REDIS_URL is set but failed to connect to redis for auth token store: %v", err)
 		}
+		tokenStore = ts
+		log.Println("auth token store: redis backend")
 	}
 	service := match.NewServiceWithStoreBroadcasterAndTokenStore(finArchive, store, broadcaster, tokenStore)
 	rl, err := rate_limit.NewRateLimiter()
@@ -181,8 +181,10 @@ func main() {
 					return
 				}
 			}
+			// The caller supplied the seat secrets in the request; echoing them
+			// back adds no value and puts them in proxy/CDN logs.
 			resp := service.CreateMatch(req, httputil.NowUTC())
-			httputil.WriteJSON(w, http.StatusCreated, resp)
+			httputil.WriteJSON(w, http.StatusCreated, match.RedactSnapshotSecrets(resp))
 		default:
 			httputil.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -199,7 +201,15 @@ func main() {
 		matchID := parts[0]
 
 		if len(parts) == 1 && r.Method == http.MethodGet {
-			resp, err := service.GetMatch(matchID)
+			// Viewer-scoped: strips both seat secrets and hides the opponent's
+			// hand unless the caller proves seat ownership. This endpoint is
+			// unauthenticated and match IDs appear in shareable URLs, so an
+			// unscoped read here handed anyone full control of both seats.
+			resp, err := service.GetMatchForViewer(
+				matchID,
+				strings.TrimSpace(r.Header.Get("X-Player-ID")),
+				strings.TrimSpace(r.Header.Get("X-Player-Secret")),
+			)
 			if err != nil {
 				writeMatchError(w, err)
 				return
@@ -237,7 +247,7 @@ func main() {
 				writeMatchError(w, err)
 				return
 			}
-			httputil.WriteJSON(w, http.StatusOK, resp)
+			httputil.WriteJSON(w, http.StatusOK, match.RedactSnapshotSecrets(resp))
 			return
 		}
 
@@ -466,15 +476,18 @@ func openMatchStore() (match.MatchStore, match.Broadcaster) {
 	keyPrefix := httputil.EnvOrDefault("MATCH_REDIS_KEY_PREFIX", "chess404:match")
 
 	if backend == "redis" && redisURL != "" {
+		// A silent fallback to memory here used to mean a Redis blip at boot
+		// downgraded what the operator believes is a scaled deployment to
+		// single-instance semantics -- with no error, no alert, and every
+		// replica running its own clock authority against the same archive
+		// row. If Redis was configured, it must actually be reachable.
 		store, err := match.NewRedisMatchStore(redisURL, keyPrefix)
 		if err != nil {
-			log.Printf("WARNING: failed to connect to redis for match store, falling back to memory: %v", err)
-			return match.NewMemoryMatchStore(), match.NoopBroadcaster{}
+			log.Fatalf("FATAL: MATCH_STATE_BACKEND=redis but failed to connect to redis for match store: %v", err)
 		}
 		broadcaster, err := match.NewRedisBroadcaster(redisURL, keyPrefix)
 		if err != nil {
-			log.Printf("WARNING: failed to connect to redis for broadcaster, falling back to noop: %v", err)
-			return store, match.NoopBroadcaster{}
+			log.Fatalf("FATAL: MATCH_STATE_BACKEND=redis but failed to connect to redis for broadcaster: %v", err)
 		}
 		log.Printf("match store: redis backend (prefix=%s)", keyPrefix)
 		return store, broadcaster
@@ -498,6 +511,8 @@ func writeMatchError(w http.ResponseWriter, err error) {
 		httputil.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, match.ErrStaleClientState):
 		httputil.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, match.ErrUnauthorizedSeatClaim):
+		httputil.WriteError(w, http.StatusForbidden, "unauthorized")
 	default:
 		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 	}
@@ -562,7 +577,10 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 		return
 	}
 
-	stream, unsubscribe, initial, err := service.Subscribe(matchID, playerID)
+	// Subscribe verifies playerSecret against the seat. Until it did, any
+	// non-empty secret passed the check above and the caller was served
+	// whichever seat matched playerID -- including that seat's private hand.
+	stream, unsubscribe, initial, err := service.Subscribe(matchID, playerID, playerSecret)
 	if err != nil {
 		_ = conn.WriteJSON(map[string]string{"type": "auth.error", "message": err.Error()})
 		_ = conn.Close()
@@ -690,7 +708,12 @@ func withCORS(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Chess404-White-Guest-Id, X-Chess404-White-Session-Token, X-Chess404-Black-Guest-Id, X-Chess404-Black-Session-Token")
 		w.Header().Set("Access-Control-Expose-Headers", "Content-Type, X-Request-Id")
 		w.Header().Set("Access-Control-Max-Age", "600")
-		w.Header().Set("Cache-Control", "public, max-age=600")
+		// API responses are per-viewer and often authenticated (live match
+		// state, seat-scoped hands, auth tokens). Vary is Origin only, so a
+		// shared cache marking these "public" would serve one player's
+		// response to another. Access-Control-Max-Age above still caches the
+		// preflight, which is what the 600 was actually for.
+		w.Header().Set("Cache-Control", "no-store")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

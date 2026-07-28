@@ -43,6 +43,9 @@ var (
 	ErrMatchNotFound     = errors.New("match not found")
 	ErrMatchSeatFull     = errors.New("match has no open seats")
 	ErrMatchJoinFinished = errors.New("match is finished")
+	// ErrUnauthorizedSeatClaim is returned when a caller matches a seat's guest
+	// ID but cannot prove ownership with that seat's player secret.
+	ErrUnauthorizedSeatClaim = errors.New("unauthorized seat claim")
 	ErrStaleClientState  = errors.New("client state is stale; refresh from latest snapshot")
 )
 
@@ -263,6 +266,43 @@ func (s *Service) GetMatch(matchID string) (contracts.MatchSnapshotResponse, err
 	return buildSnapshotWithPresence(c.state, s.ensurePresenceStateLocked(c, now), len(c.events), nil, now), nil
 }
 
+// GetMatchForViewer returns the snapshot as a specific viewer is allowed to
+// see it: seat secrets stripped, and the opponent's hand / private card state
+// hidden unless the caller proves seat ownership with a valid player secret.
+//
+// An empty playerID is treated as a spectator. A non-empty playerID with a
+// secret that does not match the seat is rejected outright rather than being
+// silently downgraded, so a caller cannot probe for a seat by guessing.
+func (s *Service) GetMatchForViewer(matchID, playerID, playerSecret string) (contracts.MatchSnapshotResponse, error) {
+	s.mu.Lock()
+	c, ok := s.ensureMatchLoadedLocked(matchID)
+	s.mu.Unlock()
+	if !ok {
+		return contracts.MatchSnapshotResponse{}, ErrMatchNotFound
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	viewerColor := ""
+	if strings.TrimSpace(playerID) != "" {
+		color, err := requireIntentColor(c.state, strings.TrimSpace(playerID), strings.TrimSpace(playerSecret))
+		if err != nil {
+			return contracts.MatchSnapshotResponse{}, err
+		}
+		viewerColor = color
+	}
+
+	now := time.Now().UTC()
+	base := buildSnapshotWithPresence(c.state, s.ensurePresenceStateLocked(c, now), len(c.events), nil, now)
+	return contracts.MatchSnapshotResponse{
+		Match:        filterStateForColor(base.Match, viewerColor),
+		ReplayHead:   base.ReplayHead,
+		ReplayFrames: base.ReplayFrames,
+		Events:       filterEventsForColor(base.Events, viewerColor),
+	}, nil
+}
+
 func (s *Service) HeartbeatPresence(matchID string, req contracts.MatchPresenceRequest, now time.Time) error {
 	s.mu.Lock()
 	c, ok := s.ensureMatchLoadedLocked(matchID)
@@ -339,7 +379,11 @@ func redactPlayerSecret(s string) string {
 	return s[:6] + "...len=" + strconv.Itoa(len(s))
 }
 
-func (s *Service) Subscribe(matchID string, playerID string) (<-chan contracts.MatchSnapshotResponse, func(), contracts.MatchSnapshotResponse, error) {
+// Subscribe attaches a snapshot stream for a viewer. playerSecret must prove
+// ownership of the seat identified by playerID; without it a caller could pass
+// any opponent's guest ID (which is public in every snapshot) and be served
+// that seat's private hand for the rest of the match.
+func (s *Service) Subscribe(matchID string, playerID string, playerSecret string) (<-chan contracts.MatchSnapshotResponse, func(), contracts.MatchSnapshotResponse, error) {
 	s.mu.Lock()
 	c, ok := s.ensureMatchLoadedLocked(matchID)
 	s.mu.Unlock()
@@ -359,11 +403,15 @@ func (s *Service) Subscribe(matchID string, playerID string) (<-chan contracts.M
 		return nil, nil, contracts.MatchSnapshotResponse{}, errors.New("max subscribers reached for match")
 	}
 
+	// Resolve the seat through the same constant-time secret check the intent
+	// path uses. Identity alone is not sufficient: guest IDs are public.
 	playerColor := ""
-	if (c.state.WhiteGuestID != "" && strings.EqualFold(c.state.WhiteGuestID, playerID)) || (c.state.WhiteAccountID != "" && strings.EqualFold(c.state.WhiteAccountID, playerID)) {
-		playerColor = "white"
-	} else if (c.state.BlackGuestID != "" && strings.EqualFold(c.state.BlackGuestID, playerID)) || (c.state.BlackAccountID != "" && strings.EqualFold(c.state.BlackAccountID, playerID)) {
-		playerColor = "black"
+	if strings.TrimSpace(playerID) != "" {
+		color, err := requireIntentColor(c.state, strings.TrimSpace(playerID), strings.TrimSpace(playerSecret))
+		if err != nil {
+			return nil, nil, contracts.MatchSnapshotResponse{}, err
+		}
+		playerColor = color
 	}
 
 	ch := make(chan contracts.MatchSnapshotResponse, 128)
@@ -706,7 +754,16 @@ func (s *Service) collectAndBroadcast(now time.Time) {
 	sem := make(chan struct{}, broadcastConcurrency)
 	var wg sync.WaitGroup
 
+	// Snapshot the container set before fanning out. Acquiring the broadcast
+	// semaphore inside Range would block while holding a shard RLock, so one
+	// slow WebSocket write would stall match creation on that whole shard.
+	containers := make([]*matchContainer, 0, s.matches.Len())
 	s.matches.Range(func(_ string, c *matchContainer) bool {
+		containers = append(containers, c)
+		return true
+	})
+
+	for _, c := range containers {
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(mc *matchContainer) {
@@ -716,8 +773,7 @@ func (s *Service) collectAndBroadcast(now time.Time) {
 			}()
 			s.processMatchBroadcast(mc, now)
 		}(c)
-		return true
-	})
+	}
 
 	wg.Wait()
 }
@@ -778,23 +834,34 @@ func (s *Service) gcFinishedMatches(now time.Time) {
 	const finishedMatchTTL = 30 * time.Minute
 	const waitingMatchTTL = 30 * time.Minute
 
+	// Collect first, delete after Range returns. Range holds the shard's
+	// RLock across the callback, and Delete takes that same shard's write
+	// lock -- calling Delete from inside Range self-deadlocks the goroutine
+	// and leaves the shard mutex permanently held, which wedges every
+	// Load/Store/Range on that shard for the lifetime of the process.
+	var stale []string
 	s.matches.Range(func(matchID string, c *matchContainer) bool {
 		c.mu.Lock()
 		status := c.state.Status
 		updatedAt := c.state.UpdatedAt
 		c.mu.Unlock()
 
-		if status == "finished" {
+		switch status {
+		case "finished":
 			if now.Sub(updatedAt) >= finishedMatchTTL {
-				s.matches.Delete(matchID)
+				stale = append(stale, matchID)
 			}
-		} else if status == "waiting" {
+		case "waiting":
 			if now.Sub(updatedAt) >= waitingMatchTTL {
-				s.matches.Delete(matchID)
+				stale = append(stale, matchID)
 			}
 		}
 		return true
 	})
+
+	for _, matchID := range stale {
+		s.matches.Delete(matchID)
+	}
 }
 
 

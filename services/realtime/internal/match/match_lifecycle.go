@@ -164,6 +164,23 @@ func (s *Service) JoinMatchSeat(matchID string, req contracts.JoinMatchSeatReque
 		return contracts.JoinMatchSeatResponse{}, errors.New("preferredSeat must be white or black")
 	}
 
+	// A guest ID is public -- it appears in every match snapshot -- so matching
+	// one is not proof of seat ownership. If the seat already carries a secret,
+	// the caller must present it before any client-supplied field is applied.
+	// Without this check anyone could rewrite a live seat's linked account and
+	// collect its rated Elo, or rebind an unclaimed seat to themselves.
+	existingSeatSecret := ""
+	switch {
+	case strings.EqualFold(state.WhiteGuestID, guestID):
+		existingSeatSecret = strings.TrimSpace(state.WhitePlayerSecret)
+	case strings.EqualFold(state.BlackGuestID, guestID):
+		existingSeatSecret = strings.TrimSpace(state.BlackPlayerSecret)
+	}
+	if existingSeatSecret != "" &&
+		subtle.ConstantTimeCompare([]byte(playerSecret), []byte(existingSeatSecret)) != 1 {
+		return contracts.JoinMatchSeatResponse{}, ErrUnauthorizedSeatClaim
+	}
+
 	seatColor := ""
 	joined := false
 	updated := false
