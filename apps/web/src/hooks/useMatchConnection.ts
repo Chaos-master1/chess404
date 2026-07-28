@@ -46,6 +46,7 @@ export interface UseMatchConnectionProps {
     setActivePage: React.Dispatch<React.SetStateAction<any>>;
   };
 
+  authoritativeMatchId: string | null;
   authoritativeMatchIdRef: React.MutableRefObject<string | null>;
   authoritativeClaimTokensRef: React.MutableRefObject<{ white: string | null; black: string | null }>;
   authoritativeClaimExpiresAtRef: React.MutableRefObject<{ white: string | null; black: string | null }>;
@@ -79,6 +80,7 @@ export interface UseMatchConnectionProps {
 export function useMatchConnection(props: UseMatchConnectionProps) {
   const {
     sets,
+    authoritativeMatchId,
     authoritativeMatchIdRef,
     authoritativeClaimTokensRef,
     authoritativeClaimExpiresAtRef,
@@ -173,8 +175,21 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
   }, [authoritativeMatchIdRef, openLiveMatch, primaryAccountIdentity.accountId, primaryAccountIdentity.sessionToken]);
 
   // ── Stream connection effect ──────────────────────────────────────────────
+  // Reads authoritativeMatchId (state), not just the ref. A freshly created
+  // match sets viewerSeat and authoritativeMatchId via two separate state
+  // updates that can land in different renders (viewerSeat first, from the
+  // room-meta read; authoritativeMatchId later, once the bootstrap fetch
+  // resolves). This effect's dependency array previously listed
+  // authoritativeMatchIdRef -- a ref object, whose identity never changes --
+  // instead of the state. So the effect fired once while the ref was still
+  // null, bailed out immediately, and nothing about the later render (where
+  // the ref finally got a real value) was in its dependency list to trigger
+  // a retry. The connection permanently never opened for that match: no
+  // WebSocket, no presence heartbeat (same bug, below), no fallback poll,
+  // no claim refresh -- until a full page reload reset everything through a
+  // different code path. Depending on the real state value fixes all four.
   React.useEffect(() => {
-    const matchId = authoritativeMatchIdRef.current;
+    const matchId = authoritativeMatchId;
     if (!matchId) {
       setAuthoritativeLive(false);
       setAuthoritativeWhiteConnected(false);
@@ -226,11 +241,11 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     return () => {
       disconnect();
     };
-  }, [authoritativeActorForColor, authoritativeMatchIdRef, onSnapshot, hostedRuntime, stopAbortCountdown, viewerSeat]);
+  }, [authoritativeActorForColor, authoritativeMatchId, onSnapshot, hostedRuntime, stopAbortCountdown, viewerSeat]);
 
   // ── Presence heartbeat effect ─────────────────────────────────────────────
   React.useEffect(() => {
-    if (!hostedRuntime || !authoritativeMatchIdRef.current || !viewerSeat || over) {
+    if (!hostedRuntime || !authoritativeMatchId || !viewerSeat || over) {
       return;
     }
 
@@ -238,7 +253,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     const sendHeartbeat = async () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       try {
-        await sendMatchPresenceHeartbeat(authoritativeMatchIdRef.current!, authoritativeActorForColor(viewerSeat));
+        await sendMatchPresenceHeartbeat(authoritativeMatchId, authoritativeActorForColor(viewerSeat));
         if (!cancelled) {
           setCardMsg(prev => prev === PRESENCE_RETRY_MESSAGE ? '' : prev);
         }
@@ -270,26 +285,26 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [authoritativeActorForColor, authoritativeMatchIdRef, hostedRuntime, over, viewerSeat]);
+  }, [authoritativeActorForColor, authoritativeMatchId, hostedRuntime, over, viewerSeat]);
 
   // ── Fallback polling fetch effect ─────────────────────────────────────────
   React.useEffect(() => {
-    if (!authoritativeMatchIdRef.current || over) {
+    if (!authoritativeMatchId || over) {
       return;
     }
 
     const interval = window.setInterval(() => {
-      void fetchMatch(authoritativeMatchIdRef.current!).then(snapshot => {
+      void fetchMatch(authoritativeMatchId).then(snapshot => {
         onSnapshot(snapshot);
       }).catch(() => {});
     }, 5000);
 
     return () => window.clearInterval(interval);
-  }, [authoritativeMatchIdRef, over, onSnapshot]);
+  }, [authoritativeMatchId, over, onSnapshot]);
 
   // ── Claim refresh effect ──────────────────────────────────────────────────
   React.useEffect(() => {
-    if (!authoritativeMatchIdRef.current || over) {
+    if (!authoritativeMatchId || over) {
       return;
     }
 
@@ -318,7 +333,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
         return;
       }
 
-      const roomMeta = readStoredRoomMeta(authoritativeMatchIdRef.current!);
+      const roomMeta = readStoredRoomMeta(authoritativeMatchId);
       const whiteNeedsRefresh = claimNeedsRefresh(
         authoritativeClaimTokensRef.current.white ?? roomMeta?.whiteClaimToken,
         authoritativeClaimExpiresAtRef.current.white ?? roomMeta?.whiteClaimExpiresAt,
@@ -334,12 +349,12 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
 
       refreshInFlight = true;
       try {
-        const bootstrap = await fetchGatewayBootstrap(buildGatewayBootstrapRequest(authoritativeMatchIdRef.current!));
+        const bootstrap = await fetchGatewayBootstrap(buildGatewayBootstrapRequest(authoritativeMatchId));
         if (cancelled) {
           return;
         }
         applyGatewayGuestSessions(bootstrap.guestSessions);
-        applyGatewayMatchClaims(authoritativeMatchIdRef.current!, bootstrap.matchClaims);
+        applyGatewayMatchClaims(authoritativeMatchId, bootstrap.matchClaims);
         applyGatewayAccountSessions(bootstrap.accountSessions);
       } catch {
       } finally {
@@ -356,7 +371,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [authoritativeMatchIdRef, over, applyGatewayGuestSessions, applyGatewayMatchClaims, applyGatewayAccountSessions, buildGatewayBootstrapRequest, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef]);
+  }, [authoritativeMatchId, over, applyGatewayGuestSessions, applyGatewayMatchClaims, applyGatewayAccountSessions, buildGatewayBootstrapRequest, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef]);
 
   const onStreamReconnect = React.useCallback(() => {
     manualRetryRef.current?.();

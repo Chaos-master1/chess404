@@ -565,6 +565,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setMatchDestinationNotice,
       setActivePage,
     },
+    authoritativeMatchId,
     authoritativeMatchIdRef,
     authoritativeClaimTokensRef,
     authoritativeClaimExpiresAtRef,
