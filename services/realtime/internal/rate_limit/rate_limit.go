@@ -1,6 +1,7 @@
 package rate_limit
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -509,6 +510,13 @@ func (w *headerStrippingResponseWriter) WriteHeader(code int) {
 		w.ResponseWriter.Header().Del(h)
 	}
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *headerStrippingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
 }
 
 func NewHeaderStrippingMiddleware(headers ...string) func(http.Handler) http.Handler {

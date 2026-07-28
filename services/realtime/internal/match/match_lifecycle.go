@@ -94,11 +94,11 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 
 	c := newMatchContainer(state, []contracts.ResolvedEvent{startEvent}, newMatchPresenceState(state, now))
 
-	if string(req.ModeID) == "computer" {
+if string(req.ModeID) == "computer" {
 		diff := engine.ParseDifficulty(req.Difficulty)
 		c.computer = engine.NewComputerOpponent(diff, "black")
-		state.Status = "active"
 		state.BlackGuestID = "computer"
+		state.BlackName = computerDisplayName(req.Difficulty)
 		state.Clock.RunningFor = "white"
 		state.Clock.StartedAt = &startedAt
 		s.Log.Info("match:create: computer opponent initialized", "matchID", matchID, "difficulty", diff, "color", "black")
@@ -116,6 +116,23 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 	s.Log.Info("match:create: ok", "matchID", matchID, "status", broadcastSnap.Match.Status, "turn", broadcastSnap.Match.Turn, "whiteFingerprint", redactPlayerSecret(broadcastSnap.Match.WhitePlayerSecret), "blackFingerprint", redactPlayerSecret(broadcastSnap.Match.BlackPlayerSecret), "computers", c.computer != nil)
 
 	return broadcastSnap
+}
+
+func computerDisplayName(difficulty string) string {
+	switch strings.TrimSpace(strings.ToLower(difficulty)) {
+	case "beginner":
+		return "Computer Beginner"
+	case "easy":
+		return "Computer Easy"
+	case "medium":
+		return "Computer Medium"
+	case "hard":
+		return "Computer Hard"
+	case "expert":
+		return "Computer Expert"
+	default:
+		return "Computer"
+	}
 }
 
 func (s *Service) JoinMatchSeat(matchID string, req contracts.JoinMatchSeatRequest, now time.Time) (contracts.JoinMatchSeatResponse, error) {
