@@ -804,6 +804,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   React.useEffect(() => {
     writeStoredActiveMatchId(authoritativeMatchId);
     setAnalysisArrows([]);
+    authoritativeMatchIdRef.current = authoritativeMatchId;
   }, [authoritativeMatchId]);
 
   React.useEffect(() => {
