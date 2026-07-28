@@ -62,6 +62,7 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
         queue: 'direct',
         modeId: 'computer' as MatchModeId,
         clockSeconds: 600,
+        difficulty,
         viewerSeat: result.seatColor,
         whiteGuestId: result.snapshot.match.whiteGuestId,
         blackGuestId: result.snapshot.match.blackGuestId,

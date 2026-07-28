@@ -49,6 +49,7 @@ export interface StoredRoomMeta extends CreateMatchInput {
   viewerSeat?: 'white' | 'black' | null;
   whiteClaimExpiresAt?: string;
   blackClaimExpiresAt?: string;
+  difficulty?: string;
 }
 
 const ROOM_META_PREFIX = 'chess404.room.';

@@ -636,7 +636,9 @@ export function MatchBoardView() {
                 const actingColor = (hostedRuntime || authoritativeMatchId) ? viewerSeat : turn;
                 const isGhostDs = ghostDs && actingColor && ghostDs.ownerColor === actingColor && turn === actingColor && ghostDs.row === r && ghostDs.col === c;
                 if (!actingColor) return;
-                if (!isGhostDs && (!p || p.color !== actingColor || turn !== actingColor)) return;
+                const canPremove = hostedRuntime && authoritativeMatchId && actingColor && turn !== actingColor && !over;
+                if (!isGhostDs && (!p || p.color !== actingColor)) return;
+                if (!isGhostDs && turn !== actingColor && !canPremove) return;
                 setDrag({ row: r, col: c });
                 setSel({ row: r, col: c });
                 setHints(getMoves(r, c));
@@ -646,7 +648,14 @@ export function MatchBoardView() {
               onDrop={(r, c) => {
                 if (!drag || isReviewing || cardPending) { setDrag(null); setDragPos(null); setSel(null); setHints([]); return; }
                 const mv = getMoves(drag.row, drag.col);
-                if (mv.some(m => m.row === r && m.col === c)) doMove(drag.row, drag.col, r, c);
+                const actingColor = (hostedRuntime || authoritativeMatchId) ? viewerSeat : turn;
+                const canPremove = hostedRuntime && authoritativeMatchId && actingColor && turn !== actingColor && !over;
+                if (canPremove && mv.some(m => m.row === r && m.col === c)) {
+                  setPremove({ from: drag, to: { row: r, col: c } });
+                  setCardMsg('? Premove queued');
+                } else if (mv.some(m => m.row === r && m.col === c)) {
+                  doMove(drag.row, drag.col, r, c);
+                }
                 setDrag(null); setDragPos(null); setSel(null); setHints([]);
               }}
               doubleMove={doubleMove}

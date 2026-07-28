@@ -207,6 +207,7 @@ export function useGameState(
       ...storedRoomMeta,
       queue: match.queue ?? storedRoomMeta?.queue,
       modeId: match.modeId ?? storedRoomMeta?.modeId ?? DEFAULT_MATCH_MODE_ID,
+      difficulty: storedRoomMeta?.difficulty,
       viewerSeat: derivedViewerSeat ?? storedRoomMeta?.viewerSeat ?? null,
       whiteGuestId: match.whiteGuestId ?? storedRoomMeta?.whiteGuestId,
       blackGuestId: match.blackGuestId ?? storedRoomMeta?.blackGuestId,

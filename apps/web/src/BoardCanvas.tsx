@@ -1669,7 +1669,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     if (cardPending || isReviewing) return;
     onClearAnalysisArrows();
     const p = displayBoard[sq.row]?.[sq.col];
-    if (viewerColor && viewerColor === turn && p?.color === viewerColor) {
+    if (viewerColor && p?.color === viewerColor) {
       const canvas = canvasRef.current!;
       const rect = canvas.getBoundingClientRect();
       const touch = e.touches[0];
@@ -1749,7 +1749,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     if (cardPending || isReviewing) return;
     onClearAnalysisArrows();
     const p = displayBoard[sq.row]?.[sq.col];
-    if (viewerColor && viewerColor === turn && p?.color === viewerColor) {
+    if (viewerColor && p?.color === viewerColor) {
       setLocalDrag(sq);
       setLocalDragPos({ x: e.clientX - canvasRef.current!.getBoundingClientRect().left, y: e.clientY - canvasRef.current!.getBoundingClientRect().top });
       onDragStart(e, sq.row, sq.col);

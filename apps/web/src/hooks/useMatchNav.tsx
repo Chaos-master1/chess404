@@ -90,6 +90,18 @@ export function useMatchNav(props: UseMatchNavProps) {
     : hostedRuntime
       ? 'Competitive Match Destination'
       : 'Local Play Sandbox';
+
+  const activeMatchRoomMeta = authoritativeMatchId ? readStoredRoomMeta(authoritativeMatchId) : null;
+
+  const COMPUTER_DIFFICULTY: Record<string, { name: string; rating: number }> = {
+    beginner: { name: 'Computer Beginner', rating: 800 },
+    easy: { name: 'Computer Easy', rating: 1200 },
+    medium: { name: 'Computer Medium', rating: 1600 },
+    hard: { name: 'Computer Hard', rating: 2000 },
+    expert: { name: 'Computer Expert', rating: 2500 },
+  };
+  const computerDifficulty = activeMatchRoomMeta?.difficulty && activeMatchRoomMeta?.modeId === 'computer'
+    ? COMPUTER_DIFFICULTY[activeMatchRoomMeta.difficulty] : undefined;
   const hasPrimaryAccountSession = Boolean((primaryAccountIdentity.accountId ?? '').trim() && (primaryAccountIdentity.sessionToken ?? '').trim());
   const showSocialNav = hasPrimaryAccountSession || activePage === 'Friends' || activePage === 'Inbox';
   const showAdminNav = activePage === 'Admin' || activePage === 'Status';
@@ -179,10 +191,10 @@ export function useMatchNav(props: UseMatchNavProps) {
     : null;
   const activeFinishReasonLabel = finishReasonLabel(activeFinishReason);
   const displayedWhiteName = hostedRuntime && authoritativeMatchId
-    ? (matchSeatMeta?.whiteName ?? (viewerSeat === 'white' ? whiteProfile?.displayName : undefined) ?? 'White')
+    ? (matchSeatMeta?.whiteName ?? (computerDifficulty && viewerSeat !== 'white' ? computerDifficulty.name : undefined) ?? (viewerSeat === 'white' ? whiteProfile?.displayName : undefined) ?? 'White')
     : (whiteProfile?.displayName ?? 'Player');
   const displayedBlackName = hostedRuntime && authoritativeMatchId
-    ? (matchSeatMeta?.blackName ?? (viewerSeat === 'black' ? whiteProfile?.displayName : undefined) ?? 'Black')
+    ? (matchSeatMeta?.blackName ?? (computerDifficulty && viewerSeat !== 'black' ? computerDifficulty.name : undefined) ?? (viewerSeat === 'black' ? whiteProfile?.displayName : undefined) ?? 'Black')
     : (blackProfile?.displayName ?? 'Opponent');
   const disconnectGraceBanner = activeDisconnectGraceFor
     ? viewerSeat === activeDisconnectGraceFor
@@ -190,12 +202,11 @@ export function useMatchNav(props: UseMatchNavProps) {
       : `${activeDisconnectGraceFor === 'white' ? displayedWhiteName : displayedBlackName} disconnected. The match will forfeit if they do not return by ${disconnectGraceDeadlineLabel ?? 'the end of the grace window'}.`
     : null;
   const displayedWhiteRating = hostedRuntime && authoritativeMatchId
-    ? ((viewerSeat === 'white' ? whiteProfile?.rating : blackProfile?.rating) ?? 1200)
+    ? (computerDifficulty && viewerSeat !== 'white' ? computerDifficulty.rating : (viewerSeat === 'white' ? whiteProfile?.rating : blackProfile?.rating) ?? 1200)
     : (whiteProfile?.rating ?? 1200);
   const displayedBlackRating = hostedRuntime && authoritativeMatchId
-    ? ((viewerSeat === 'black' ? whiteProfile?.rating : blackProfile?.rating) ?? 1200)
+    ? (computerDifficulty && viewerSeat !== 'black' ? computerDifficulty.rating : (viewerSeat === 'black' ? whiteProfile?.rating : blackProfile?.rating) ?? 1200)
     : (blackProfile?.rating ?? 1200);
-  const activeMatchRoomMeta = authoritativeMatchId ? readStoredRoomMeta(authoritativeMatchId) : null;
   const activeMatchModeLabel = modeLabel(activeMatchRoomMeta?.modeId);
   const activeMatchQueueLabel = queueLabel(activeMatchRoomMeta?.queue);
   const canCreateDirectRematch = Boolean(authoritativeMatchId && activeMatchRoomMeta?.queue === 'direct');
