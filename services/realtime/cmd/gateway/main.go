@@ -1303,10 +1303,11 @@ func createGatewayPrivateMatchForSession(
 	}
 
 	createReq := contracts.CreateMatchRequest{
-		ClockSeconds: clockSeconds,
-		Queue:        matchQueue,
-		ModeID:       contracts.NormalizeMatchModeID(string(modeID)),
-		Difficulty:   strings.TrimSpace(difficulty),
+		ClockSeconds:   clockSeconds,
+		Queue:          matchQueue,
+		ModeID:         contracts.NormalizeMatchModeID(string(modeID)),
+		Difficulty:     strings.TrimSpace(difficulty),
+		StarterHandMode: "starter_three",
 	}
 	if createReq.ModeID == "" {
 		createReq.ModeID = contracts.MatchModeOpenCards

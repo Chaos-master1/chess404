@@ -97,6 +97,10 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 	if string(req.ModeID) == "computer" {
 		diff := engine.ParseDifficulty(req.Difficulty)
 		c.computer = engine.NewComputerOpponent(diff, "black")
+		state.Status = "active"
+		state.BlackGuestID = "computer"
+		state.Clock.RunningFor = "white"
+		state.Clock.StartedAt = &startedAt
 		s.Log.Info("match:create: computer opponent initialized", "matchID", matchID, "difficulty", diff, "color", "black")
 	}
 
