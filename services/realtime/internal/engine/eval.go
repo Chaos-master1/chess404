@@ -130,8 +130,6 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 	score := 0
 	whiteMaterial := 0
 	blackMaterial := 0
-	whitePieces := 0
-	blackPieces := 0
 
 	for r := 0; r < 8; r++ {
 		for c := 0; c < 8; c++ {
@@ -147,10 +145,8 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 
 			if piece.Color == "white" {
 				whiteMaterial += value
-				whitePieces++
 			} else {
 				blackMaterial += value
-				blackPieces++
 			}
 		}
 	}
@@ -171,9 +167,7 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 
 			posBonus := positionalBonus(piece, r, c, isEndgame)
 
-			mobility := 0
-
-			total := value + posBonus + mobility
+			total := value + posBonus
 
 			if piece.Color == turn {
 				score += total
@@ -182,6 +176,20 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 			}
 		}
 	}
+
+	// --- Pawn structure evaluation ---
+	whitePawnSquares := pawnSquares(board, "white")
+	blackPawnSquares := pawnSquares(board, "black")
+	score += pawnStructureScore(board, whitePawnSquares)
+	score -= pawnStructureScore(board, blackPawnSquares)
+
+	// Passed pawn bonuses
+	score += passedPawnBonus(board, whitePawnSquares, blackPawnSquares, true)
+	score -= passedPawnBonus(board, blackPawnSquares, whitePawnSquares, false)
+
+	// Knight outpost bonus
+	score += outpostBonus(board, "white")
+	score -= outpostBonus(board, "black")
 
 	whiteKing := findKingPos(board, "white")
 	blackKing := findKingPos(board, "black")
@@ -212,7 +220,6 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 
 	// --- Board-modifier scoring ---
 
-	// Lava squares: penalize own pieces standing on lava, reward enemy pieces on lava.
 	for _, lava := range lavas {
 		if lava.Row < 0 || lava.Row > 7 || lava.Col < 0 || lava.Col > 7 {
 			continue
@@ -229,7 +236,6 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 		}
 	}
 
-	// Fortress zones: bonus for own fortress control.
 	for _, z := range fortresses {
 		if z.OwnerColor == turn {
 			score += 30
@@ -238,7 +244,6 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 		}
 	}
 
-	// Bomb pieces: friendly-fire risk vs. enemy-bait upside.
 	for _, bomb := range bombs {
 		ownBomb := bomb.OwnerColor == turn
 		for dr := -1; dr <= 1; dr++ {
@@ -263,6 +268,199 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 
 	return score
 }
+
+// pawnSquares returns a set of column indices per row for pawns of the given color.
+func pawnSquares(board [][]*contracts.Piece, color string) []uint8 {
+	cols := make([]uint8, 8)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece != nil && piece.Type == "pawn" && piece.Color == color {
+				cols[r] |= 1 << uint(c)
+			}
+		}
+	}
+	return cols
+}
+
+// pawnStructureScore penalizes doubled and isolated pawns, rewards connected pawns.
+func pawnStructureScore(board [][]*contracts.Piece, pawnCols []uint8) int {
+	score := 0
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			if pawnCols[r]&(1<<uint(c)) == 0 {
+				continue
+			}
+			// Isolated pawn: no friendly pawns on adjacent files
+			isolated := true
+			for adj := max(0, c-1); adj <= min(7, c+1); adj++ {
+				if adj == c {
+					continue
+				}
+				for rr := 0; rr < 8; rr++ {
+					if pawnCols[rr]&(1<<uint(adj)) != 0 {
+						isolated = false
+						break
+					}
+				}
+				if !isolated {
+					break
+				}
+			}
+			if isolated {
+				score -= 15
+			}
+
+			// Doubled pawn: another pawn in same file
+			doubled := false
+			for rr := 0; rr < 8; rr++ {
+				if rr == r {
+					continue
+				}
+				if pawnCols[rr]&(1<<uint(c)) != 0 {
+					doubled = true
+					break
+				}
+			}
+			if doubled {
+				score -= 10
+			}
+
+			// Connected pawn: friendly pawn on adjacent file in neighboring rows
+			connected := false
+			for adj := max(0, c-1); adj <= min(7, c+1); adj++ {
+				if adj == c {
+					continue
+				}
+				for dr := -1; dr <= 1; dr++ {
+					rr := r + dr
+					if rr < 0 || rr > 7 {
+						continue
+					}
+					if pawnCols[rr]&(1<<uint(adj)) != 0 {
+						connected = true
+						break
+					}
+				}
+				if connected {
+					break
+				}
+			}
+			if connected {
+				score += 8
+			}
+		}
+	}
+	return score
+}
+
+// passedPawnBonus rewards pawns with no enemy pawns blocking or opposing on the same or adjacent files.
+func passedPawnBonus(board [][]*contracts.Piece, myPawns, enemyPawns []uint8, isWhite bool) int {
+	score := 0
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			if myPawns[r]&(1<<uint(c)) == 0 {
+				continue
+			}
+			passed := true
+			start := r + 1
+			end := 8
+			if !isWhite {
+				start = r - 1
+				end = -1
+			}
+			step := 1
+			if !isWhite {
+				step = -1
+			}
+			for rr := start; rr != end; rr += step {
+				if enemyPawns[rr]&(1<<uint(c)) != 0 {
+					passed = false
+					break
+				}
+				if c > 0 && enemyPawns[rr]&(1<<uint(c-1)) != 0 {
+					passed = false
+					break
+				}
+				if c < 7 && enemyPawns[rr]&(1<<uint(c+1)) != 0 {
+					passed = false
+					break
+				}
+			}
+			if passed {
+				dist := r
+				if !isWhite {
+					dist = 7 - r
+				}
+				bonus := 10 + dist*5
+				score += bonus
+			}
+		}
+	}
+	return score
+}
+
+// outpostBonus rewards knights on squares protected by a friendly pawn with no enemy pawns that can attack it.
+func outpostBonus(board [][]*contracts.Piece, color string) int {
+	score := 0
+	enemy := oppositeColor(color)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece == nil || piece.Type != "knight" || piece.Color != color {
+				continue
+			}
+			hasPawnCover := false
+			pawnRow := r + 1
+			if color == "black" {
+				pawnRow = r - 1
+			}
+			if pawnRow >= 0 && pawnRow < 8 {
+				for dc := -1; dc <= 1; dc++ {
+					pc := c + dc
+					if pc < 0 || pc > 7 {
+						continue
+					}
+					p := board[pawnRow][pc]
+					if p != nil && p.Type == "pawn" && p.Color == color {
+						hasPawnCover = true
+						break
+					}
+				}
+			}
+			if !hasPawnCover {
+				continue
+			}
+			canBeAttacked := false
+			for dr := -1; dr <= 1; dr++ {
+				for dc := -1; dc <= 1; dc++ {
+					if dr == 0 && dc == 0 {
+						continue
+					}
+					pr := r + dr
+					pc := c + dc
+					if pr < 0 || pr > 7 || pc < 0 || pc > 7 {
+						continue
+					}
+					p := board[pr][pc]
+					if p != nil && p.Type == "pawn" && p.Color == enemy {
+						canBeAttacked = true
+						break
+					}
+				}
+				if canBeAttacked {
+					break
+				}
+			}
+			if !canBeAttacked {
+				score += 20
+			}
+		}
+	}
+	return score
+}
+
+
 
 func positionalBonus(piece *contracts.Piece, r, c int, isEndgame bool) int {
 	blackRow := 7 - r

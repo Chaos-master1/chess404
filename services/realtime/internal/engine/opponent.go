@@ -9,6 +9,14 @@ import (
 	"github.com/chess404/realtime/internal/contracts"
 )
 
+const (
+	timeBeginner = 100 * time.Millisecond
+	timeEasy     = 250 * time.Millisecond
+	timeMedium   = 500 * time.Millisecond
+	timeHard     = 1000 * time.Millisecond
+	timeExpert   = 2000 * time.Millisecond
+)
+
 type Difficulty int
 
 const (
@@ -35,19 +43,23 @@ func ParseDifficulty(s string) Difficulty {
 }
 
 func (d Difficulty) SearchDepth() int {
+	return 32
+}
+
+func (d Difficulty) TimeLimit() time.Duration {
 	switch d {
 	case DifficultyBeginner:
-		return 2
+		return timeBeginner
 	case DifficultyEasy:
-		return 3
+		return timeEasy
 	case DifficultyMedium:
-		return 4
+		return timeMedium
 	case DifficultyHard:
-		return 6
+		return timeHard
 	case DifficultyExpert:
-		return 8
+		return timeExpert
 	default:
-		return 4
+		return timeMedium
 	}
 }
 
@@ -121,7 +133,8 @@ func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.Pla
 	}
 
 	searchDepth := co.Difficulty.SearchDepth()
-	result := Search(state, searchDepth, co.tt)
+	timeLimit := co.Difficulty.TimeLimit()
+	result := SearchWithTime(state, searchDepth, co.tt, timeLimit)
 
 	if result.BestMove.From == (contracts.Square{}) && result.BestMove.To == (contracts.Square{}) {
 		return nil

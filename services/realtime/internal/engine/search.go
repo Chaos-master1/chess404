@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
 )
@@ -81,6 +82,41 @@ type SearchResult struct {
 	Depth    int
 }
 
+type SearchContext struct {
+	TT       *TranspositionTable
+	Nodes    int
+	Stopped  bool
+	Deadline time.Time
+	mu       sync.Mutex
+}
+
+func NewSearchContext(tt *TranspositionTable, timeLimit time.Duration) *SearchContext {
+	sc := &SearchContext{
+		TT:       tt,
+		Deadline: time.Now().Add(timeLimit),
+	}
+	return sc
+}
+
+func (sc *SearchContext) ShouldStop() bool {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if sc.Stopped {
+		return true
+	}
+	if time.Now().After(sc.Deadline) {
+		sc.Stopped = true
+		return true
+	}
+	return sc.Stopped
+}
+
+func (sc *SearchContext) Stop() {
+	sc.mu.Lock()
+	sc.Stopped = true
+	sc.mu.Unlock()
+}
+
 var defaultHasher *ZobristHasher
 
 func init() {
@@ -88,28 +124,42 @@ func init() {
 }
 
 func Search(state *contracts.MatchState, maxDepth int, tt *TranspositionTable) SearchResult {
+	return SearchWithTime(state, maxDepth, tt, 5*time.Second)
+}
+
+func SearchWithTime(state *contracts.MatchState, maxDepth int, tt *TranspositionTable, timeLimit time.Duration) SearchResult {
 	turn := state.Turn
 	bestMove := Move{}
 	nodes := 0
 	prevScore := 0
+	sc := NewSearchContext(tt, timeLimit)
+	sc.Nodes = 0
 
 	for depth := 1; depth <= maxDepth; depth++ {
+		if depth > 1 && sc.ShouldStop() {
+			break
+		}
+
 		alpha := math.MinInt + 1
 		beta := math.MaxInt - 1
 
-		// Aspiration window: narrow the search window around the previous
-		// iteration's score for tighter alpha-beta bounds.
 		if depth >= 3 {
 			alpha = prevScore - aspirationDelta
 			beta = prevScore + aspirationDelta
 		}
 
-		score, move := alphaBeta(state, depth, alpha, beta, turn == "white", tt, &nodes, 0)
+		score, move := alphaBeta(state, depth, alpha, beta, turn == "white", sc, &nodes, 0)
 
-		// If the score fell outside the aspiration window, re-search with full
-		// window (research is uncommon, ~5-10% of iterations).
+		if sc.Stopped {
+			break
+		}
+
 		if score <= alpha || score >= beta {
-			score, move = alphaBeta(state, depth, math.MinInt+1, math.MaxInt-1, turn == "white", tt, &nodes, 0)
+			score, move = alphaBeta(state, depth, math.MinInt+1, math.MaxInt-1, turn == "white", sc, &nodes, 0)
+		}
+
+		if sc.Stopped {
+			break
 		}
 
 		prevScore = score
@@ -119,6 +169,8 @@ func Search(state *contracts.MatchState, maxDepth int, tt *TranspositionTable) S
 			bestMove.Score = score
 		}
 	}
+
+	sc.Stop()
 
 	return SearchResult{
 		BestMove: bestMove,
@@ -137,27 +189,28 @@ const (
 	checkExtension = 0       // Check extension (0=disabled; enables deeper tactical search)
 )
 
-func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing bool, tt *TranspositionTable, nodes *int, ply int) (int, *Move) {
+func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing bool, sc *SearchContext, nodes *int, ply int) (int, *Move) {
 	*nodes++
 
-	// TT probe: use Zobrist hash to look up this position.
+	if *nodes&8191 == 0 && sc.ShouldStop() {
+		return 0, nil
+	}
+
 	hash := defaultHasher.Hash(state)
-	if tt != nil {
-		if ok, ttScore := tt.Lookup(hash, depth, alpha, beta); ok {
+	if sc.TT != nil {
+		if ok, ttScore := sc.TT.Lookup(hash, depth, alpha, beta); ok {
 			return ttScore, nil
 		}
 	}
 
 	if depth <= 0 {
-		return quiescence(state, alpha, beta, maximizing, tt, nodes, ply, hash), nil
+		return quiescence(state, alpha, beta, maximizing, sc, nodes, ply, hash), nil
 	}
 
-	// Null-move pruning: skip a move (forfeit the turn) and see if we're still
-	// above beta. If so, the position is too good to need searching.
 	if ply > 0 && depth >= nullMoveDepth && !isKingInCheck(state) {
 		nullState := cloneMatchState(state)
 		nullState.Turn = oppositeColor(state.Turn)
-		nullScore, _ := alphaBeta(nullState, depth-nullMoveR-1, -beta, -beta+1, !maximizing, tt, nodes, ply+1)
+		nullScore, _ := alphaBeta(nullState, depth-nullMoveR-1, -beta, -beta+1, !maximizing, sc, nodes, ply+1)
 		nullScore = -nullScore
 		if nullScore >= beta {
 			return beta, nil
@@ -181,18 +234,16 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 
 	bestMove := &moves[0]
 	improving := true
-	if ply >= 2 {
-		// Simple improving detection: non-pawn material is roughly equal →
-		// assume improving unless proven otherwise (simplified).
-		improving = true
-	}
 
 	if maximizing {
 		maxEval := math.MinInt + 1
 		for i := range moves {
+			if sc.Stopped {
+				break
+			}
+
 			newDepth := depth - 1
 
-			// Check extension (expensive per-move, only enabled if >0).
 			isCheck := false
 			if checkExtension > 0 {
 				if piece := state.Board[moves[i].From.Row][moves[i].From.Col]; piece != nil {
@@ -225,11 +276,10 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 			}
 
 			newState := applyMoveCopy(state, &moves[i])
-			eval, _ := alphaBeta(newState, newDepth, alpha, beta, false, tt, nodes, ply+1)
+			eval, _ := alphaBeta(newState, newDepth, alpha, beta, false, sc, nodes, ply+1)
 
-			// If LMR was used and result > alpha, re-search at full depth.
 			if newDepth < depth-1 && eval > alpha {
-				eval, _ = alphaBeta(newState, depth-1, alpha, beta, false, tt, nodes, ply+1)
+				eval, _ = alphaBeta(newState, depth-1, alpha, beta, false, sc, nodes, ply+1)
 			}
 
 			if eval > maxEval {
@@ -246,20 +296,24 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 				break
 			}
 		}
-		if tt != nil {
+		if sc.TT != nil {
 			flag := ExactScore
 			if maxEval <= alpha {
 				flag = UpperBound
 			} else if maxEval >= beta {
 				flag = LowerBound
 			}
-			tt.Store(hash, depth, maxEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
+			sc.TT.Store(hash, depth, maxEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
 		}
 		return maxEval, bestMove
 	}
 
 	minEval := math.MaxInt - 1
 	for i := range moves {
+		if sc.Stopped {
+			break
+		}
+
 		newDepth := depth - 1
 
 		isCheck := false
@@ -294,10 +348,10 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 		}
 
 		newState := applyMoveCopy(state, &moves[i])
-		eval, _ := alphaBeta(newState, newDepth, alpha, beta, true, tt, nodes, ply+1)
+		eval, _ := alphaBeta(newState, newDepth, alpha, beta, true, sc, nodes, ply+1)
 
 		if newDepth < depth-1 && eval < beta {
-			eval, _ = alphaBeta(newState, depth-1, alpha, beta, true, tt, nodes, ply+1)
+			eval, _ = alphaBeta(newState, depth-1, alpha, beta, true, sc, nodes, ply+1)
 		}
 
 		if eval < minEval {
@@ -314,24 +368,28 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 			break
 		}
 	}
-	if tt != nil {
+	if sc.TT != nil {
 		flag := ExactScore
 		if minEval <= alpha {
 			flag = UpperBound
 		} else if minEval >= beta {
 			flag = LowerBound
 		}
-		tt.Store(hash, depth, minEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
+		sc.TT.Store(hash, depth, minEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
 	}
 	return minEval, bestMove
 }
 
 // quiescence searches captures at depth 0 (stand-pat) to reduce the horizon
-// effect. Returns a score from the perspective of the side to move.
-func quiescence(state *contracts.MatchState, alpha, beta int, maximizing bool, tt *TranspositionTable, nodes *int, ply int, hash uint64) int {
+// effect. Delta pruning filters losing captures. Returns a score from the
+// perspective of the side to move.
+func quiescence(state *contracts.MatchState, alpha, beta int, maximizing bool, sc *SearchContext, nodes *int, ply int, hash uint64) int {
 	*nodes++
 
-	// Stand-pat: evaluate the current position.
+	if *nodes&16383 == 0 && sc.ShouldStop() {
+		return 0
+	}
+
 	standPat := EvaluateWithModifiers(state.Board, state.Turn, state.LavaSquares, state.FortressZones, state.BombPieces)
 	if !maximizing {
 		standPat = -standPat
@@ -344,11 +402,32 @@ func quiescence(state *contracts.MatchState, alpha, beta int, maximizing bool, t
 		alpha = standPat
 	}
 
-	// Generate only capture moves for quiescence search.
+	const deltaMargin = 200
 	captures := generateCaptureMoves(state, maximizing)
 	for i := range captures {
+		if sc.Stopped {
+			break
+		}
+
+		captured := state.Board[captures[i].To.Row][captures[i].To.Col]
+		capturedValue := 0
+		if captured != nil {
+			capturedValue = pieceValue(captured.Type)
+		}
+
+		// Delta pruning: if stand-pat + captured value + margin can't reach alpha, skip.
+		if standPat+capturedValue+deltaMargin < alpha {
+			continue
+		}
+
+		// SEE pruning: if the capture loses material, skip it in quiescence.
+		seeScore := see(state, &captures[i])
+		if seeScore < 0 {
+			continue
+		}
+
 		newState := applyMoveCopy(state, &captures[i])
-		score := -quiescence(newState, -beta, -alpha, !maximizing, tt, nodes, ply+1, 0)
+		score := -quiescence(newState, -beta, -alpha, !maximizing, sc, nodes, ply+1, 0)
 		if score >= beta {
 			return beta
 		}
@@ -358,6 +437,37 @@ func quiescence(state *contracts.MatchState, alpha, beta int, maximizing bool, t
 	}
 
 	return alpha
+}
+
+// see (Static Exchange Evaluation) determines the net material gain from
+// a capture sequence at the target square. Returns the estimated score
+// from the perspective of the side initiating the capture.
+func see(state *contracts.MatchState, move *Move) int {
+	fromPiece := state.Board[move.From.Row][move.From.Col]
+	toPiece := state.Board[move.To.Row][move.To.Col]
+	if fromPiece == nil {
+		return 0
+	}
+
+	targetValue := 0
+	if toPiece != nil {
+		targetValue = pieceValue(toPiece.Type)
+		if toPiece.FusedWith != "" {
+			targetValue = (targetValue + pieceValue(toPiece.FusedWith)) / 2
+		}
+	}
+
+	attackerValue := pieceValue(fromPiece.Type)
+	if fromPiece.FusedWith != "" {
+		attackerValue = (attackerValue + pieceValue(fromPiece.FusedWith)) / 2
+	}
+
+	gain := targetValue - attackerValue
+	if gain <= 0 {
+		return gain
+	}
+
+	return gain
 }
 
 // generateCaptureMoves returns only moves that capture an enemy piece.
@@ -549,19 +659,21 @@ func orderMoves(moves []Move, state *contracts.MatchState, ply int) {
 		score := 0
 		captured := state.Board[moves[i].To.Row][moves[i].To.Col]
 		if captured != nil {
-			attacker := state.Board[moves[i].From.Row][moves[i].From.Col]
-			if attacker != nil {
-				// MVV-LVA: most-valuable victim, least-valuable attacker
-				score += 1000 + 10*pieceValue(captured.Type) - pieceValue(attacker.Type)
+			seeScore := see(state, &moves[i])
+			if seeScore >= 0 {
+				// Winning or equal capture: high priority
+				score += 1000 + seeScore
+			} else {
+				// Losing capture: low priority
+				score -= 500 - seeScore
 			}
 		}
 		if moves[i].Score > 0 {
-			score += 100 // TT best move priority
+			score += 100
 		}
 		if moves[i].To.Row == 3 || moves[i].To.Row == 4 {
 			score += 10
 		}
-		// Promotion bonus
 		if moves[i].Promotion != "" {
 			if moves[i].Promotion == "queen" {
 				score += 900
@@ -572,10 +684,8 @@ func orderMoves(moves []Move, state *contracts.MatchState, ply int) {
 		moves[i].Score = score
 	}
 
-	// Apply killer-move bonus and history-heuristic bonus.
 	for i := range moves {
 		key := keyForSquare(moves[i].From) + keyForSquare(moves[i].To)
-		// Check killer slots for the current ply
 		kp := ply
 		if kp >= len(killerMoves) {
 			kp = 0
@@ -586,7 +696,6 @@ func orderMoves(moves []Move, state *contracts.MatchState, ply int) {
 				break
 			}
 		}
-		// History heuristic bonus
 		attacker := state.Board[moves[i].From.Row][moves[i].From.Col]
 		if attacker != nil {
 			idx := pieceTypeIndex(attacker.Type)
