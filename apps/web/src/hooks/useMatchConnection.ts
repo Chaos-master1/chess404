@@ -181,7 +181,6 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
       setAuthoritativeBlackConnected(false);
       setAuthoritativeDisconnectGraceFor(null);
       setAuthoritativeDisconnectGraceDeadline(null);
-      setViewerSeat(null);
       setMatchSeatMeta(null);
       return;
     }
