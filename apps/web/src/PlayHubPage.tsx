@@ -1,10 +1,13 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { type MatchModeId, type PieceColor } from '@chess404/contracts';
 import type { GuestProfile } from './lib/platform-service';
 import type { QueueName, QueueTicket } from './lib/matchmaking-service';
+import { createPrivateMatch } from './lib/private-match-service';
 import type { PrivateMatchIdentity } from './lib/private-match-service';
+import { writeStoredRoomMeta } from './lib/match-service';
 import { modeLabel, queueLabel } from './lib/match-labels';
 import QueuePage from './QueuePage';
 import LobbiesPage from './LobbiesPage';
@@ -71,6 +74,41 @@ export default function PlayHubPage({
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  const router = useRouter();
+  const handlePlayComputer = useCallback(() => {
+    if (!identity?.guestId) return;
+    const difficulty = 'medium';
+    createPrivateMatch({
+      identity,
+      queue: 'direct',
+      modeId: 'computer' as MatchModeId,
+      difficulty,
+      clockSeconds: 600,
+      preferredSeat: 'white',
+    }).then((result) => {
+      writeStoredRoomMeta(result.matchId, {
+        queue: 'direct',
+        modeId: 'computer' as MatchModeId,
+        clockSeconds: 600,
+        difficulty,
+        viewerSeat: result.seatColor,
+        whiteGuestId: result.snapshot.match.whiteGuestId,
+        blackGuestId: result.snapshot.match.blackGuestId,
+        whiteAccountId: result.snapshot.match.whiteAccountId,
+        blackAccountId: result.snapshot.match.blackAccountId,
+        whiteName: result.snapshot.match.whiteName,
+        blackName: result.snapshot.match.blackName,
+        whitePlayerSecret: result.seatColor === 'white' ? result.claim?.playerSecret : undefined,
+        blackPlayerSecret: result.seatColor === 'black' ? result.claim?.playerSecret : undefined,
+        whiteClaimToken: result.seatColor === 'white' ? result.claim?.claimToken : undefined,
+        blackClaimToken: result.seatColor === 'black' ? result.claim?.claimToken : undefined,
+        whiteClaimExpiresAt: result.seatColor === 'white' ? result.claim?.expiresAt : undefined,
+        blackClaimExpiresAt: result.seatColor === 'black' ? result.claim?.expiresAt : undefined,
+      });
+      router.push(`/match/${encodeURIComponent(result.matchId)}`);
+    }).catch(() => {});
+  }, [identity, router]);
+
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px 28px 32px', color: '#f4e8c8' }}>
       <div style={{ maxWidth: '1380px', margin: '0 auto', display: 'grid', gap: '18px' }}>
@@ -87,7 +125,7 @@ export default function PlayHubPage({
         </div>
 
         <button
-          onClick={() => scrollTo(computerRef)}
+          onClick={handlePlayComputer}
           style={{
             padding:'16px 24px',
             borderRadius:'16px',
@@ -192,7 +230,7 @@ export default function PlayHubPage({
               eyebrow="Play vs Computer"
               title="Challenge the built-in engine"
               detail="Play against a chess engine with full card effects. Choose difficulty and start immediately — no opponent needed."
-              onClick={() => scrollTo(computerRef)}
+              onClick={handlePlayComputer}
             />
           </div>
         )}

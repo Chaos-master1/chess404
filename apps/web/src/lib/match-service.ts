@@ -312,8 +312,9 @@ export function connectToMatchStream(
       return;
     }
     if (reconnectAttempt >= maxReconnectAttempts) {
-      console.warn('max reconnect attempts reached, giving up');
-      handlers.onStatusChange?.('disconnected');
+      console.warn('max reconnect attempts reached, falling back to polling');
+      handlers.onStatusChange?.('connected');
+      schedulePoll(0);
       return;
     }
     clearReconnectTimer();
