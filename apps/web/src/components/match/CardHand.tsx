@@ -7,12 +7,12 @@ import { useMatchCard } from '../../contexts/MatchCardContext';
 import { useMatchState } from '../../contexts/MatchStateContext';
 
 interface CardHandProps {
-  hand: GameCard[];
+  hand?: GameCard[];
   playerColor: PieceColor;
   position: 'top' | 'bottom';
 }
 
-export default function CardHand({ hand, playerColor, position }: CardHandProps) {
+export default function CardHand({ hand = [], playerColor, position }: CardHandProps) {
   const { selectedCard, setSelectedCard, cardUsedBy, dealPhase, canUseCard } = useMatchCard();
   const { radarActive } = useMatchState();
 

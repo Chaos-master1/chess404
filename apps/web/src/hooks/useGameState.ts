@@ -242,8 +242,8 @@ export function useGameState(
     authoritativeSetters.setAuthoritativeDisconnectGraceFor((match.disconnectGraceFor as PieceColor | undefined) ?? null);
     authoritativeSetters.setAuthoritativeDisconnectGraceDeadline(match.disconnectGraceDeadline ?? null);
 
-    cardSetters.setWhiteHand(match.whiteHand as GameCard[]);
-    cardSetters.setBlackHand(match.blackHand as GameCard[]);
+    cardSetters.setWhiteHand((match.whiteHand as GameCard[]) ?? []);
+    cardSetters.setBlackHand((match.blackHand as GameCard[]) ?? []);
 
     const drawEvent = [...(snapshot.events ?? [])].reverse().find(e => {
       const p = e.payload as any;
@@ -275,7 +275,7 @@ export function useGameState(
     gameSetters.setDrawOffer(match.drawOfferedBy ?? null);
     gameSetters.setMovHist(buildMoveRows(match.moveHistory));
     gameSetters.setChatMessages(match.chatMessages.map(msg => ({ sender: msg.sender as any, text: msg.text })));
-    cardSetters.setCardPending(buildPendingCardFromSnapshot(match.pendingCard ?? null, match.whiteHand as GameCard[], match.blackHand as GameCard[]));
+    cardSetters.setCardPending(buildPendingCardFromSnapshot(match.pendingCard ?? null, (match.whiteHand as GameCard[]) ?? [], (match.blackHand as GameCard[]) ?? []));
 
     if (match.pendingCard?.target && match.pendingCard.options?.length && ['promote', 'demote', 'promotehim', 'demotehim'].includes(match.pendingCard.mechanic)) {
       cardSetters.setPromoPicker({
@@ -289,7 +289,7 @@ export function useGameState(
 
     cardSetters.setSelectedCard(prev => {
       if (!prev) return null;
-      return [...(match.whiteHand as GameCard[]), ...(match.blackHand as GameCard[])].find(c => c.id === prev.id) ?? null;
+      return [...((match.whiteHand as GameCard[]) ?? []), ...((match.blackHand as GameCard[]) ?? [])].find(c => c.id === prev.id) ?? null;
     });
 
     gameSetters.setPosHist(prev => {

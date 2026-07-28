@@ -236,6 +236,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
 
     let cancelled = false;
     const sendHeartbeat = async () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       try {
         await sendMatchPresenceHeartbeat(authoritativeMatchIdRef.current!, authoritativeActorForColor(viewerSeat));
         if (!cancelled) {

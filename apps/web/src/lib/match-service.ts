@@ -306,7 +306,7 @@ export function connectToMatchStream(
     }, delay);
   };
 
-  const maxReconnectAttempts = 20;
+  const maxReconnectAttempts = 10;
   const scheduleReconnect = () => {
     if (disposed) {
       return;
@@ -315,6 +315,17 @@ export function connectToMatchStream(
       console.warn('max reconnect attempts reached, falling back to polling');
       handlers.onStatusChange?.('connected');
       schedulePoll(0);
+      return;
+    }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      console.log('offline — waiting for network before reconnecting');
+      handlers.onStatusChange?.('reconnecting');
+      const onOnline = () => {
+        window.removeEventListener('online', onOnline);
+        reconnectAttempt = 0;
+        if (!disposed) connect();
+      };
+      window.addEventListener('online', onOnline);
       return;
     }
     clearReconnectTimer();
