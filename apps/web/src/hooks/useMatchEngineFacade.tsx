@@ -536,6 +536,18 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     playerClaimToken?: string;
   }) | null>(null);
 
+  // Stable wrappers around the ref-forwarded callbacks. useMatchConnection's
+  // WebSocket-owning effect lists these three as dependencies; an inline
+  // arrow here (a fresh function identity every render) made that effect
+  // tear down and recreate the socket on every render of this hook --
+  // including every clock tick -- so the connection was closed before its
+  // handshake ever finished, over and over. The ref indirection was already
+  // correct (that's why these can safely have an empty dependency array);
+  // only the missing memoization on the wrapper itself was the bug.
+  const onSnapshotStable = React.useCallback((snapshot: MatchSnapshotMessage) => onSnapshotRef.current?.(snapshot), []);
+  const stopAbortCountdownStable = React.useCallback((manual?: boolean) => stopAbortRef.current?.(manual), []);
+  const authoritativeActorForColorStable = React.useCallback((color: PieceColor) => actorForColorRef.current!(color), []);
+
   const matchConnection = useMatchConnection({
     sets: {
       setAuthoritativeMatchId,
@@ -565,9 +577,9 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     applyGatewayGuestSessions,
     applyGatewayMatchClaims,
     applyGatewayAccountSessions,
-    onSnapshot: (snapshot) => onSnapshotRef.current?.(snapshot),
-    stopAbortCountdown: (manual) => stopAbortRef.current?.(manual),
-    authoritativeActorForColor: (color) => actorForColorRef.current!(color),
+    onSnapshot: onSnapshotStable,
+    stopAbortCountdown: stopAbortCountdownStable,
+    authoritativeActorForColor: authoritativeActorForColorStable,
   });
   const {
     manualRetryRef,
@@ -898,6 +910,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     authoritativeRematchBusy,
     primaryAccountIdentity,
     activePage,
+    pathname,
     friendsAttentionCount,
     inboxUnreadCount,
     whiteHand,

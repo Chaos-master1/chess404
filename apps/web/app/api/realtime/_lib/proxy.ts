@@ -7,6 +7,11 @@ const backendBaseUrl = resolveBackendBaseUrl(
 // match-service pins this handler for five minutes per request.
 const UPSTREAM_TIMEOUT_MS = 8000;
 
+// The Fetch spec forbids a body on these statuses -- Response's constructor
+// throws "Invalid response status code" if body is anything other than
+// null, even an empty string. match-service's presence handler returns 204.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
 export async function proxyRealtime(request: Request, path: string): Promise<Response> {
   const url = `${backendBaseUrl}${path}`;
   const init: RequestInit = {
@@ -24,7 +29,7 @@ export async function proxyRealtime(request: Request, path: string): Promise<Res
     const upstream = await fetch(url, init);
     const body = await upstream.text();
 
-    return new Response(body, {
+    return new Response(NULL_BODY_STATUSES.has(upstream.status) ? null : body, {
       status: upstream.status,
       headers: filterResponseHeaders(upstream.headers),
     });

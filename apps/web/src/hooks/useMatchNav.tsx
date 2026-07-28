@@ -32,6 +32,7 @@ interface UseMatchNavProps {
   authoritativeRematchBusy: boolean;
   primaryAccountIdentity: { accountId?: string; sessionToken?: string };
   activePage: string;
+  pathname: string;
   friendsAttentionCount: number;
   inboxUnreadCount: number;
   whiteHand: GameCard[];
@@ -71,7 +72,7 @@ export function useMatchNav(props: UseMatchNavProps) {
   const {
     authoritativeMatchId, authoritativeStatus, hostedRuntime, viewerSeat, authoritativeLive,
     authoritativeRematchBusy,
-    primaryAccountIdentity, activePage, friendsAttentionCount, inboxUnreadCount,
+    primaryAccountIdentity, activePage, pathname, friendsAttentionCount, inboxUnreadCount,
     whiteHand, blackHand, over, winner, authoritativeFinishReason, hmc, stale, insuf, mate,
     whiteProfile, blackProfile, matchSeatMeta,
     authoritativeDisconnectGraceFor, authoritativeDisconnectGraceDeadline,
@@ -148,10 +149,17 @@ export function useMatchNav(props: UseMatchNavProps) {
   );
   const activeSecondaryNav = secondaryNavItems.some((item) => item.key === activePage);
   const showReturnToMatch = !!hostedRuntime && Boolean(authoritativeMatchId);
-  const showPlayHub = hostedRuntime
+  // The URL updates synchronously on router.push, but activePage only
+  // follows it a render later (App.tsx syncs pathname -> activePage in a
+  // useEffect). Without this check, the one frame where pathname is already
+  // "/match/<id>" but activePage is still the previous page (e.g. "Play")
+  // rendered the play hub -- including the difficulty picker -- at the match
+  // URL for that single frame, a visible flash on every match launch.
+  const isMatchRoute = pathname?.startsWith('/match/') ?? false;
+  const showPlayHub = !isMatchRoute && (hostedRuntime
     ? (activePage === 'Play' || activePage === 'Modes' || activePage === 'Queue' || activePage === 'Lobbies')
-    : (activePage === 'Modes' || activePage === 'Queue' || activePage === 'Lobbies');
-  const showBoardSurface = activePage === 'Match' || (!hostedRuntime && activePage === 'Play');
+    : (activePage === 'Modes' || activePage === 'Queue' || activePage === 'Lobbies'));
+  const showBoardSurface = isMatchRoute || activePage === 'Match' || (!hostedRuntime && activePage === 'Play');
   const controlledSeat = hostedRuntime ? viewerSeat : null;
   const topSeat: PieceColor = controlledSeat === 'black' ? 'white' : 'black';
   const bottomSeat: PieceColor = controlledSeat === 'black' ? 'black' : 'white';

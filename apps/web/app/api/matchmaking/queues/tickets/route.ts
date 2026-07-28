@@ -12,6 +12,10 @@ const platformBaseUrl = resolveBackendBaseUrl(
   'http://platform-service.railway.internal:8080',
 );
 
+// The Fetch spec forbids a body on these statuses -- Response's constructor
+// throws if body is anything other than null, even an empty string.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
 interface QueueTicketCreatePayload {
   guestId?: string;
   queue?: 'casual' | 'rated';
@@ -133,7 +137,7 @@ async function forwardMatchmaking(request: Request, payload: QueueTicketCreatePa
   });
 
   const body = await upstream.text();
-  return new Response(body, {
+  return new Response(NULL_BODY_STATUSES.has(upstream.status) ? null : body, {
     status: upstream.status,
     headers: filterResponseHeaders(upstream.headers),
   });

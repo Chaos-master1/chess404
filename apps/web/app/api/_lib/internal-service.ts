@@ -5,6 +5,13 @@
 const UPSTREAM_TIMEOUT_MS = 8000;
 const UPSTREAM_STREAM_TIMEOUT_MS = 15000;
 
+// The Fetch spec forbids a body on these statuses -- the Response
+// constructor throws "Invalid response status code" if body is anything
+// other than null, even an empty string. Presence heartbeats return 204,
+// so every 204 through this proxy crashed into the catch block below and
+// surfaced as a misleading "gateway is unreachable" 502.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
 interface InternalServiceProxyConfig {
   explicitUrl?: string;
   fallbackUrl: string;
@@ -42,7 +49,7 @@ export async function proxyInternalService(request: Request, path: string, confi
     if (resolved.warning) {
       headers.set('x-chess404-proxy-warning', resolved.warning);
     }
-    return new Response(body, {
+    return new Response(NULL_BODY_STATUSES.has(upstream.status) ? null : body, {
       status: upstream.status,
       headers,
     });
@@ -73,7 +80,7 @@ export async function proxyInternalServiceStream(request: Request, path: string,
     if (resolved.warning) {
       headers.set('x-chess404-proxy-warning', resolved.warning);
     }
-    return new Response(upstream.body, {
+    return new Response(NULL_BODY_STATUSES.has(upstream.status) ? null : upstream.body, {
       status: upstream.status,
       headers,
     });
