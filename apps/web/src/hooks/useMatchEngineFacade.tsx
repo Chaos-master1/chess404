@@ -793,7 +793,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     });
   // bootstrapFnRef intentionally omitted — stable ref, avoids re-fire when inline-object deps recreate bootstrapAuthoritativeMatch
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guestProfilesReady, whiteProfile, bootstrapFallback, pathname]);
+  }, [guestProfilesReady, whiteProfile, bootstrapFallback, pathname, hostedRuntime]);
 
   React.useEffect(() => {
     if (!guestProfilesReady || whiteProfile || bootstrapFallback) return;

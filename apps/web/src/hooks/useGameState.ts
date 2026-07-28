@@ -189,7 +189,7 @@ export function useGameState(
       derivedViewerSeat = matchWhiteOk ? 'white' : matchBlackOk ? 'black' : (storedMeta ?? null);
     }
     if (!derivedViewerSeat && storedMeta) derivedViewerSeat = storedMeta;
-    if (hostedRuntime && !derivedViewerSeat && match.matchId) {
+    if (!derivedViewerSeat && match.matchId) {
       derivedViewerSeat = 'white';
     }
     authSetters.setViewerSeat(derivedViewerSeat);
