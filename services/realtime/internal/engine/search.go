@@ -209,7 +209,24 @@ func SearchWithTime(state *contracts.MatchState, maxDepth int, tt *Transposition
 			bestMove.Score = score
 		}
 
-		pv := []string{MoveToUCI(move)}
+		// alphaBeta legitimately returns a nil move at the root -- a
+		// mid-iteration stop-check firing before any move is tried, a
+		// transposition-table hit short-circuiting move generation entirely,
+		// or checkmate/stalemate being detected directly -- and this used to
+		// pass that nil straight into MoveToUCI, which dereferences it
+		// unconditionally. That crashed the calling goroutine with a nil
+		// pointer panic; since the computer opponent runs unrecovered inside
+		// match-service's own process, an unlucky position was a path to
+		// taking down every match on the instance, not just the one search.
+		// Found by the gauntlet harness in TestGauntletDetectsAKnownStrengthGap,
+		// which is the first thing to have played this many real, undirected
+		// moves against this code.
+		moveUCI := ""
+		if move != nil {
+			moveUCI = MoveToUCI(move)
+		}
+
+		pv := []string{moveUCI}
 		pvMoves := extractPV(state, tt, turn == "white", 8)
 		for _, pm := range pvMoves {
 			if pm != "" {
@@ -218,7 +235,7 @@ func SearchWithTime(state *contracts.MatchState, maxDepth int, tt *Transposition
 		}
 		EmitSearchEvent(SearchEvent{
 			Type: EventDepthDone, Depth: depth, Score: score,
-			Move: MoveToUCI(move), Nodes: nodes, Pv: pv,
+			Move: moveUCI, Nodes: nodes, Pv: pv,
 			NPS: int(float64(nodes) / time.Since(searchStart).Seconds()),
 		})
 	}
