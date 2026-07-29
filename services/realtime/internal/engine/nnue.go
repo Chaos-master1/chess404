@@ -67,13 +67,15 @@ func nnueEnabled() bool {
 	}
 }
 
+const nnueWeightsFilename = "nnue_weights.bin"
+
 func init() {
 	defaultNNUE = &NNUE{}
 	// The error is intentionally non-fatal: the weights file is optional and
 	// EvaluateWithModifiers falls back to the hand-crafted evaluation. It is
 	// logged rather than swallowed so a missing/corrupt file is diagnosable
 	// instead of silently degrading the engine, which is what happened before.
-	if err := defaultNNUE.Load("nnue_weights.bin"); err != nil {
+	if err := defaultNNUE.Load(nnueWeightsFilename); err != nil {
 		log.Printf("engine: NNUE weights not loaded (%v); using hand-crafted evaluation", err)
 	}
 }
@@ -86,10 +88,27 @@ func NewNNUE() *NNUE {
 	}
 }
 
+// Load reads the weights file. It tries, in order: an explicit absolute path
+// from CHESS404_NNUE_WEIGHTS_PATH, then `path` and a couple of relative
+// fallbacks for `go test`/local dev, where the working directory is
+// predictably services/realtime or one of its subpackages.
+//
+// The relative fallbacks alone are why this silently never found the file in
+// production: match-service.Dockerfile's runtime image never copied
+// nnue_weights.bin in at all, and even if it had, the container's working
+// directory is / (CMD ["/usr/local/bin/match-service"]), which none of
+// "nnue_weights.bin", "../nnue_weights.bin", "../../nnue_weights.bin" resolve
+// from -- so Load failed every time, silently (the error was swallowed
+// entirely until the surrounding init() fix). The env var gives deployment a
+// way to point at wherever the file actually lands that doesn't depend on
+// guessing the working directory.
 func (n *NNUE) Load(path string) error {
 	var data []byte
 	var err error
 	paths := []string{path, "../" + path, "../../" + path}
+	if explicit := strings.TrimSpace(os.Getenv("CHESS404_NNUE_WEIGHTS_PATH")); explicit != "" {
+		paths = append([]string{explicit}, paths...)
+	}
 	for _, p := range paths {
 		data, err = os.ReadFile(p)
 		if err == nil {

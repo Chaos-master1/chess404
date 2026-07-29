@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/chess404/realtime/internal/contracts"
@@ -8,6 +10,58 @@ import (
 
 func startingBoard() [][]*contracts.Piece {
 	return MatchStateFromFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").Board
+}
+
+// TestNNUELoadPrefersExplicitPathEnvVar is a regression test for why
+// production never found the weights file at all: match-service's runtime
+// image never shipped it, and even if it had, the container's working
+// directory (/) doesn't satisfy any of Load's relative fallback paths. The
+// fix ships the file to a fixed location and points CHESS404_NNUE_WEIGHTS_PATH
+// at it (see match-service.Dockerfile) -- this pins that the env var actually
+// takes priority over the relative guesses, using a file the relative
+// fallbacks could not possibly find (an isolated temp directory).
+func TestNNUELoadPrefersExplicitPathEnvVar(t *testing.T) {
+	// Load rejects any header shape other than the package's fixed
+	// architecture (nnueInputSize/nnueHiddenSize/nnueHidden2Size), so the test
+	// fixture has to declare those exact dimensions -- an arbitrary small
+	// shape fails validation before the env var precedence being tested here
+	// is even reached.
+	weights := buildMinimalNNUEWeights(t, nnueInputSize, nnueHiddenSize, nnueHidden2Size)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "weights.bin")
+	if err := os.WriteFile(path, weights, 0o644); err != nil {
+		t.Fatalf("failed to write test weights file: %v", err)
+	}
+	t.Setenv("CHESS404_NNUE_WEIGHTS_PATH", path)
+
+	n := &NNUE{}
+	if err := n.Load("this-relative-path-does-not-exist.bin"); err != nil {
+		t.Fatalf("expected Load to find the file via CHESS404_NNUE_WEIGHTS_PATH, got %v", err)
+	}
+	if !n.Loaded() {
+		t.Fatal("expected the network to report loaded after a successful Load")
+	}
+}
+
+// buildMinimalNNUEWeights constructs the smallest byte-valid weights file for
+// the given (in, h1, h2) shape: a 12-byte header followed by
+// W0(in*h1) B0(h1) W1(h1*h2) B1(h2) W2(h2*1) B2(1) little-endian float32s, all
+// zero. Mirrors the layout nnue.go's Load parses.
+func buildMinimalNNUEWeights(t *testing.T, in, h1, h2 int) []byte {
+	t.Helper()
+	floatCount := in*h1 + h1 + h1*h2 + h2 + h2*1 + 1
+	buf := make([]byte, 12+floatCount*4)
+	putU32 := func(off int, v int) {
+		buf[off] = byte(v)
+		buf[off+1] = byte(v >> 8)
+		buf[off+2] = byte(v >> 16)
+		buf[off+3] = byte(v >> 24)
+	}
+	putU32(0, in)
+	putU32(4, h1)
+	putU32(8, h2)
+	return buf
 }
 
 func TestNNUELoaded(t *testing.T) {
