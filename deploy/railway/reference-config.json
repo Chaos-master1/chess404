@@ -1,0 +1,91 @@
+{
+  "_readme": "This file is NOT read by Railway. Railway's config-as-code schema (docs.railway.com/config-as-code) only supports {$schema, build, deploy, environments} for a SINGLE service/deployment -- it has no top-level 'services' map, no top-level 'cron' object, and no top-level 'volumes' object, so a repo-root railway.json shaped like this one is silently ignored in full. This file previously lived at the repo root and looked authoritative but did nothing. It's kept here (deploy/railway/) purely as a human-readable record of the per-service settings that are actually live -- applied directly via the Railway dashboard/API instead, and verified against each service's real config as of 2026-07-29. If you change a value here, you must also change it in the Railway dashboard (or via the Railway MCP/CLI) for it to take effect -- editing this file alone changes nothing.",
+  "services": {
+    "gateway": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "deploy/railway/gateway.Dockerfile"
+      },
+      "deploy": {
+        "healthcheckPath": "/readyz",
+        "healthcheckTimeout": 10,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 3,
+        "numReplicas": 1
+      }
+    },
+    "match-service": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "deploy/railway/match-service.Dockerfile"
+      },
+      "deploy": {
+        "healthcheckPath": "/readyz",
+        "healthcheckTimeout": 10,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 3,
+        "numReplicas": 1,
+        "_note": "Keep at 1 replica. Multi-instance is wired (Redis state hydration + cross-instance broadcast relay in internal/match/state.go), but has not had a two-replica soak test."
+      }
+    },
+    "platform-service": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "deploy/railway/platform-service.Dockerfile"
+      },
+      "deploy": {
+        "healthcheckPath": "/readyz",
+        "healthcheckTimeout": 10,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 3,
+        "numReplicas": 1
+      },
+      "_liveBackendsVerified2026-07-29": {
+        "accountStoreBackend": "postgres",
+        "guestStoreBackend": "postgres",
+        "archiveBackend": "postgres",
+        "claimStoreBackend": "redis"
+      }
+    },
+    "matchmaking-service": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "deploy/railway/matchmaking-service.Dockerfile"
+      },
+      "deploy": {
+        "healthcheckPath": "/readyz",
+        "healthcheckTimeout": 10,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 3,
+        "numReplicas": 1
+      }
+    },
+    "analysis-worker": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "deploy/railway/Dockerfile.analysis-worker"
+      },
+      "deploy": {
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 3
+      }
+    },
+    "web": {
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "deploy/railway/web.Dockerfile"
+      },
+      "deploy": {
+        "healthcheckPath": "/",
+        "healthcheckTimeout": 10,
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 3,
+        "numReplicas": 1
+      },
+      "_note": "NEXT_PUBLIC_SENTRY_DSN: ${{Sentry.DSN}} was never live -- no Sentry service exists in this project. Remove or provision Sentry before relying on this."
+    }
+  },
+  "_notImplemented": {
+    "postgres-backup-cron": "deploy/postgres-backup.sh exists and works standalone (pg_dump + optional S3 upload if AWS_S3_BUCKET is set), but nothing schedules it, and without AWS_S3_BUCKET it would write into a Railway container's ephemeral disk -- a 'backup' that vanishes on the next redeploy, which is worse than no backup because it looks like protection that isn't there. Railway has a first-party alternative that needs neither this script nor S3 credentials: Postgres service -> Backups tab -> Enable PITR (pgBackRest-based, ~4 week restore window, billed via existing bucket-storage/egress meters). That's a dashboard click with a real (if small) cost, so it needs a human decision, not an autonomous change."
+  }
+}
