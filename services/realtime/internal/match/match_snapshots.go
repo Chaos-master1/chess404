@@ -110,6 +110,22 @@ func RedactSnapshotSecrets(resp contracts.MatchSnapshotResponse) contracts.Match
 	return resp
 }
 
+// FilterSnapshotForColor scopes a snapshot response to a single seat's point
+// of view: clears both seat secrets, clears the opposing seat's hand (and any
+// fog zone / invisible piece belonging to the opposing seat), and drops
+// card_drawn events that belong to the opposing seat. This is exactly what
+// deliverToSubscribersLocked already computes per-recipient for the ongoing
+// WebSocket broadcast stream -- any other path that hands a single seat a
+// snapshot built for internal use (join, apply-intent's HTTP response, an
+// intent.success WS acknowledgement) must call this too, or that seat's
+// opponent's hidden hand and card draws ride along in the payload. Pass ""
+// for color to get the fully-redacted, no-hand spectator view.
+func FilterSnapshotForColor(resp contracts.MatchSnapshotResponse, color string) contracts.MatchSnapshotResponse {
+	resp.Match = filterStateForColor(resp.Match, color)
+	resp.Events = filterEventsForColor(resp.Events, color)
+	return resp
+}
+
 func filterStateForColor(state contracts.MatchState, color string) contracts.MatchState {
 	state = redactSeatSecrets(state)
 	if color == "white" {

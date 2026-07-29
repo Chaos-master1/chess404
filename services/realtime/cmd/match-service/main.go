@@ -35,7 +35,6 @@ func redactToken(s string) string {
 
 func main() {
 	envutil.Require("PLATFORM_SERVICE_INTERNAL_URL", "ALLOWED_ORIGINS", "INTERNAL_SERVICE_TOKEN")
-	mux := http.NewServeMux()
 	archive, err := openArchiveStore()
 	if err != nil {
 		log.Fatalf("failed to initialize archive store: %v", err)
@@ -83,6 +82,49 @@ func main() {
 	// 64 KiB is more than enough for any intent we accept (typical intents are
 	// well under 1 KiB). Excess closes the connection.
 	const wsReadLimit int64 = 64 * 1024
+
+	mux := buildMatchServiceMux(service, archive, upgrader, wsReadLimit)
+
+	internalToken := internalServiceToken()
+	addr := httputil.ListenAddr("MATCH_SERVICE_ADDR", 8081)
+	srv := &http.Server{
+		Addr: addr,
+		// CORS middleware wraps CSRF so that even CSRF-rejected responses
+		// carry the proper Access-Control-Allow-* headers. Otherwise the
+		// browser reports "blocked by CORS policy" on legitimate cross-origin
+		// POSTs whose Origin happens to mismatch the same-origin self check.
+		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("match-service", rate_limit.SecurityHeadersMiddleware(httputil.LimitBody(withCORS(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl, internalToken)(rate_limit.MiddlewareWithTrustedBypass(rl, rate_limit.DefaultAPIWindow, rate_limit.DefaultAPILimit, internalToken)(mux)), httputil.ParseAllowedOrigins(), internalToken))))))),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	go func() {
+		log.Printf("match-service listening on %s", addr)
+		service.Log.Info("listening", "addr", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %v", err)
+		}
+	}()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("match-service shutting down...")
+	service.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
+	finArchive.Drain()
+	rl.Close()
+}
+
+// buildMatchServiceMux registers every HTTP/WS route. Extracted from main so
+// tests can exercise real handlers (redaction, auth, routing) via ServeHTTP
+// instead of only unit-testing the underlying match.Service methods -- the
+// join-secret-leak regression this func's join handler guards against would
+// not have been caught by a test that never went through this wiring.
+func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchiveStore, upgrader websocket.Upgrader, wsReadLimit int64) *http.ServeMux {
+	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -230,6 +272,11 @@ func main() {
 				writeMatchError(w, err)
 				return
 			}
+			// JoinMatchSeat's raw response is an internal, full-visibility
+			// snapshot (both hands, both secrets) -- scope it to the seat that
+			// just joined before it leaves the process, exactly like the
+			// ongoing WS broadcast stream already scopes each subscriber's copy.
+			resp.Match = match.FilterSnapshotForColor(resp.Match, resp.SeatColor)
 			httputil.WriteJSON(w, http.StatusOK, resp)
 			return
 		}
@@ -247,7 +294,10 @@ func main() {
 				writeMatchError(w, err)
 				return
 			}
-			httputil.WriteJSON(w, http.StatusOK, match.RedactSnapshotSecrets(resp))
+			// Same as join: ApplyIntent's raw response carries both hands.
+			// Scope it to whichever seat submitted the intent.
+			actorColor := colorForPlayerID(resp.Match, req.Intent.PlayerID)
+			httputil.WriteJSON(w, http.StatusOK, match.FilterSnapshotForColor(resp, actorColor))
 			return
 		}
 
@@ -290,37 +340,7 @@ func main() {
 		httputil.WriteError(w, http.StatusNotFound, "route not found")
 	})
 
-	internalToken := internalServiceToken()
-	addr := httputil.ListenAddr("MATCH_SERVICE_ADDR", 8081)
-	srv := &http.Server{
-		Addr: addr,
-		// CORS middleware wraps CSRF so that even CSRF-rejected responses
-		// carry the proper Access-Control-Allow-* headers. Otherwise the
-		// browser reports "blocked by CORS policy" on legitimate cross-origin
-		// POSTs whose Origin happens to mismatch the same-origin self check.
-		Handler:           rate_limit.NewHeaderStrippingMiddleware("X-Powered-By")(httputil.WithRecovery(httputil.WithLogging("match-service", rate_limit.SecurityHeadersMiddleware(httputil.LimitBody(withCORS(rate_limit.CSRFMiddleware(rate_limit.GlobalIPRateLimitMiddleware(rl, internalToken)(rate_limit.MiddlewareWithTrustedBypass(rl, rate_limit.DefaultAPIWindow, rate_limit.DefaultAPILimit, internalToken)(mux)), httputil.ParseAllowedOrigins(), internalToken))))))),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
-	go func() {
-		log.Printf("match-service listening on %s", addr)
-		service.Log.Info("listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %v", err)
-		}
-	}()
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("match-service shutting down...")
-	service.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(ctx)
-	finArchive.Drain()
-	rl.Close()
+	return mux
 }
 
 type finalizingArchiveStore struct {
@@ -518,6 +538,25 @@ func writeMatchError(w http.ResponseWriter, err error) {
 	}
 }
 
+// colorForPlayerID reports which seat playerID occupies in state, by public
+// guest ID match only (no secret check -- callers already have a snapshot
+// obtained via a secret-verified call, and only need this to know which
+// hand/events to keep, not to authorize anything).
+func colorForPlayerID(state contracts.MatchState, playerID string) string {
+	playerID = strings.TrimSpace(playerID)
+	if playerID == "" {
+		return ""
+	}
+	switch {
+	case strings.EqualFold(strings.TrimSpace(state.WhiteGuestID), playerID):
+		return "white"
+	case strings.EqualFold(strings.TrimSpace(state.BlackGuestID), playerID):
+		return "black"
+	default:
+		return ""
+	}
+}
+
 type intentResult struct {
 	err  error
 	resp contracts.MatchSnapshotResponse
@@ -665,7 +704,11 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 					return
 				}
 			} else {
-				if err := writeEnvelope(conn, "intent.success", result.resp); err != nil {
+				// result.resp is ApplyIntent's raw internal snapshot (both
+				// hands) -- scope it to this connection's own seat before it
+				// goes out, same as every other path that serializes one.
+				scoped := match.FilterSnapshotForColor(result.resp, colorForPlayerID(result.resp.Match, playerID))
+				if err := writeEnvelope(conn, "intent.success", scoped); err != nil {
 					return
 				}
 			}

@@ -442,7 +442,7 @@ func (s *Service) Subscribe(matchID string, playerID string, playerSecret string
 	initial := contracts.MatchSnapshotResponse{
 		Match:      filterStateForColor(baseInitial.Match, playerColor),
 		ReplayHead: baseInitial.ReplayHead,
-		Events:     baseInitial.Events,
+		Events:     filterEventsForColor(baseInitial.Events, playerColor),
 	}
 
 	unsubscribe := func() {
