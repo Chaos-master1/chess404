@@ -36,6 +36,18 @@ func IsPublicReplayableMatch(entry MatchArchiveEntry) bool {
 	if !strings.EqualFold(strings.TrimSpace(entry.Status), "finished") {
 		return false
 	}
+	// Private invite games, vs-computer games, and aborted games (almost
+	// always a handful of moves or none at all) aren't meant to be public
+	// spectacle -- only real finished games between two human opponents.
+	if strings.EqualFold(strings.TrimSpace(entry.Queue), "direct") {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(string(entry.ModeID)), "computer") {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(entry.FinishReason), "abort") {
+		return false
+	}
 	return strings.TrimSpace(entry.MatchID) != ""
 }
 
@@ -44,6 +56,9 @@ func IsPublicLiveSpectateMatch(entry MatchArchiveEntry) bool {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(entry.Queue), "direct") {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(string(entry.ModeID)), "computer") {
 		return false
 	}
 	if strings.TrimSpace(entry.Winner) != "" || strings.TrimSpace(entry.FinishReason) != "" {
