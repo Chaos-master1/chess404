@@ -175,6 +175,12 @@ func (n *NNUE) Evaluate(board [][]*contracts.Piece, lavas []contracts.LavaSquare
 	return int(output * 100)
 }
 
+// forward applies one linear layer plus ReLU. This must match
+// scripts/train_nnue.py's NNUE.forward exactly (`torch.clamp(h, min=0)`,
+// i.e. plain ReLU) -- it previously used leaky ReLU with an arbitrary,
+// undocumented slope of 0.1 for negative sums, so every negative-preactivation
+// unit in a trained network computed a different function at inference than
+// the one it was fit to compute under.
 func (n *NNUE) forward(input, output, hidden []float32) {
 	if hidden != nil {
 		for j := range hidden {
@@ -187,7 +193,7 @@ func (n *NNUE) forward(input, output, hidden []float32) {
 			}
 			sum += n.Biases[0][j]
 			if sum < 0 {
-				sum *= 0.1
+				sum = 0
 			}
 			hidden[j] = sum
 		}
@@ -203,7 +209,7 @@ func (n *NNUE) forward(input, output, hidden []float32) {
 		}
 		sum += n.Biases[1][j]
 		if sum < 0 {
-			sum *= 0.1
+			sum = 0
 		}
 		output[j] = sum
 	}
@@ -211,6 +217,24 @@ func (n *NNUE) forward(input, output, hidden []float32) {
 
 func (n *NNUE) Loaded() bool { return n.loaded }
 
+// encodeBoard sets one input feature per occupied square, at index
+// `(colorIdx*6 + typeIdx)*64 + sq` where `sq = boardRow*8 + col` and
+// `boardRow` follows THIS PACKAGE's own convention: board[0] is rank 1 (a1 is
+// square 0), matching every other Go function in this package (chess.go,
+// perft.go's FEN parser at `boardRow := 7 - fenRow`, search.go) and the wire
+// contract.MatchState.Board itself.
+//
+// scripts/train_nnue.py's encode_fen must produce the identical index for the
+// identical real-world square. A FEN's rank order is top-to-bottom (its first
+// '/'-separated segment is rank 8), the OPPOSITE of boardRow -- so the trainer
+// converts with the same `7 - fenRow` most Go FEN parsing already uses,
+// rather than using the raw FEN row directly. It did not do this: it computed
+// `sq = fen_row*8 + col`, i.e. treated a8 as square 0. Every trained weight
+// was therefore fit against the vertical mirror of the position this function
+// queries it on -- confirmed by TestNNUEBoardEncodingContractWithTrainer,
+// which pins the exact index this function must produce for a fixed
+// reference square, matching the corrected trainer formula in a comment
+// alongside it so the two can be checked against each other by inspection.
 func (n *NNUE) encodeBoard(board [][]*contracts.Piece, input []float32) {
 	for r := 0; r < 8; r++ {
 		for c := 0; c < 8; c++ {

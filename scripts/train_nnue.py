@@ -52,11 +52,23 @@ pieces_map = {
 
 
 def encode_fen(board_fen, white_hand=None, black_hand=None):
+    # A FEN's rank segments run top-to-bottom (rows[0] is rank 8), but the Go
+    # engine's board -- and its own NNUE encoder in nnue.go's encodeBoard --
+    # index board[0] as rank 1, i.e. a1 is square 0. This must convert between
+    # the two, or every square index computed here is the vertical mirror of
+    # what the Go engine will query the resulting weights on: `board_row =
+    # 7 - r` is the same conversion Go's own FEN parser uses at
+    # perft.go's `boardRow := 7 - fenRow`.
+    #
+    # See TestNNUEBoardEncodingContractWithTrainer in nnue_test.go, which pins
+    # the index this formula must produce for a fixed reference square so the
+    # two sides can be checked against each other by inspection.
     parts = board_fen.strip().split()
     fen_part = parts[0]
     rows = fen_part.split('/')
     features = np.zeros(INPUT_SIZE, dtype=np.float32)
     for r, row_str in enumerate(rows):
+        board_row = 7 - r
         col = 0
         for ch in row_str:
             if ch.isdigit():
@@ -64,14 +76,30 @@ def encode_fen(board_fen, white_hand=None, black_hand=None):
                 continue
             if ch in pieces_map:
                 ptype, color_idx = pieces_map[ch]
-                sq = r * 8 + col
+                sq = board_row * 8 + col
                 idx = (color_idx * PIECE_TYPES + ptype) * SQUARES + sq
                 features[idx] = 1.0
                 col += 1
 
+    # The 5 modifier input features (lava / bomb / fortress / fog / blackhole
+    # presence -- see nnue.go's encodeModifiers) are intentionally left at 0
+    # here, not set from `parts`. This is NOT the bug it looks like at first
+    # glance: a FEN string has nowhere to encode these -- they are Chess404
+    # card effects, not part of standard chess notation -- so there is no
+    # information in `board_fen` this function COULD read them from. The 0.1x
+    # leaky-ReLU / plain-ReLU mismatch and the board orientation flip (fixed
+    # above) were both self-contained bugs fixable by aligning two encoders
+    # that already receive the same information. This one is structural: the
+    # Go self-play pipeline that generates this trainer's input data
+    # (selfplay.go) deals hands but never actually plays a card, so no
+    # self-play position has ever had lava/fortress/bombs/fog/a blackhole on
+    # the board, and there is no real signal here to fit even if this
+    # function were wired up to read it. Fixing self-play to play cards is
+    # tracked separately (Phase 4 of the engine rebuild plan, "self-play that
+    # actually plays cards") -- do that first, thread the resulting per-position
+    # modifier state through load_go_training_data, and only then set these
+    # features here.
     mod_offset = PIECE_TYPES * COLORS * SQUARES
-    if len(parts) > 1 and parts[1] == 'w':
-        pass
 
     hand_offset = mod_offset + MODIFIERS
     if white_hand:
