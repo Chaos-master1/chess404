@@ -1023,6 +1023,7 @@ func (s *Service) computerWorker() {
 		case task := <-s.computerCh:
 			task.c.mu.Lock()
 			s.autoPlayComputerDepthLimited(task.c, task.now, 0)
+			s.ensureComputerMadeProgressLocked(task.c, task.now)
 			task.c.mu.Unlock()
 		}
 	}

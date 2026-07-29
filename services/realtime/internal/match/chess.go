@@ -118,6 +118,39 @@ func hasLegalMoveWithFusion(board [][]*contracts.Piece, color string, lastMove *
 	return false
 }
 
+// firstLegalMoveForColor returns any single legal from/to pair for color,
+// applying the same king-safety filter as hasLegalMoveWithFusion. Used as a
+// last-resort fallback so a caller can guarantee forward progress without
+// depending on search/card logic to decide on a move.
+func firstLegalMoveForColor(board [][]*contracts.Piece, color string, lastMove *contracts.LastMove, moved map[string]struct{}, fortressZones []contracts.FortressZone) (contracts.Square, contracts.Square, bool) {
+	opponent := opposite(color)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece == nil || piece.Color != color {
+				continue
+			}
+
+			from := contracts.Square{Row: r, Col: c}
+			moves := legalMovesWithFusion(board, from, lastMove, moved, fortressZones)
+			for _, move := range moves {
+				testBoard := cloneBoard(board)
+				moving := testBoard[from.Row][from.Col]
+				if moving == nil {
+					continue
+				}
+				captureEmptyDiagonal := moving.Type == "pawn" && move.Col != from.Col && pieceAt(board, move) == nil
+				movePiece(testBoard, from, move, moving, captureEmptyDiagonal)
+				king := findKing(testBoard, color)
+				if king != nil && !isAttackedWithFusion(testBoard, *king, opponent, fortressZones) {
+					return from, move, true
+				}
+			}
+		}
+	}
+	return contracts.Square{}, contracts.Square{}, false
+}
+
 func gameStatusWithFusion(board [][]*contracts.Piece, player string, lastMove *contracts.LastMove, moved map[string]struct{}, fortressZones []contracts.FortressZone) (bool, bool, bool) {
 	king := findKing(board, player)
 	if king == nil {

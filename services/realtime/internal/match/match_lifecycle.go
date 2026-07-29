@@ -99,6 +99,13 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 		c.computer = engine.NewComputerOpponent(diff, "black")
 		state.BlackGuestID = "computer"
 		state.BlackName = computerDisplayName(req.Difficulty)
+		// requireIntentColor demands a matching secret before it will
+		// authorize any intent for the black seat. The computer has no HTTP
+		// request to source one from, so it needs its own server-only
+		// secret here, exactly like a real player's -- never sent to any
+		// client, only ever compared against the intents this service
+		// manufactures for the computer itself in autoPlayComputerDepthLimited.
+		state.BlackPlayerSecret = generateComputerSeatSecret()
 		state.Clock.RunningFor = "white"
 		state.Clock.StartedAt = &startedAt
 		// status was computed above from the CreateMatchRequest, which never
@@ -438,6 +445,14 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 		s.Log.Info("match:autoPlay: computer returned NIL intent", "matchID", c.state.MatchID, "turn", c.state.Turn, "status", c.state.Status)
 		return
 	}
+	// The engine builds this intent internally -- it has no HTTP request to
+	// carry an identity, so PlayerID/PlayerSecret come back empty. Every
+	// applyX handler runs requireIntentColor(intent.PlayerID, ...) before
+	// touching state, so without this the computer's own move is rejected
+	// as "unrecognized player id" on every single attempt: the match starts
+	// active (fixed above) but the computer can then never move again.
+	computerIntent.PlayerID = c.state.BlackGuestID
+	computerIntent.PlayerSecret = c.state.BlackPlayerSecret
 
 	savedClock := c.state.Clock
 	savedStatus := c.state.Status
@@ -457,10 +472,22 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 	if c.state.PendingCard != nil && c.computer != nil {
 		targetIntent := c.computer.HandleSelectTarget(c.state)
 		if targetIntent != nil {
+			targetIntent.PlayerID = c.state.BlackGuestID
+			targetIntent.PlayerSecret = c.state.BlackPlayerSecret
 			targetEvents, targetErr := applyIntent(c.state, *targetIntent, now)
 			if targetErr == nil {
 				events = append(events, targetEvents...)
 			}
+		}
+		if c.state.PendingCard != nil {
+			// The engine played a card but couldn't find a target for its
+			// own mechanic (or the target it picked didn't resolve). Nothing
+			// else has mutated for this card yet -- abandon it rather than
+			// leave a dangling pending card that can never be resolved and
+			// would deadlock the match forever. ensureComputerMadeProgress,
+			// called once the recursion below unwinds, guarantees the turn
+			// still completes with a real move.
+			c.state.PendingCard = nil
 		}
 	}
 
@@ -481,6 +508,57 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 	if c.state.Turn == "black" && c.state.Status == "active" {
 		s.autoPlayComputerDepthLimited(c, now, depth+1)
 	}
+}
+
+// ensureComputerMadeProgressLocked runs once, after autoPlayComputerDepthLimited
+// has fully unwound. That function is best-effort: it can give up (MakeMove
+// returns nil, an intent is rejected, recursion hits its depth cap) while
+// leaving it black's turn. Whatever the reason, retrying the same card/search
+// decision tends to fail the same way again, so this does not retry it --
+// it falls back to any single legal move via firstLegalMoveForColor, which
+// depends only on this package's own board rules, so the match can never
+// deadlock waiting on a computer opponent that has nothing left to try.
+func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.Time) {
+	if c.computer == nil || c.state.Status != "active" || c.state.Turn != "black" {
+		return
+	}
+	c.state.PendingCard = nil
+
+	from, to, ok := firstLegalMoveForColor(c.state.Board, "black", c.state.LastMove, sliceToSet(c.state.Moved), c.state.FortressZones)
+	if !ok {
+		// No legal move at all -- genuine checkmate/stalemate, not a bug;
+		// the normal automatic-finish path (evaluated on the human's next
+		// intent) will resolve it.
+		return
+	}
+
+	intent := contracts.PlayerIntent{
+		Type:         "make_move",
+		MatchID:      c.state.MatchID,
+		PlayerID:     c.state.BlackGuestID,
+		PlayerSecret: c.state.BlackPlayerSecret,
+		From:         &from,
+		To:           &to,
+	}
+	events, err := applyIntent(c.state, intent, now)
+	if err != nil {
+		s.Log.Warn("match:autoPlay: fallback legal move rejected", "matchID", c.state.MatchID, "err", err.Error())
+		return
+	}
+
+	if shouldEvaluateAutomaticMatchFinish(c.state, intent) {
+		events = finalizeAutomaticMatchFinish(c.state, events, now, "computer")
+	}
+
+	timeoutEvents := syncClockForMutation(c.state, now)
+	events = append(events, timeoutEvents...)
+
+	c.events = append(c.events, events...)
+	snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), events, now)
+	persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
+	s.persistSnapshot(persistSnap)
+	s.saveToRedis(persistSnap, c.presence)
+	s.broadcastLocked(c, snapshot)
 }
 
 
@@ -638,6 +716,14 @@ func chooseSeed(_ int64, _ int64) int64 {
 		return int64(binary.LittleEndian.Uint64(buf[:]))
 	}
 	return time.Now().UnixNano()
+}
+
+func generateComputerSeatSecret() string {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		binary.LittleEndian.PutUint64(buf, uint64(time.Now().UnixNano()))
+	}
+	return hex.EncodeToString(buf)
 }
 
 func makeEvent(matchID, eventType string, now time.Time, actorID string, payload map[string]any) contracts.ResolvedEvent {

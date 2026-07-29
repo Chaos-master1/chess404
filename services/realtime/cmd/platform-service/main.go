@@ -535,7 +535,7 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(claim)
+		_ = json.NewEncoder(w).Encode(claim.IssuedView())
 	})
 
 	mux.HandleFunc("/api/platform/matches", func(w http.ResponseWriter, r *http.Request) {

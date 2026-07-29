@@ -68,3 +68,54 @@ func TestComputerMatchAcceptsFirstMove(t *testing.T) {
 		t.Fatalf("expected the match to remain active after a move, got status=%q", resp.Match.Status)
 	}
 }
+
+// Regression test for a second, deeper bug in the same "Play vs Computer"
+// path: even after the match started active, ComputerOpponent.MakeMove and
+// HandleSelectTarget never populated PlayerID/PlayerSecret on the intents
+// they returned -- they have no HTTP request to source an identity from --
+// so requireIntentColor rejected every one of the computer's own moves as
+// "unrecognized player id", forever, on every attempt, regardless of
+// whether the computer chose a card or a normal move. The match would sit
+// on "black to move" permanently after the human's first move. Separately,
+// even once the computer's intents carry a valid identity, a card whose
+// target the engine cannot resolve (HandleSelectTarget returns nil) used to
+// leave PendingCard dangling forever with no fallback. This asserts the
+// computer's reply always lands within a bounded, short time regardless.
+func TestComputerRepliesToOpeningMove(t *testing.T) {
+	service := NewService()
+	now := time.Now()
+
+	service.CreateMatch(contracts.CreateMatchRequest{
+		MatchID:           "computer_replies",
+		ModeID:            contracts.MatchModeComputer,
+		Difficulty:        "medium",
+		WhiteGuestID:      "guest_white",
+		WhitePlayerSecret: "white-secret",
+	}, now)
+
+	if _, err := service.ApplyIntent(contracts.PlayerIntent{
+		Type:         "make_move",
+		MatchID:      "computer_replies",
+		PlayerID:     "guest_white",
+		PlayerSecret: "white-secret",
+		From:         &contracts.Square{Row: 1, Col: 1},
+		To:           &contracts.Square{Row: 3, Col: 1},
+	}, now); err != nil {
+		t.Fatalf("expected the opening move to be accepted, got error: %v", err)
+	}
+
+	// autoPlayComputer dispatches to a worker goroutine, so the computer's
+	// reply is asynchronous -- poll briefly instead of asserting instantly.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		snap, err := service.GetMatchForViewer("computer_replies", "guest_white", "white-secret")
+		if err != nil {
+			t.Fatalf("GetMatchForViewer error: %v", err)
+		}
+		if snap.Match.Turn == "white" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("computer never replied to the opening move within 5s")
+}

@@ -1698,7 +1698,16 @@ func proxyGatewayIntent(w http.ResponseWriter, r *http.Request, config GatewayCo
 	}
 
 	req.Intent.MatchID = matchID
-	if strings.TrimSpace(req.Intent.PlayerClaimToken) != "" {
+	// A claim token is a one-time bootstrap into playerID+playerSecret --
+	// resolving it deletes it from the store (see MatchClaimStore.GetByToken),
+	// so it must only be consumed when the caller doesn't already have a
+	// secret. authoritativeActorForColor on the client sends both fields
+	// together once a secret is known; resolving the token unconditionally
+	// here meant whichever of presence/intents happened to fire first
+	// consumed the single-use token, and every other call -- still sending
+	// that same now-dead token alongside a perfectly valid secret -- was
+	// rejected as "unknown room claim token".
+	if strings.TrimSpace(req.Intent.PlayerSecret) == "" && strings.TrimSpace(req.Intent.PlayerClaimToken) != "" {
 		claim, errMessage := resolveGatewayClaimByToken(config, client, matchID, strings.TrimSpace(req.Intent.PlayerClaimToken), r)
 		if errMessage != "" {
 			httputil.WriteError(w, http.StatusUnauthorized, errMessage)
@@ -1732,7 +1741,10 @@ func proxyGatewayPresence(w http.ResponseWriter, r *http.Request, config Gateway
 		}
 	}
 
-	if strings.TrimSpace(req.PlayerClaimToken) != "" {
+	// See the matching comment in proxyGatewayIntent: a claim token is
+	// single-use (MatchClaimStore.GetByToken deletes on read), so it must
+	// only be resolved when the caller doesn't already have a secret.
+	if strings.TrimSpace(req.PlayerSecret) == "" && strings.TrimSpace(req.PlayerClaimToken) != "" {
 		claim, errMessage := resolveGatewayClaimByToken(config, client, matchID, strings.TrimSpace(req.PlayerClaimToken), r)
 		if errMessage != "" {
 			httputil.WriteError(w, http.StatusUnauthorized, errMessage)

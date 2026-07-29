@@ -1437,6 +1437,81 @@ func TestGatewayPresenceProxyResolvesClaimToken(t *testing.T) {
 	}
 }
 
+// Regression test: MatchClaimStore.GetByToken deletes the claim on every
+// successful lookup (a claim token is meant as a one-time bootstrap into
+// playerId+playerSecret). The client's authoritativeActorForColor sends
+// both the already-known secret AND the claim token together on every
+// presence/intent call once a secret has been resolved once. The proxy used
+// to resolve via claim token unconditionally whenever one was present,
+// ignoring an already-valid secret -- so the first presence heartbeat (or
+// intent, whichever raced ahead) consumed the single-use token, and every
+// subsequent call with that same now-dead token was rejected as "unknown
+// room claim token" even though a perfectly good secret was sent right
+// alongside it. This asserts the resolve endpoint is never even called when
+// a secret is already present.
+func TestGatewayPresenceProxyPrefersKnownSecretOverClaimToken(t *testing.T) {
+	matchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/matches/room-presence-secret/presence" {
+			http.NotFound(w, r)
+			return
+		}
+		var req contracts.MatchPresenceRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("expected forwarded presence body to decode, got %v", err)
+		}
+		if req.PlayerSecret != "already-known-secret" || req.PlayerID != "guest_already_known" || req.PlayerClaimToken != "stale-claim-token" {
+			t.Fatalf("expected gateway to forward the known secret unchanged, got %#v", req)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer matchServer.Close()
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/platform/match-claims/resolve":
+			t.Fatalf("expected gateway to skip claim token resolution when a secret is already known")
+		case "/api/platform/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "service": "platform-service"})
+		case "/api/platform/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{"profiles": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer platformServer.Close()
+
+	matchmakingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "service": "matchmaking-service"})
+		case "/api/queues/default":
+			_ = json.NewEncoder(w).Encode(map[string]any{"queue": "rated", "status": "open"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer matchmakingServer.Close()
+
+	mux := buildGatewayMux(GatewayConfig{
+		MatchServiceURL:       matchServer.URL,
+		PlatformServiceURL:    platformServer.URL,
+		MatchmakingServiceURL: matchmakingServer.URL,
+	}, matchServer.Client())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/matches/room-presence-secret/presence", strings.NewReader(`{
+		"playerId":"guest_already_known",
+		"playerSecret":"already-known-secret",
+		"playerClaimToken":"stale-claim-token"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected gateway presence proxy to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestGatewayForwardsOriginHeaderToBackendServices verifies that when the
 // browser sends a request to the gateway, the gateway forwards a clean
 // Origin header to the backend services (platform/match). This is required

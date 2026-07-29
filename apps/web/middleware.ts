@@ -36,9 +36,18 @@ function extraConnectOrigins(): string[] {
 }
 
 function buildCsp(nonce: string): string {
+  // Next.js dev mode's webpack runtime evaluates each module through eval()
+  // (its HMR/source-map devtool) -- blocking eval there isn't a security
+  // property, it just crashes the entire client bundle before React can
+  // render anything. Production's build never uses eval(), so this stays
+  // scoped to non-production and the CSP shipped to users is unchanged.
+  const scriptSrc =
+    process.env.NODE_ENV === 'production'
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`;
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",

@@ -154,7 +154,7 @@ export function sendIntentViaWs(matchId: string, intent: Omit<PlayerIntent, 'mat
 export async function applyIntent(matchId: string, intent: Omit<PlayerIntent, 'matchId'>): Promise<MatchSnapshotMessage> {
   const latestSeq = latestSeqByMatch.get(matchId) ?? 0;
   const intentWithSeq = { ...intent, expectedSeqNum: latestSeq } as Omit<PlayerIntent, 'matchId'>;
-  const response = await fetch(buildIntentUrl(matchId, intent), {
+  const response = await fetch(buildIntentUrl(matchId), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -178,7 +178,7 @@ export async function sendMatchPresenceHeartbeat(
   matchId: string,
   presence: MatchPresenceRequest,
 ): Promise<void> {
-  const response = await fetch(buildPresenceUrl(matchId, presence), {
+  const response = await fetch(buildPresenceUrl(matchId), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -491,24 +491,25 @@ function toWebSocketBaseUrl(input: string): string {
   return input;
 }
 
-function buildIntentUrl(matchId: string, intent?: Partial<PlayerIntent>): string {
-  if (typeof intent?.playerClaimToken === 'string' && intent.playerClaimToken.trim()) {
-    return `${gatewayBaseUrl}/matches/${matchId}/intents`;
-  }
-  if (/\/api\/realtime$/i.test(httpBaseUrl)) {
-    return `${httpBaseUrl}/matches/${matchId}`;
-  }
-  return `${httpBaseUrl}/matches/${matchId}/intents`;
+// Both of these always route through the gateway now. The gateway's
+// intent/presence proxies handle a caller that already has a resolved
+// playerSecret (forwards it directly) just as well as one that only has a
+// playerClaimToken (resolves it first) -- see proxyGatewayIntent /
+// proxyGatewayPresence in cmd/gateway/main.go. The apps/web/app/api/realtime
+// routes' POST handlers are deliberately local-dev-only (they 404 for any
+// non-localhost request with "use the gateway match flow"), and there is no
+// POST .../presence route under /api/realtime at all -- so whenever a caller
+// here had a secret but no claim token, this used to build a URL under
+// httpBaseUrl ("/api/realtime/matches/{id}/presence") that 404s
+// unconditionally, breaking presence (and, via the equivalent intents
+// branch, move submission) for every match reached through a path that
+// resolves identity without a claim token, e.g. queue-matched pairing.
+function buildIntentUrl(matchId: string): string {
+  return `${gatewayBaseUrl}/matches/${matchId}/intents`;
 }
 
-function buildPresenceUrl(matchId: string, presence?: Partial<MatchPresenceRequest>): string {
-  if (typeof presence?.playerClaimToken === 'string' && presence.playerClaimToken.trim()) {
-    return `${gatewayBaseUrl}/matches/${matchId}/presence`;
-  }
-  if (/\/api\/realtime$/i.test(httpBaseUrl)) {
-    return `${httpBaseUrl}/matches/${matchId}/presence`;
-  }
-  return `${httpBaseUrl}/matches/${matchId}/presence`;
+function buildPresenceUrl(matchId: string): string {
+  return `${gatewayBaseUrl}/matches/${matchId}/presence`;
 }
 
 function buildMatchFetchHeaders(): Headers {

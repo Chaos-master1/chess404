@@ -2469,6 +2469,71 @@ func TestMatchClaimsReturnSeatSecretForOwnedSeat(t *testing.T) {
 	}
 }
 
+// Regression test: the gateway calls /api/platform/match-claims immediately
+// after creating a brand new match (every "Play vs Computer" game, every
+// fresh private invite, every queued pairing), before that match has ever
+// been synced into the archive store. That first-ever claim for a match
+// went through a third code path that json.Encode'd the raw MatchSeatClaim
+// instead of claim.IssuedView() -- and MatchSeatClaim.PlayerSecret is
+// `json:"-"` precisely so a claim can't leak a secret if it's ever
+// serialized by accident elsewhere. The result: every new match's claim
+// response carried playerSecret:"" to the browser, so the client's own
+// first presence heartbeat -- sent moments later using that empty secret --
+// was rejected as unauthorized, and every new match looked disconnected
+// from the very first frame.
+func TestMatchClaimsReturnSeatSecretForBrandNewMatch(t *testing.T) {
+	tempDir := t.TempDir()
+	archive, err := platform.NewMatchArchiveStore(filepath.Join(tempDir, "archive.json"))
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = archive.Close() }()
+	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
+	if err != nil {
+		t.Fatalf("expected guest store to initialize, got %v", err)
+	}
+	defer func() { _ = guests.Close() }()
+	claims := platform.NewMatchClaimStore()
+
+	session, err := guests.EnsureGuest("guest_white_new", "")
+	if err != nil {
+		t.Fatalf("expected guest session creation to succeed, got %v", err)
+	}
+
+	// No archive.Upsert call -- this match does not exist in the archive
+	// yet, exactly like the gateway's create-private-match / create-computer-
+	// match flow, which calls match-claims before (or racing) the archive
+	// sync call.
+	body := `{"matchId":"brand_new_match","guestId":"` + session.Guest.GuestID + `","sessionSecret":"` + session.SessionSecret + `",` +
+		`"seatColor":"white","playerSecret":"` + session.SessionSecret + `",` +
+		`"whiteGuestId":"` + session.Guest.GuestID + `","blackGuestId":"computer",` +
+		`"queue":"direct","modeId":"computer","matchStatus":"active"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/platform/match-claims", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	buildTestPlatformMux(t, archive, guests, claims).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected match claim to succeed, got status %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		SeatColor    string `json:"seatColor"`
+		PlayerSecret string `json:"playerSecret"`
+		PlayerID     string `json:"playerId"`
+		ClaimToken   string `json:"claimToken"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected match claim response to decode, got %v", err)
+	}
+	if response.PlayerSecret == "" {
+		t.Fatalf("expected a non-empty playerSecret for a brand new match's claim, got %#v", response)
+	}
+	if response.SeatColor != "white" || response.PlayerSecret != session.SessionSecret || response.PlayerID != session.Guest.GuestID || response.ClaimToken == "" {
+		t.Fatalf("unexpected match claim response %#v", response)
+	}
+}
+
 func TestMatchClaimsRejectUnauthorizedGuestSession(t *testing.T) {
 	tempDir := t.TempDir()
 	archive, err := platform.NewMatchArchiveStore(filepath.Join(tempDir, "archive.json"))

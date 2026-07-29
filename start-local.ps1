@@ -45,7 +45,9 @@ Start-Chess404Window `
         "ACCOUNT_STORE_BACKEND='file'",
         "ACCOUNT_STORE_PATH='data/accounts.json'",
         "ACCOUNT_STORE_SQLITE_PATH='data/accounts.sqlite'",
-        "MATCH_CLAIM_STORE_BACKEND='memory'"
+        "MATCH_CLAIM_STORE_BACKEND='memory'",
+        "ALLOWED_ORIGINS='http://localhost:3000'",
+        "INTERNAL_SERVICE_TOKEN='local-dev-internal-token'"
     ) `
     -Command "& '$goExe' run .\cmd\platform-service"
 
@@ -60,7 +62,10 @@ Start-Chess404Window `
         "MATCH_ARCHIVE_BACKEND='file'",
         "MATCH_ARCHIVE_PATH='data/match-archive.json'",
         "MATCH_ARCHIVE_SQLITE_PATH='data/match-archive.sqlite'",
-        "PLATFORM_SERVICE_INTERNAL_URL='http://127.0.0.1:8083'"
+        "PLATFORM_SERVICE_INTERNAL_URL='http://127.0.0.1:8083'",
+        "ALLOWED_ORIGINS='http://localhost:3000'",
+        "INTERNAL_SERVICE_TOKEN='local-dev-internal-token'",
+        "MATCH_STATE_BACKEND='memory'"
     ) `
     -Command "& '$goExe' run .\cmd\match-service"
 
@@ -76,7 +81,9 @@ Start-Chess404Window `
         "MATCHMAKING_TICKET_STORE_PATH='data/matchmaking-tickets.json'",
         "MATCHMAKING_TICKET_STORE_SQLITE_PATH='data/matchmaking-tickets.sqlite'",
         "MATCH_SERVICE_INTERNAL_URL='http://127.0.0.1:8082'",
-        "PLATFORM_SERVICE_INTERNAL_URL='http://127.0.0.1:8083'"
+        "PLATFORM_SERVICE_INTERNAL_URL='http://127.0.0.1:8083'",
+        "ALLOWED_ORIGINS='http://localhost:3000'",
+        "INTERNAL_SERVICE_TOKEN='local-dev-internal-token'"
     ) `
     -Command "& '$goExe' run .\cmd\matchmaking-service"
 
@@ -90,7 +97,9 @@ Start-Chess404Window `
         "GATEWAY_ADDR=':8090'",
         "MATCH_SERVICE_INTERNAL_URL='http://127.0.0.1:8082'",
         "PLATFORM_SERVICE_INTERNAL_URL='http://127.0.0.1:8083'",
-        "MATCHMAKING_SERVICE_INTERNAL_URL='http://127.0.0.1:8084'"
+        "MATCHMAKING_SERVICE_INTERNAL_URL='http://127.0.0.1:8084'",
+        "ALLOWED_ORIGINS='http://localhost:3000'",
+        "INTERNAL_SERVICE_TOKEN='local-dev-internal-token'"
     ) `
     -Command "& '$goExe' run .\cmd\gateway"
 
