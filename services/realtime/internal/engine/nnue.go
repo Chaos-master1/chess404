@@ -2,8 +2,10 @@ package engine
 
 import (
 	"encoding/binary"
+	"log"
 	"math"
 	"os"
+	"strings"
 
 	"github.com/chess404/realtime/internal/contracts"
 )
@@ -39,9 +41,40 @@ var mechanicNames = [37]string{
 
 var defaultNNUE *NNUE
 
+// nnueEnabled reports whether the learned evaluation should be used instead of
+// the hand-crafted one.
+//
+// It defaults to OFF, deliberately. The shipped nnue_weights.bin does not
+// evaluate positions correctly: the trainer encodes the board with a8 as square
+// 0 (scripts/train_nnue.py) while this package encodes a1 as square 0, so the
+// network is queried on the vertical mirror of what it was fitted to; the
+// trainer fits plain ReLU while inference below applies leaky ReLU with slope
+// 0.1; the 5 modifier inputs are never set during training but are set here;
+// and self-play deals hands without ever playing a card, so the 74 card
+// features were fit against a target they cannot influence. The observable
+// result is that the symmetric starting position scores about -322cp and
+// removing a black pawn makes White's score worse.
+//
+// Until those are fixed and the network is retrained, the hand-crafted
+// evaluation is strictly better. Set CHESS404_ENGINE_NNUE=1 to opt in for
+// experiments -- Evaluate is still wired up and exercised by tests.
+func nnueEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHESS404_ENGINE_NNUE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func init() {
 	defaultNNUE = &NNUE{}
+	// The error is intentionally non-fatal: the weights file is optional and
+	// EvaluateWithModifiers falls back to the hand-crafted evaluation. It is
+	// logged rather than swallowed so a missing/corrupt file is diagnosable
+	// instead of silently degrading the engine, which is what happened before.
 	if err := defaultNNUE.Load("nnue_weights.bin"); err != nil {
+		log.Printf("engine: NNUE weights not loaded (%v); using hand-crafted evaluation", err)
 	}
 }
 

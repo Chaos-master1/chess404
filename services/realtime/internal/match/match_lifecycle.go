@@ -454,6 +454,41 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 	computerIntent.PlayerID = c.state.BlackGuestID
 	computerIntent.PlayerSecret = c.state.BlackPlayerSecret
 
+	// Re-stamp the clock now that the search is finished.
+	//
+	// `now` arrives here frozen at the moment the HUMAN's intent was received
+	// (ApplyIntent -> autoPlayComputer -> computerCh -> computerWorker), but
+	// MakeMove above just spent up to several seconds thinking. Applying the
+	// move with that stale timestamp got the accounting exactly backwards:
+	// syncClockForMutation saw `elapsed = now - StartedAt == 0` and returned
+	// early, so the engine's think time was never deducted from Black; then
+	// applyMove set Clock.StartedAt = now, backdated by the whole search, so
+	// the next sync (the 1s broadcast tick, or White's next move) computed
+	// `realNow - now` -- which *includes* the engine's search -- and charged
+	// all of it to White. Every millisecond the engine thought came out of its
+	// opponent's clock.
+	//
+	// Each recursion level re-stamps after its own search, so multi-move turns
+	// (double-move cards) are charged correctly too.
+	now = time.Now().UTC()
+
+	// Charge the engine for the time it just spent thinking, BEFORE applying
+	// its move -- the same order ApplyIntent uses for a human intent.
+	// applyMove resets Clock.StartedAt and hands the clock to White, so the
+	// sync further down (which is all this function used to do) always
+	// measured zero elapsed time and the engine effectively moved for free.
+	// If it burned its last second thinking, it flags here, exactly as a human
+	// would.
+	if timeoutEvents := syncClockForMutation(c.state, now); len(timeoutEvents) > 0 {
+		c.events = append(c.events, timeoutEvents...)
+		snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), timeoutEvents, now)
+		persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
+		s.persistSnapshot(persistSnap)
+		s.saveToRedis(persistSnap, c.presence)
+		s.broadcastLocked(c, snapshot)
+		return
+	}
+
 	savedClock := c.state.Clock
 	savedStatus := c.state.Status
 	savedWinner := c.state.Winner

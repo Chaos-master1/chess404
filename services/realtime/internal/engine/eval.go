@@ -124,15 +124,30 @@ func ClassicalEval(board [][]*contracts.Piece, turn string, lavas []contracts.La
 	return base + mods
 }
 
+// EvaluateWithModifiers is the single evaluation entry point used by the search
+// (razoring at search.go and quiescence stand-pat).
+//
+// CONTRACT: the returned score is in centipawns and is ALWAYS absolute --
+// positive means "good for White" regardless of whose turn it is. Callers that
+// want a side-to-move-relative score negate it themselves; both call sites in
+// search.go already do exactly that (`if !maximizing { v = -v }`, where
+// `maximizing == (state.Turn == "white")` at every ply). Returning a
+// side-relative score from here therefore double-negates for Black.
+//
+// This used to `return 0` whenever the network was unavailable, with no
+// fallback -- and the weights file is not shipped in the runtime image, so in
+// production every position evaluated to exactly 0 and the search ran on move
+// ordering and mate scores alone. The hand-crafted evaluation was sitting right
+// here, fully implemented, reachable only from tests. It is now the fallback,
+// so this function can never again silently return "all positions are equal".
 func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece, whiteHand, blackHand []contracts.GameCard) int {
-	if defaultNNUE == nil || !defaultNNUE.Loaded() {
-		return 0
+	if nnueEnabled() && defaultNNUE != nil && defaultNNUE.Loaded() {
+		// No negation here -- see the CONTRACT note above. The previous
+		// `if turn == "black" { nnue = -nnue }` combined with the caller's own
+		// negation to invert every evaluation for Black.
+		return defaultNNUE.Evaluate(board, lavas, fortresses, bombs, nil, nil, whiteHand, blackHand)
 	}
-	nnue := defaultNNUE.Evaluate(board, lavas, fortresses, bombs, nil, nil, whiteHand, blackHand)
-	if turn == "black" {
-		nnue = -nnue
-	}
-	return nnue
+	return ClassicalEval(board, turn, lavas, fortresses, bombs)
 }
 
 func baseEval(board [][]*contracts.Piece, turn string) int {
@@ -178,7 +193,15 @@ func baseEval(board [][]*contracts.Piece, turn string) int {
 
 			total := value + posBonus
 
-			if piece.Color == turn {
+			// White-positive, like every other term below. This used to be
+			// `piece.Color == turn`, which made material and PST -- by far the
+			// dominant terms -- side-to-move relative while pawn structure,
+			// mobility, king safety, rook files and the rest stayed
+			// White-positive. The two halves of the evaluation then carried
+			// opposite signs whenever Black was to move, so the positional
+			// terms were subtracted from the material verdict instead of added
+			// to it.
+			if piece.Color == "white" {
 				score += total
 			} else {
 				score -= total
@@ -218,16 +241,15 @@ func baseEval(board [][]*contracts.Piece, turn string) int {
 	whiteKing := findKingPos(board, "white")
 	blackKing := findKingPos(board, "black")
 
+	// Both king-shield terms are White-positive, matching every other term.
+	// They were previously flipped by `turn`, which made a side's own king
+	// safety count for it only on its own move.
 	if whiteKing != nil {
 		whiteKingShield := kingShieldScore(board, whiteKing.Row, whiteKing.Col, "white")
 		if isEndgame {
 			whiteKingShield = 0
 		}
-		if turn == "white" {
-			score += whiteKingShield
-		} else {
-			score -= whiteKingShield
-		}
+		score += whiteKingShield
 	}
 
 	if blackKing != nil {
@@ -235,11 +257,7 @@ func baseEval(board [][]*contracts.Piece, turn string) int {
 		if isEndgame {
 			blackKingShield = 0
 		}
-		if turn == "white" {
-			score -= blackKingShield
-		} else {
-			score += blackKingShield
-		}
+		score -= blackKingShield
 	}
 
 	score += developmentBonus(board, "white")
