@@ -100,6 +100,56 @@ func NewComputerOpponent(difficulty Difficulty, color string) *ComputerOpponent 
 	}
 }
 
+// computerPlayableMechanics is every mechanic HandleSelectTarget/findBestTarget
+// can actually carry through to a successful select_target (or that needs no
+// target at all). It is deliberately a strict subset of the 37 mechanics --
+// see the comment on filterHandForComputer for why this exists.
+var computerPlayableMechanics = map[string]bool{
+	// Zero-target: applyPlayCard resolves these immediately, no PendingCard,
+	// so there is nothing to fail.
+	"doublemove_same": true, "doublemove_diff": true, "undo": true,
+	"reverse": true, "mirror": true, "gambler": true, "radar": true, "cheater": true,
+	// One-target, and findBestTarget has a real case for it below.
+	"freeze": true, "sniper": true, "badsniper": true, "demotehim": true,
+	"mindcontrol": true, "borrow": true, "parasite": true, "demote": true,
+	"promotehim": true, "promote": true, "clone": true, "invisible": true,
+}
+
+// filterHandForComputer returns a copy of hand containing only mechanics the
+// computer can actually complete.
+//
+// This is the fix for a live bug where the computer, once it happened to draw
+// and select ANY of the other 17 mechanics, got permanently stuck: a card
+// only leaves the hand when select_target successfully resolves it, but for
+// these 17, HandleSelectTarget/findBestTarget either has no matching case at
+// all (lavaground, fakepiece -- dispatched but unimplemented), never dispatches
+// in the first place (shield, unabomber, fortress, fog_village, teleport, jump,
+// blackhole, joker, smallsacrifice, bigsacrifice), or submits a SelectionID
+// (swapme/swapus/swaphim/halffuse/fullfusion's PendingCard.Options[0]) that
+// applySelectTarget never accepts. match_lifecycle.go's
+// autoPlayComputerDepthLimited abandons the pending card on failure but never
+// removes it from hand, so on the VERY NEXT turn the same card scores highest
+// again, gets picked again, fails again -- forever. Because
+// Difficulty.ShouldPlayCard is a deterministic score threshold with no
+// randomness for Medium/Hard/Expert (Beginner/Easy additionally roll dice
+// against it, which is why they mostly didn't show this), once one of these
+// difficulties drew one of the 17, it got stuck making zero real chess moves
+// for the rest of the game -- burning all 5 retry levels on the same dead
+// card every turn and falling through every time to
+// ensureComputerMadeProgressLocked's firstLegalMoveForColor fallback, a raw
+// board scan starting from the a-file. That fallback IS the reported "pushes
+// the a-file pawn, then b-file, then c-file..." behavior; it was never a
+// pawn-specific bug, it was the total absence of any other move being tried.
+func filterHandForComputer(hand []contracts.GameCard) []contracts.GameCard {
+	filtered := make([]contracts.GameCard, 0, len(hand))
+	for _, card := range hand {
+		if computerPlayableMechanics[card.Mechanic] {
+			filtered = append(filtered, card)
+		}
+	}
+	return filtered
+}
+
 func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.PlayerIntent {
 	co.mu.Lock()
 	defer co.mu.Unlock()
@@ -108,8 +158,15 @@ func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.Pla
 		return nil
 	}
 
-	if co.cardEval.ShouldPlayCard(state, co.Color == "white") {
-		play := co.cardEval.BestCardToPlay(state, co.Color == "white")
+	// Card scoring reads WhiteHand/BlackHand straight off state; evaluate
+	// against a filtered copy so a card the computer cannot complete is never
+	// even a candidate, instead of catching the failure after the fact.
+	cardState := *state
+	cardState.WhiteHand = filterHandForComputer(state.WhiteHand)
+	cardState.BlackHand = filterHandForComputer(state.BlackHand)
+
+	if co.cardEval.ShouldPlayCard(&cardState, co.Color == "white") {
+		play := co.cardEval.BestCardToPlay(&cardState, co.Color == "white")
 		if play != nil && co.Difficulty.ShouldPlayCard(play.Card, play.Score) {
 			return &contracts.PlayerIntent{
 				Type:     "play_card",
