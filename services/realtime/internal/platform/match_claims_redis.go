@@ -64,25 +64,29 @@ func (s *redisClaimStore) load() (map[string]MatchSeatClaim, error) {
 	return claims, nil
 }
 
-func (s *redisClaimStore) persist(claims map[string]MatchSeatClaim) error {
-	ctx := context.Background()
-	pipe := s.client.TxPipeline()
-	pipe.Del(ctx, s.key)
-
-	if len(claims) > 0 {
-		payload := make(map[string]any, len(claims))
-		for claimKey, claim := range claims {
-			encoded, err := json.Marshal(claim)
-			if err != nil {
-				return err
-			}
-			payload[claimKey] = string(encoded)
-		}
-		pipe.HSet(ctx, s.key, payload)
+// saveOne writes a single claim field. Every MatchClaimStore mutation
+// (Put, a token-based Get-and-consume, an expiry prune) used to call the old
+// persist(entireMap) here, which did a full HDEL-the-whole-hash-then-rewrite
+// on every single write regardless of how many claims actually changed --
+// against a request-quota-limited managed Redis (Upstash free tier), that
+// multiplies real traffic by the size of the whole claims table on every
+// write instead of costing one command for the one field that changed.
+func (s *redisClaimStore) saveOne(key string, claim MatchSeatClaim) error {
+	encoded, err := json.Marshal(claim)
+	if err != nil {
+		return err
 	}
+	return s.client.HSet(context.Background(), s.key, key, string(encoded)).Err()
+}
 
-	_, err := pipe.Exec(ctx)
-	return err
+// deleteMany removes the given fields in one HDEL round trip.
+func (s *redisClaimStore) deleteMany(keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	args := make([]string, len(keys))
+	copy(args, keys)
+	return s.client.HDel(context.Background(), s.key, args...).Err()
 }
 
 func (s *redisClaimStore) close() error {

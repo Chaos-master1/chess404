@@ -58,7 +58,8 @@ type MatchClaimStats struct {
 type claimPersistence interface {
 	backend() string
 	load() (map[string]MatchSeatClaim, error)
-	persist(map[string]MatchSeatClaim) error
+	saveOne(key string, claim MatchSeatClaim) error
+	deleteMany(keys []string) error
 	close() error
 }
 
@@ -151,7 +152,7 @@ func (s *MatchClaimStore) GetByToken(matchID, claimToken string) (MatchSeatClaim
 	for key, claim := range s.claims {
 		if claim.MatchID == matchID && subtle.ConstantTimeCompare([]byte(claim.ClaimToken), []byte(claimToken)) == 1 {
 			delete(s.claims, key)
-			_ = s.persistLocked()
+			_ = s.deleteManyLocked([]string{key})
 			return claim, true
 		}
 	}
@@ -198,7 +199,7 @@ func (s *MatchClaimStore) Put(claim MatchSeatClaim) error {
 	}
 	claim.ExpiresAt = now.Add(s.ttl)
 	s.claims[key] = claim
-	return s.persistLocked()
+	return s.persistOneLocked(key, claim)
 }
 
 func (s *MatchClaimStore) Delete(matchID, guestID string) error {
@@ -211,7 +212,7 @@ func (s *MatchClaimStore) Delete(matchID, guestID string) error {
 		return nil
 	}
 	delete(s.claims, key)
-	return s.persistLocked()
+	return s.deleteManyLocked([]string{key})
 }
 
 func matchClaimKey(matchID, guestID string) string {
@@ -234,21 +235,28 @@ func normalizeMatchClaimTTL(ttl time.Duration) time.Duration {
 }
 
 func (s *MatchClaimStore) pruneExpiredLocked(now time.Time) {
-	changed := false
+	var expired []string
 	for key, claim := range s.claims {
 		if !claim.ExpiresAt.IsZero() && !claim.ExpiresAt.After(now) {
 			delete(s.claims, key)
-			changed = true
+			expired = append(expired, key)
 		}
 	}
-	if changed {
-		_ = s.persistLocked()
+	if len(expired) > 0 {
+		_ = s.deleteManyLocked(expired)
 	}
 }
 
-func (s *MatchClaimStore) persistLocked() error {
+func (s *MatchClaimStore) persistOneLocked(key string, claim MatchSeatClaim) error {
 	if s.store == nil {
 		return nil
 	}
-	return s.store.persist(s.claims)
+	return s.store.saveOne(key, claim)
+}
+
+func (s *MatchClaimStore) deleteManyLocked(keys []string) error {
+	if s.store == nil || len(keys) == 0 {
+		return nil
+	}
+	return s.store.deleteMany(keys)
 }

@@ -116,6 +116,10 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
   } = sets;
 
   const manualRetryRef = React.useRef<(() => void) | null>(null);
+  // Tracks whether the WebSocket is currently delivering snapshots, read
+  // (not depended-on) by the fallback poll effect below so that effect can
+  // skip its network call whenever the primary channel is already healthy.
+  const wsConnectedRef = React.useRef(false);
 
   const createAuthoritativeRematchRoom = React.useCallback(async () => {
     const matchId = authoritativeMatchIdRef.current;
@@ -211,27 +215,32 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
 
     const { disconnect, retry } = connectToMatchStream(matchId, {
       onSnapshot: (snapshot) => {
+        wsConnectedRef.current = true;
         setCardMsg(prev => prev === STREAM_RECONNECT_MESSAGE ? '' : prev);
         onSnapshot(snapshot);
       },
       onStatusChange: (status) => {
         if (status === 'connected') {
+          wsConnectedRef.current = true;
           setCardMsg(prev => prev === STREAM_RECONNECT_MESSAGE ? '' : prev);
           setStreamDisconnected(false);
           return;
         }
         if (status === 'reconnecting') {
+          wsConnectedRef.current = false;
           setAuthoritativeLive(false);
           setStreamDisconnected(false);
           setCardMsg(STREAM_RECONNECT_MESSAGE);
         }
         if (status === 'disconnected') {
+          wsConnectedRef.current = false;
           setAuthoritativeLive(false);
           setStreamDisconnected(true);
           setCardMsg('Live match stream lost. Click "Reconnect" to try again.');
         }
       },
       onError: () => {
+        wsConnectedRef.current = false;
         setAuthoritativeLive(false);
       }
     }, streamIdentity);
@@ -239,6 +248,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     manualRetryRef.current = retry;
 
     return () => {
+      wsConnectedRef.current = false;
       disconnect();
     };
   }, [authoritativeActorForColor, authoritativeMatchId, onSnapshot, hostedRuntime, stopAbortCountdown, viewerSeat]);
@@ -288,12 +298,22 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
   }, [authoritativeActorForColor, authoritativeMatchId, hostedRuntime, over, viewerSeat]);
 
   // ── Fallback polling fetch effect ─────────────────────────────────────────
+  // This used to fire unconditionally: every open match tab issued a GET
+  // every 5s forever, even while the WebSocket was healthy and already
+  // delivering the same snapshot for free. Against a request-quota-limited
+  // backing store (every request also runs through Redis-backed rate
+  // limiting), that is a continuous, multiplying-by-open-tabs cost for data
+  // the client already had. It is a *fallback* -- only skip it while
+  // wsConnectedRef says the primary channel is actually delivering.
   React.useEffect(() => {
     if (!authoritativeMatchId || over) {
       return;
     }
 
     const interval = window.setInterval(() => {
+      if (wsConnectedRef.current) {
+        return;
+      }
       void fetchMatch(authoritativeMatchId).then(snapshot => {
         onSnapshot(snapshot);
       }).catch(() => {});
