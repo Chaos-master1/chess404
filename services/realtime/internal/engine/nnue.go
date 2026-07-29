@@ -9,29 +9,24 @@ import (
 )
 
 type NNUE struct {
-	// Input layer: piece-square encoding (12 piece types * 64 squares) + modifier flags
-	InputSize  int
-	HiddenSize int
-	// Weights[0] = input→hidden (InputSize × HiddenSize)
-	// Biases[0] = hidden bias (HiddenSize)
-	// Weights[1] = hidden→output (HiddenSize × 1)
-	// Biases[1] = output bias (1)
+	InputSize      int
+	HiddenSize     int
+	HiddenSize2    int
 	Weights [][]float32
 	Biases  [][]float32
 	loaded  bool
 }
 
 const (
-	nnuePieceTypes = 12  // 6 piece types * 2 colors
-	nnueSquares    = 64  // 8×8 board
-	nnueModifiers  = 5   // lava, bomb, fortress, fog, blackhole
-	nnueHandSize   = 74  // 37 mechanics * 2 players
+	nnuePieceTypes = 12
+	nnueSquares    = 64
+	nnueModifiers  = 5
+	nnueHandSize   = 74
 	nnueInputSize  = nnuePieceTypes*nnueSquares + nnueModifiers + nnueHandSize
-	nnueHiddenSize = 512
+	nnueHiddenSize = 1024
+	nnueHidden2Size = 1024
 )
 
-// mechanicNames defines the fixed ordering of hand card features for NNUE.
-// Must match the Python training script ordering exactly.
 var mechanicNames = [37]string{
 	"freeze", "shield", "sniper", "badsniper", "teleport", "jump",
 	"swapme", "swapus", "swaphim", "clone", "halffuse", "fullfusion",
@@ -47,14 +42,14 @@ var defaultNNUE *NNUE
 func init() {
 	defaultNNUE = &NNUE{}
 	if err := defaultNNUE.Load("nnue_weights.bin"); err != nil {
-		// No weights file — NNUE stays unloaded, eval falls back to hand-crafted.
 	}
 }
 
 func NewNNUE() *NNUE {
 	return &NNUE{
-		InputSize:  nnueInputSize,
-		HiddenSize: nnueHiddenSize,
+		InputSize:   nnueInputSize,
+		HiddenSize:  nnueHiddenSize,
+		HiddenSize2: nnueHidden2Size,
 	}
 }
 
@@ -71,30 +66,30 @@ func (n *NNUE) Load(path string) error {
 	if err != nil {
 		return err
 	}
-	if len(data) < 8 {
+	if len(data) < 12 {
 		return os.ErrClosed
 	}
 	inputSize := int(binary.LittleEndian.Uint32(data[0:4]))
 	hiddenSize := int(binary.LittleEndian.Uint32(data[4:8]))
-	if inputSize != nnueInputSize || hiddenSize != nnueHiddenSize {
+	hiddenSize2 := int(binary.LittleEndian.Uint32(data[8:12]))
+	if inputSize != nnueInputSize || hiddenSize != nnueHiddenSize || hiddenSize2 != nnueHidden2Size {
 		return os.ErrClosed
 	}
 	n.InputSize = inputSize
 	n.HiddenSize = hiddenSize
+	n.HiddenSize2 = hiddenSize2
 
-	offset := 8
-	n.Weights = make([][]float32, 2)
-	n.Biases = make([][]float32, 2)
+	offset := 12
+	n.Weights = make([][]float32, 3)
+	n.Biases = make([][]float32, 3)
 
 	n.Weights[0] = make([]float32, inputSize*hiddenSize)
 	n.Biases[0] = make([]float32, hiddenSize)
-	n.Weights[1] = make([]float32, hiddenSize)
-	n.Biases[1] = make([]float32, 1)
+	n.Weights[1] = make([]float32, hiddenSize*hiddenSize2)
+	n.Biases[1] = make([]float32, hiddenSize2)
+	n.Weights[2] = make([]float32, hiddenSize2)
+	n.Biases[2] = make([]float32, 1)
 
-	expected := inputSize*hiddenSize*4 + hiddenSize*4 + hiddenSize*4 + 4
-	if len(data)-offset < expected {
-		return os.ErrClosed
-	}
 	for i := range n.Weights[0] {
 		n.Weights[0][i] = math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
 		offset += 4
@@ -111,11 +106,18 @@ func (n *NNUE) Load(path string) error {
 		n.Biases[1][i] = math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
 		offset += 4
 	}
+	for i := range n.Weights[2] {
+		n.Weights[2][i] = math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+		offset += 4
+	}
+	for i := range n.Biases[2] {
+		n.Biases[2][i] = math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+		offset += 4
+	}
 	n.loaded = true
 	return nil
 }
 
-// Evaluate returns the NNUE evaluation from white's perspective.
 func (n *NNUE) Evaluate(board [][]*contracts.Piece, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece, fogs []contracts.FogZone, blackHoles []contracts.BlackHoleZone, whiteHand, blackHand []contracts.GameCard) int {
 	if !n.loaded {
 		return 0
@@ -125,37 +127,57 @@ func (n *NNUE) Evaluate(board [][]*contracts.Piece, lavas []contracts.LavaSquare
 	n.encodeModifiers(lavas, fortresses, bombs, fogs, blackHoles, input)
 	n.encodeHand(whiteHand, blackHand, input)
 
-	hidden := make([]float32, n.HiddenSize)
-	for j := range hidden {
-		var sum float32
-		base := j * n.InputSize
-		for i := 0; i < n.InputSize; i++ {
-			if input[i] != 0 {
-				sum += n.Weights[0][base+i] * input[i]
-			}
-		}
-		sum += n.Biases[0][j]
-		if sum < 0 {
-			sum *= 0.1 // ClippedReLU: leaky slope for negatives
-		}
-		hidden[j] = sum
-	}
-
+	h1 := make([]float32, n.HiddenSize)
+	n.forward(input, nil, h1)
+	h2 := make([]float32, n.HiddenSize2)
+	n.forward(h1, h2, nil)
 	var output float32
-	for j := range hidden {
-		if hidden[j] != 0 {
-			output += n.Weights[1][j] * hidden[j]
+	for j := range h2 {
+		if h2[j] != 0 {
+			output += n.Weights[2][j] * h2[j]
 		}
 	}
-	output += n.Biases[1][0]
+	output += n.Biases[2][0]
 
-	return int(output * 100) // Scale to centipawns
+	return int(output * 100)
 }
 
-// Loaded returns true if NNUE weights have been loaded.
+func (n *NNUE) forward(input, output, hidden []float32) {
+	if hidden != nil {
+		for j := range hidden {
+			var sum float32
+			base := j * n.InputSize
+			for i := 0; i < n.InputSize; i++ {
+				if input[i] != 0 {
+					sum += n.Weights[0][base+i] * input[i]
+				}
+			}
+			sum += n.Biases[0][j]
+			if sum < 0 {
+				sum *= 0.1
+			}
+			hidden[j] = sum
+		}
+		return
+	}
+	for j := range output {
+		var sum float32
+		base := j * n.HiddenSize
+		for i := 0; i < n.HiddenSize; i++ {
+			if input[i] != 0 {
+				sum += n.Weights[1][base+i] * input[i]
+			}
+		}
+		sum += n.Biases[1][j]
+		if sum < 0 {
+			sum *= 0.1
+		}
+		output[j] = sum
+	}
+}
+
 func (n *NNUE) Loaded() bool { return n.loaded }
 
-// encodeBoard fills the sparse piece-square input features.
 func (n *NNUE) encodeBoard(board [][]*contracts.Piece, input []float32) {
 	for r := 0; r < 8; r++ {
 		for c := 0; c < 8; c++ {
@@ -177,7 +199,6 @@ func (n *NNUE) encodeBoard(board [][]*contracts.Piece, input []float32) {
 	}
 }
 
-// encodeModifiers fills the board-modifier input features.
 func (n *NNUE) encodeModifiers(lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece, fogs []contracts.FogZone, blackHoles []contracts.BlackHoleZone, input []float32) {
 	modOffset := nnuePieceTypes * nnueSquares
 	if len(lavas) > 0 && modOffset < nnueInputSize {
@@ -201,7 +222,6 @@ func (n *NNUE) encodeModifiers(lavas []contracts.LavaSquare, fortresses []contra
 	}
 }
 
-// encodeHand fills the hand card input features (74 binary flags: 37 per side).
 func (n *NNUE) encodeHand(whiteHand, blackHand []contracts.GameCard, input []float32) {
 	handOffset := nnuePieceTypes*nnueSquares + nnueModifiers
 
@@ -243,5 +263,3 @@ func pieceNNUEIndex(ptype string) int {
 	}
 	return 0
 }
-
-

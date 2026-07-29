@@ -235,8 +235,8 @@ func TestEvaluateWithBombOwnPieceNearby(t *testing.T) {
 	//   (4,2) empty
 	//   (3,2) empty
 	//   (2,2) empty
-	score := EvaluateWithModifiers(b, "white", nil, nil, bombs, nil, nil)
-	plainScore := EvaluateWithModifiers(b, "white", nil, nil, nil, nil, nil)
+	score := ClassicalEval(b, "white", nil, nil, bombs)
+	plainScore := ClassicalEval(b, "white", nil, nil, nil)
 	if score >= plainScore {
 		t.Errorf("expected own-bomb penalty, bomb=%d plain=%d", score, plainScore)
 	}
@@ -253,8 +253,8 @@ func TestEvaluateWithBombEnemyNearby(t *testing.T) {
 	}
 	// Bomb at (3,3) owned by white. White queen AT (3,3), black rook at (4,3).
 	// ownBomb=true, p.Color!=turn → reward: rook(500)/4 = 125
-	score := EvaluateWithModifiers(b, "white", nil, nil, bombs, nil, nil)
-	plainScore := EvaluateWithModifiers(b, "white", nil, nil, nil, nil, nil)
+	score := ClassicalEval(b, "white", nil, nil, bombs)
+	plainScore := ClassicalEval(b, "white", nil, nil, nil)
 	if score <= plainScore {
 		t.Errorf("expected enemy-near-bomb reward, bomb=%d plain=%d", score, plainScore)
 	}
@@ -277,10 +277,8 @@ func TestEvaluateWithBombEnemyAdjacent(t *testing.T) {
 	//   ownBomb := bomb.OwnerColor == turn  // turn=white, OwnerColor=black → false
 	//   if ownBomb && p.Color == turn → penalty (own piece near own bomb)
 	//   else if ownBomb && p.Color != turn → reward (enemy near own bomb)
-	// Since ownBomb=false, neither triggers. So bomb doesn't affect score.
-	// But the bomb piece itself is on row 2, col 3 — black rook.
-	score := EvaluateWithModifiers(b, "white", nil, nil, bombs, nil, nil)
-	plainScore := EvaluateWithModifiers(b, "white", nil, nil, nil, nil, nil)
+	score := ClassicalEval(b, "white", nil, nil, bombs)
+	plainScore := ClassicalEval(b, "white", nil, nil, nil)
 	if score != plainScore {
 		t.Errorf("expected bomb to have no effect when not owned by turn, score=%d plain=%d", score, plainScore)
 	}
@@ -292,12 +290,7 @@ func TestEvaluateWithLava(t *testing.T) {
 	place(b, 7, 4, "king", "black")
 	place(b, 3, 3, "queen", "white")
 	lavas := []contracts.LavaSquare{{Row: 3, Col: 3, MovesLeft: 2}}
-	// White queen on lava should be penalized.
-	score := EvaluateWithModifiers(b, "white", lavas, nil, nil, nil, nil)
-	// Without lava, white queen = 900 + positional. With lava, penalty = 900/3 = 300.
-	// Stand-pat for white turn: white queen (900) minus nothing,
-	// then lava penalty subtracts 300 from white score.
-	// So score should be ~600ish.
+	score := ClassicalEval(b, "white", lavas, nil, nil)
 	if score > 700 {
 		t.Errorf("expected lava penalty to reduce score, got %d", score)
 	}

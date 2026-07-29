@@ -871,6 +871,28 @@ func (s *Service) broadcastLocked(c *matchContainer, snapshot contracts.MatchSna
 	deliverToSubscribersLocked(c, snapshot)
 }
 
+// broadcastLockedNoSeqBump delivers a snapshot without minting a new seq --
+// use it only when nothing about the authoritative game state (board, hands,
+// turn, status) actually changed, e.g. the once-a-second tick that exists
+// purely to keep the visible clock countdown smooth for connected viewers.
+// Reusing c.seqNum instead of calling nextSeqNum matters because ApplyIntent
+// rejects a move whenever the client's expectedSeqNum is behind the current
+// seq (staleness protection against acting on a board the client hasn't
+// seen yet) -- if this per-second cosmetic tick bumped that same counter,
+// any client whose WS delivery of that tick lagged its own next move click
+// by even a few tens of milliseconds would have its perfectly valid move
+// rejected as "stale", purely because of a broadcast that changed nothing
+// the move's legality depended on. That was happening in production: a
+// steady trickle of 409s roughly once every 10-30s of active play, each one
+// self-recovering (via the client's post-409 resync) but still visibly
+// failing every time it happened.
+func (s *Service) broadcastLockedNoSeqBump(c *matchContainer, snapshot contracts.MatchSnapshotResponse) {
+	snapshot.SeqNum = c.seqNum
+	snapshot.ReplayFrames = nil
+	s.publishToRedis(c.state.MatchID, snapshot)
+	deliverToSubscribersLocked(c, snapshot)
+}
+
 func deliverToSubscribersLocked(c *matchContainer, snapshot contracts.MatchSnapshotResponse) {
 	if len(c.subs) == 0 {
 		return
@@ -1011,7 +1033,11 @@ func (s *Service) processMatchBroadcast(c *matchContainer, now time.Time) {
 	if len(c.subs) == 0 {
 		return
 	}
-	s.broadcastLocked(c, buildSnapshotWithPresence(c.state, presence, len(c.events), nil, now))
+	// Nothing authoritative changed this tick (no timeout, no presence
+	// runtime event) -- this broadcast exists only so connected clients see
+	// the clock keep counting down. Must not advance seqNum; see
+	// broadcastLockedNoSeqBump.
+	s.broadcastLockedNoSeqBump(c, buildSnapshotWithPresence(c.state, presence, len(c.events), nil, now))
 }
 
 func (s *Service) computerWorker() {

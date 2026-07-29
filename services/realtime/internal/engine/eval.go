@@ -124,21 +124,15 @@ func ClassicalEval(board [][]*contracts.Piece, turn string, lavas []contracts.La
 	return base + mods
 }
 
-// EvaluateWithModifiers extends Evaluate with board-modifier scoring (lava, fortress, bombs).
-// Uses NNUE for base evaluation if loaded, then adds hand-crafted modifier adjustments.
 func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece, whiteHand, blackHand []contracts.GameCard) int {
-	var base int
-	if defaultNNUE != nil && defaultNNUE.Loaded() {
-		nnue := defaultNNUE.Evaluate(board, nil, nil, nil, nil, nil, whiteHand, blackHand)
-		if turn == "black" {
-			nnue = -nnue
-		}
-		base = nnue
-	} else {
-		base = baseEval(board, turn)
+	if defaultNNUE == nil || !defaultNNUE.Loaded() {
+		return 0
 	}
-	mods := modifierScore(board, turn, lavas, fortresses, bombs)
-	return base + mods
+	nnue := defaultNNUE.Evaluate(board, lavas, fortresses, bombs, nil, nil, whiteHand, blackHand)
+	if turn == "black" {
+		nnue = -nnue
+	}
+	return nnue
 }
 
 func baseEval(board [][]*contracts.Piece, turn string) int {
