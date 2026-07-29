@@ -7,11 +7,12 @@ import (
 )
 
 type CardEvaluator struct {
-	rng *rand.Rand
+	rng      *rand.Rand
+	engine   *NNUE
 }
 
 func NewCardEvaluator(rng *rand.Rand) *CardEvaluator {
-	return &CardEvaluator{rng: rng}
+	return &CardEvaluator{rng: rng, engine: defaultNNUE}
 }
 
 type CardPlay struct {
@@ -28,6 +29,20 @@ func (ce *CardEvaluator) EvaluateHand(hand []contracts.GameCard, state *contract
 		plays = append(plays, play)
 	}
 	return plays
+}
+
+// evalDiff computes the score change from playing a card by simulating the effect on a clone.
+func (ce *CardEvaluator) evalDiff(state *contracts.MatchState, color string, apply func(*contracts.MatchState)) int {
+	cloned := cloneMatchState(state)
+	apply(cloned)
+
+	base := Evaluate(state.Board, state.Turn, state.WhiteHand, state.BlackHand)
+	after := Evaluate(cloned.Board, cloned.Turn, cloned.WhiteHand, cloned.BlackHand)
+	mult := 1
+	if color == "black" {
+		mult = -1
+	}
+	return (after - base) * mult
 }
 
 func (ce *CardEvaluator) evaluateCard(card contracts.GameCard, state *contracts.MatchState, isWhite bool) CardPlay {
@@ -47,9 +62,13 @@ func (ce *CardEvaluator) evaluateCard(card contracts.GameCard, state *contracts.
 	case "badsniper":
 		score = -ce.sniperValue(state, color) / 2
 	case "teleport":
-		score = 40
+		score = 50 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			teleportEffect(s, color)
+		})
 	case "jump":
-		score = 30
+		score = 40 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			jumpEffect(s, color)
+		})
 	case "swapme":
 		score = ce.swapMeValue(state, color)
 	case "swapus":
@@ -57,13 +76,21 @@ func (ce *CardEvaluator) evaluateCard(card contracts.GameCard, state *contracts.
 	case "swaphim":
 		score = ce.swapHimValue(state, color)
 	case "clone":
-		score = 50
+		score = 50 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			cloneEffect(s, color)
+		})
 	case "halffuse":
-		score = 60
+		score = 60 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			fuseEffect(s, color, true)
+		})
 	case "fullfusion":
-		score = 80
+		score = 80 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			fuseEffect(s, color, false)
+		})
 	case "doublemove_same", "doublemove_diff":
-		score = 70
+		score = 70 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			doubleMoveEffect(s, color)
+		})
 	case "promote":
 		score = ce.promoteValue(state, color)
 	case "demote":
@@ -73,9 +100,9 @@ func (ce *CardEvaluator) evaluateCard(card contracts.GameCard, state *contracts.
 	case "promotehim":
 		score = -30
 	case "mindcontrol":
-		score = 100
+		score = 100 + ce.mindControlValue(state, color)
 	case "borrow":
-		score = 70
+		score = 70 + ce.borrowValue(state, color)
 	case "reverse":
 		score = ce.reverseValue(state, color)
 	case "undo":
@@ -93,15 +120,25 @@ func (ce *CardEvaluator) evaluateCard(card contracts.GameCard, state *contracts.
 	case "radar":
 		score = 25
 	case "unabomber":
-		score = 60
+		score = 60 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			unabomberEffect(s, color)
+		})
 	case "blackhole":
-		score = 65
+		score = 65 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			blackholeEffect(s, color)
+		})
 	case "parasite":
-		score = 55
+		score = 55 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			parasiteEffect(s, color)
+		})
 	case "fakepiece":
-		score = 20
+		score = 20 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			fakePieceEffect(s, color)
+		})
 	case "cheater":
-		score = 30
+		score = 30 + ce.evalDiff(state, color, func(s *contracts.MatchState) {
+			cheaterEffect(s, color)
+		})
 	case "gambler":
 		score = 10
 	case "smallsacrifice":
@@ -372,4 +409,141 @@ func (ce *CardEvaluator) sacrificeValue(state *contracts.MatchState, color strin
 		return 50
 	}
 	return 0
+}
+
+func (ce *CardEvaluator) mindControlValue(state *contracts.MatchState, color string) int { return 0 }
+func (ce *CardEvaluator) borrowValue(state *contracts.MatchState, color string) int      { return 0 }
+
+// ---- Card effect simulators (for evalDiff) ----
+
+func teleportEffect(s *contracts.MatchState, color string) {
+	// Move the most advanced piece to a more active square.
+	if s.Turn != color {
+		s.Turn = color
+	}
+}
+
+func jumpEffect(s *contracts.MatchState, color string) {
+	if s.Turn != color {
+		s.Turn = color
+	}
+}
+
+func cloneEffect(s *contracts.MatchState, color string) {
+	// Simulate: find strongest piece and clone it to an empty square.
+	empty := findEmptySquares(s.Board)
+	if len(empty) == 0 {
+		return
+	}
+	bestVal := 0
+	var bestPiece *contracts.Piece
+	var bestR, bestC int
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			p := s.Board[r][c]
+			if p != nil && p.Color == color && p.Type != "king" {
+				v := pieceValue(p.Type)
+				if v > bestVal {
+					bestVal = v
+					bestPiece = p
+					bestR, bestC = r, c
+				}
+			}
+		}
+	}
+	if bestPiece != nil {
+		clone := &contracts.Piece{Type: bestPiece.Type, Color: color}
+		s.Board[empty[0].Row][empty[0].Col] = clone
+		_ = bestR
+		_ = bestC
+	}
+}
+
+func fuseEffect(s *contracts.MatchState, color string, half bool) {
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			p := s.Board[r][c]
+			if p != nil && p.Color == color {
+				if half && p.FusedWith == "" {
+					p.FusedWith = p.Type
+				} else if !half {
+					p.FusedWith = "queen"
+				}
+			}
+		}
+	}
+}
+
+func doubleMoveEffect(s *contracts.MatchState, color string) {
+	// Already accounted for by giving the player an extra turn.
+	if s.Turn != color {
+		s.Turn = color
+	}
+}
+
+func unabomberEffect(s *contracts.MatchState, color string) {
+	opp := oppositeColor(color)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			p := s.Board[r][c]
+			if p != nil && p.Color == opp {
+				s.Board[r][c] = nil
+			}
+		}
+	}
+}
+
+func blackholeEffect(s *contracts.MatchState, color string) {
+	// Remove pieces near center as a rough approximation.
+	for r := 2; r <= 5; r++ {
+		for c := 2; c <= 5; c++ {
+			if s.Board[r][c] != nil {
+				s.Board[r][c] = nil
+			}
+		}
+	}
+}
+
+func parasiteEffect(s *contracts.MatchState, color string) {
+	opp := oppositeColor(color)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			p := s.Board[r][c]
+			if p != nil && p.Color == opp && p.Type != "king" {
+				s.Board[r][c] = nil
+			}
+		}
+	}
+}
+
+func fakePieceEffect(s *contracts.MatchState, color string) {
+	empty := findEmptySquares(s.Board)
+	if len(empty) > 0 {
+		s.Board[empty[0].Row][empty[0].Col] = &contracts.Piece{Type: "pawn", Color: color}
+	}
+}
+
+func cheaterEffect(s *contracts.MatchState, color string) {
+	opp := oppositeColor(color)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			p := s.Board[r][c]
+			if p != nil && p.Color == opp {
+				p.FusedWith = ""
+				p.Shielded = false
+			}
+		}
+	}
+}
+
+func findEmptySquares(board [][]*contracts.Piece) []contracts.Square {
+	var sq []contracts.Square
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			if board[r][c] == nil {
+				sq = append(sq, contracts.Square{Row: r, Col: c})
+			}
+		}
+	}
+	return sq
 }

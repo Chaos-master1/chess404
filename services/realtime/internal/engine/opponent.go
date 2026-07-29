@@ -134,6 +134,39 @@ func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.Pla
 
 	searchDepth := co.Difficulty.SearchDepth()
 	timeLimit := co.Difficulty.TimeLimit()
+
+	// Dynamic time adjustment based on position complexity.
+	stateTurn := state.Turn == "white"
+	moves := generateAllMoves(state, stateTurn)
+	numMoves := len(moves)
+	if numMoves == 0 {
+		return nil
+	}
+	if numMoves == 1 {
+		// Only one legal move: play instantly (but still search a little).
+		timeLimit = timeLimit / 5
+		if timeLimit < 10*time.Millisecond {
+			timeLimit = 10 * time.Millisecond
+		}
+	} else {
+		// Count pieces on the board: more pieces = more complex.
+		pieceCount := 0
+		for r := 0; r < 8; r++ {
+			for c := 0; c < 8; c++ {
+				if state.Board[r][c] != nil {
+					pieceCount++
+				}
+			}
+		}
+		// Scale time: more pieces = more time (max 2x), fewer = less (min 0.5x).
+		factor := 0.5 + float64(pieceCount)/64.0
+		timeLimit = time.Duration(float64(timeLimit) * factor)
+		// In complex positions (many legal moves), spend more time.
+		if numMoves > 30 {
+			timeLimit += timeLimit / 2
+		}
+	}
+
 	result := SearchWithTime(state, searchDepth, co.tt, timeLimit)
 
 	if result.BestMove.From == (contracts.Square{}) && result.BestMove.To == (contracts.Square{}) {

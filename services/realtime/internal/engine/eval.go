@@ -15,23 +15,23 @@ var pieceValues = map[string]int{
 
 var pawnTable = [8][8]int{
 	{0, 0, 0, 0, 0, 0, 0, 0},
-	{50, 50, 50, 50, 50, 50, 50, 50},
-	{10, 10, 20, 30, 30, 20, 10, 10},
-	{5, 5, 10, 25, 25, 10, 5, 5},
-	{0, 0, 0, 20, 20, 0, 0, 0},
-	{5, -5, -10, 0, 0, -10, -5, 5},
-	{5, 10, 10, -20, -20, 10, 10, 5},
+	{40, 40, 40, 40, 40, 40, 40, 40},
+	{10, 10, 15, 20, 20, 15, 10, 10},
+	{5, 5, 10, 15, 15, 10, 5, 5},
+	{0, 0, 5, 15, 15, 5, 0, 0},
+	{0, 0, 0, 10, 10, 0, 0, 0},
+	{0, 0, 0, -10, -10, 0, 0, 0},
 	{0, 0, 0, 0, 0, 0, 0, 0},
 }
 
 var knightTable = [8][8]int{
 	{-50, -40, -30, -30, -30, -30, -40, -50},
-	{-40, -20, 0, 0, 0, 0, -20, -40},
-	{-30, 0, 10, 15, 15, 10, 0, -30},
-	{-30, 5, 15, 20, 20, 15, 5, -30},
-	{-30, 0, 15, 20, 20, 15, 0, -30},
-	{-30, 5, 10, 15, 15, 10, 5, -30},
-	{-40, -20, 0, 5, 5, 0, -20, -40},
+	{-30, -10, 5, 5, 5, 5, -10, -30},
+	{-20, 5, 15, 20, 20, 15, 5, -20},
+	{-20, 10, 20, 25, 25, 20, 10, -20},
+	{-20, 5, 20, 25, 25, 20, 5, -20},
+	{-20, 10, 15, 20, 20, 15, 10, -20},
+	{-30, -10, 5, 10, 10, 5, -10, -30},
 	{-50, -40, -30, -30, -30, -30, -40, -50},
 }
 
@@ -113,20 +113,35 @@ func inFriendlyFortress(zones []contracts.FortressZone, color string, row, col i
 	return false
 }
 
-func Evaluate(board [][]*contracts.Piece, turn string) int {
-	return EvaluateWithModifiers(board, turn, nil, nil, nil)
+func Evaluate(board [][]*contracts.Piece, turn string, whiteHand, blackHand []contracts.GameCard) int {
+	return EvaluateWithModifiers(board, turn, nil, nil, nil, whiteHand, blackHand)
+}
+
+// ClassicalEval always uses the hand-crafted evaluation, ignoring NNUE.
+func ClassicalEval(board [][]*contracts.Piece, turn string, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece) int {
+	base := baseEval(board, turn)
+	mods := modifierScore(board, turn, lavas, fortresses, bombs)
+	return base + mods
 }
 
 // EvaluateWithModifiers extends Evaluate with board-modifier scoring (lava, fortress, bombs).
-// Uses NNUE if weights are loaded, otherwise falls back to hand-crafted evaluation.
-func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece) int {
+// Uses NNUE for base evaluation if loaded, then adds hand-crafted modifier adjustments.
+func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece, whiteHand, blackHand []contracts.GameCard) int {
+	var base int
 	if defaultNNUE != nil && defaultNNUE.Loaded() {
-		nnue := defaultNNUE.Evaluate(board, lavas, fortresses, bombs, nil, nil)
+		nnue := defaultNNUE.Evaluate(board, nil, nil, nil, nil, nil, whiteHand, blackHand)
 		if turn == "black" {
 			nnue = -nnue
 		}
-		return nnue
+		base = nnue
+	} else {
+		base = baseEval(board, turn)
 	}
+	mods := modifierScore(board, turn, lavas, fortresses, bombs)
+	return base + mods
+}
+
+func baseEval(board [][]*contracts.Piece, turn string) int {
 	score := 0
 	whiteMaterial := 0
 	blackMaterial := 0
@@ -177,19 +192,34 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 		}
 	}
 
-	// --- Pawn structure evaluation ---
 	whitePawnSquares := pawnSquares(board, "white")
 	blackPawnSquares := pawnSquares(board, "black")
 	score += pawnStructureScore(board, whitePawnSquares)
 	score -= pawnStructureScore(board, blackPawnSquares)
 
-	// Passed pawn bonuses
 	score += passedPawnBonus(board, whitePawnSquares, blackPawnSquares, true)
 	score -= passedPawnBonus(board, blackPawnSquares, whitePawnSquares, false)
 
-	// Knight outpost bonus
 	score += outpostBonus(board, "white")
 	score -= outpostBonus(board, "black")
+
+	score += bishopPairBonus(board, "white")
+	score -= bishopPairBonus(board, "black")
+
+	score += rookFileBonus(board, whitePawnSquares, "white")
+	score -= rookFileBonus(board, blackPawnSquares, "black")
+
+	score += kingSafetyBonus(board, "white")
+	score -= kingSafetyBonus(board, "black")
+
+	score += mobilityBonus(board, "white")
+	score -= mobilityBonus(board, "black")
+
+	score += rookSeventhBonus(board, "white")
+	score -= rookSeventhBonus(board, "black")
+
+	score += connectedRooksBonus(board, "white")
+	score -= connectedRooksBonus(board, "black")
 
 	whiteKing := findKingPos(board, "white")
 	blackKing := findKingPos(board, "black")
@@ -218,7 +248,20 @@ func EvaluateWithModifiers(board [][]*contracts.Piece, turn string, lavas []cont
 		}
 	}
 
-	// --- Board-modifier scoring ---
+	score += developmentBonus(board, "white")
+	score -= developmentBonus(board, "black")
+
+	score += centerControlBonus(board, "white")
+	score -= centerControlBonus(board, "black")
+
+	score += castlingBonus(board, "white")
+	score -= castlingBonus(board, "black")
+
+	return score
+}
+
+func modifierScore(board [][]*contracts.Piece, turn string, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece) int {
+	score := 0
 
 	for _, lava := range lavas {
 		if lava.Row < 0 || lava.Row > 7 || lava.Col < 0 || lava.Col > 7 {
@@ -460,7 +503,203 @@ func outpostBonus(board [][]*contracts.Piece, color string) int {
 	return score
 }
 
+// bishopPairBonus gives a bonus for having two bishops.
+func bishopPairBonus(board [][]*contracts.Piece, color string) int {
+	count := 0
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece != nil && piece.Type == "bishop" && piece.Color == color {
+				count++
+			}
+		}
+	}
+	if count >= 2 {
+		return 30
+	}
+	return 0
+}
 
+// rookFileBonus rewards rooks on open (no pawns) or semi-open (no friendly pawns) files.
+func rookFileBonus(board [][]*contracts.Piece, pawnCols []uint8, color string) int {
+	score := 0
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece == nil || piece.Type != "rook" || piece.Color != color {
+				continue
+			}
+			hasEnemyPawn := false
+			hasFriendlyPawn := false
+			for rr := 0; rr < 8; rr++ {
+				if board[rr][c] != nil && board[rr][c].Type == "pawn" {
+					if board[rr][c].Color == color {
+						hasFriendlyPawn = true
+					} else {
+						hasEnemyPawn = true
+					}
+				}
+			}
+			if !hasFriendlyPawn && !hasEnemyPawn {
+				score += 25
+			} else if !hasFriendlyPawn && hasEnemyPawn {
+				score += 15
+			}
+		}
+	}
+	return score
+}
+
+// kingSafetyBonus rewards pawn cover near the own king.
+func kingSafetyBonus(board [][]*contracts.Piece, color string) int {
+	king := findKingPos(board, color)
+	if king == nil {
+		return 0
+	}
+	score := 0
+	pawnRow := king.Row - 1
+	if color == "black" {
+		pawnRow = king.Row + 1
+	}
+	for dc := -2; dc <= 2; dc++ {
+		c := king.Col + dc
+		if c < 0 || c > 7 {
+			continue
+		}
+		if pawnRow >= 0 && pawnRow <= 7 {
+			p := board[pawnRow][c]
+			if p != nil && p.Type == "pawn" && p.Color == color {
+				score += 10
+			}
+		}
+		p := board[king.Row][c]
+		if p != nil && p.Type == "pawn" && p.Color == color && (c < king.Col-1 || c > king.Col+1) {
+			score += 5
+		}
+	}
+	return score
+}
+
+// mobility counts pseudo-legal moves for all pieces of the given color.
+func mobility(board [][]*contracts.Piece, color string) int {
+	count := 0
+	enemy := oppositeColor(color)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece == nil || piece.Color != color {
+				continue
+			}
+			switch piece.Type {
+			case "knight":
+				for _, d := range [8][2]int{{-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1}} {
+					nr, nc := r+d[0], c+d[1]
+					if nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+						target := board[nr][nc]
+						if target == nil || target.Color == enemy {
+							count++
+						}
+					}
+				}
+			case "bishop":
+				for _, d := range [4][2]int{{-1,-1},{-1,1},{1,-1},{1,1}} {
+					nr, nc := r+d[0], c+d[1]
+					for nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+						target := board[nr][nc]
+						if target == nil {
+							count++
+						} else {
+							if target.Color == enemy {
+								count++
+							}
+							break
+						}
+						nr += d[0]
+						nc += d[1]
+					}
+				}
+			case "rook":
+				for _, d := range [4][2]int{{-1,0},{1,0},{0,-1},{0,1}} {
+					nr, nc := r+d[0], c+d[1]
+					for nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+						target := board[nr][nc]
+						if target == nil {
+							count++
+						} else {
+							if target.Color == enemy {
+								count++
+							}
+							break
+						}
+						nr += d[0]
+						nc += d[1]
+					}
+				}
+			case "queen":
+				for _, d := range [8][2]int{{-1,-1},{-1,0},{-1,1},{0,-1},{0,1},{1,-1},{1,0},{1,1}} {
+					nr, nc := r+d[0], c+d[1]
+					for nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
+						target := board[nr][nc]
+						if target == nil {
+							count++
+						} else {
+							if target.Color == enemy {
+								count++
+							}
+							break
+						}
+						nr += d[0]
+						nc += d[1]
+					}
+				}
+			}
+		}
+	}
+	return count
+}
+
+// mobilityBonus returns a scaled mobility score (max ~30 per side).
+func mobilityBonus(board [][]*contracts.Piece, color string) int {
+	mob := mobility(board, color)
+	return mob
+}
+
+// rookSeventhBonus gives +10 for each rook on the 7th rank (rank 1 for black).
+func rookSeventhBonus(board [][]*contracts.Piece, color string) int {
+	score := 0
+	targetRank := 6
+	if color == "black" {
+		targetRank = 1
+	}
+	for c := 0; c < 8; c++ {
+		p := board[targetRank][c]
+		if p != nil && p.Type == "rook" && p.Color == color {
+			score += 10
+		}
+	}
+	return score
+}
+
+// connectedRooksBonus gives +15 for two rooks on the same rank/file.
+func connectedRooksBonus(board [][]*contracts.Piece, color string) int {
+	rooks := make([]int, 0, 2)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			p := board[r][c]
+			if p != nil && p.Type == "rook" && p.Color == color {
+				rooks = append(rooks, r*8+c)
+			}
+		}
+	}
+	if len(rooks) >= 2 {
+		r1, c1 := rooks[0]/8, rooks[0]%8
+		r2, c2 := rooks[1]/8, rooks[1]%8
+		if r1 == r2 || c1 == c2 {
+			return 15
+		}
+	}
+	return 0
+}
 
 func positionalBonus(piece *contracts.Piece, r, c int, isEndgame bool) int {
 	blackRow := 7 - r
@@ -540,6 +779,109 @@ func findKingPos(board [][]*contracts.Piece, color string) *contracts.Square {
 		}
 	}
 	return nil
+}
+
+func developmentBonus(board [][]*contracts.Piece, color string) int {
+	score := 0
+	homeRow := 0
+	if color == "black" {
+		homeRow = 7
+	}
+	queenMoved := false
+	minorDeveloped := 0
+	for c := 0; c < 8; c++ {
+		p := board[homeRow][c]
+		if p == nil || p.Color != color {
+			continue
+		}
+		switch p.Type {
+		case "knight":
+			score += 20
+			minorDeveloped++
+		case "bishop":
+			score += 15
+			minorDeveloped++
+		case "rook":
+			score += 5
+		case "queen":
+			queenMoved = true
+		}
+	}
+	if queenMoved && minorDeveloped < 2 {
+		score -= 25
+	}
+	return score
+}
+
+func centerControlBonus(board [][]*contracts.Piece, color string) int {
+	centers := [4][2]int{{3, 3}, {3, 4}, {4, 3}, {4, 4}}
+	score := 0
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			p := board[r][c]
+			if p == nil || p.Color != color {
+				continue
+			}
+			for _, cc := range centers {
+				cr, cc2 := cc[0], cc[1]
+				switch p.Type {
+				case "pawn":
+					if color == "white" && r+1 == cr && (c == cc2-1 || c == cc2+1) {
+						score += 4
+					} else if color == "black" && r-1 == cr && (c == cc2-1 || c == cc2+1) {
+						score += 4
+					}
+				case "knight", "bishop":
+					dr := cr - r
+					dc := cc2 - c
+					if dr*dr+dc*dc <= 8 {
+						score += 5
+					}
+				case "rook", "queen":
+					if r == cr || c == cc2 {
+						score += 3
+					}
+				}
+			}
+		}
+	}
+	// Bonus for occupying center squares directly
+	for _, cc := range centers {
+		cr, cc2 := cc[0], cc[1]
+		p := board[cr][cc2]
+		if p != nil && p.Color == color {
+			score += 10
+		}
+	}
+	return score
+}
+
+func castlingBonus(board [][]*contracts.Piece, color string) int {
+	king := findKingPos(board, color)
+	if king == nil {
+		return 0
+	}
+	homeRow := 0
+	if color == "black" {
+		homeRow = 7
+	}
+	// King on its original square
+	if king.Row == homeRow && (king.Col == 4 || king.Col == 3) {
+		return 0
+	}
+	// King castled kingside
+	if king.Row == homeRow && (king.Col == 6 || king.Col == 5) {
+		return 30
+	}
+	// King castled queenside
+	if king.Row == homeRow && (king.Col == 2 || king.Col == 1) {
+		return 20
+	}
+	// King moved but not castled
+	if king.Row == homeRow {
+		return -10
+	}
+	return -20
 }
 
 func pieceValue(pieceType string) int {

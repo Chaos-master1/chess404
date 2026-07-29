@@ -18,10 +18,17 @@ const (
 )
 
 type TTEntry struct {
-	Depth  int
-	Score  int
-	Flag   int
+	Depth    int
+	Score    int
+	Flag     int
 	BestMove string
+}
+
+func (tt *TranspositionTable) Peek(key uint64) (TTEntry, bool) {
+	tt.mu.RLock()
+	entry, ok := tt.entries[key]
+	tt.mu.RUnlock()
+	return entry, ok
 }
 
 type TranspositionTable struct {
@@ -58,6 +65,16 @@ func (tt *TranspositionTable) Lookup(key uint64, depth int, alpha, beta int) (bo
 	return false, 0
 }
 
+func (tt *TranspositionTable) GetBestMove(key uint64) string {
+	tt.mu.RLock()
+	entry, ok := tt.entries[key]
+	tt.mu.RUnlock()
+	if ok {
+		return entry.BestMove
+	}
+	return ""
+}
+
 func (tt *TranspositionTable) Store(key uint64, depth, score, flag int, bestMove string) {
 	tt.mu.Lock()
 	defer tt.mu.Unlock()
@@ -80,6 +97,7 @@ type SearchResult struct {
 	Score    int
 	Nodes    int
 	Depth    int
+	PV       []string // principal variation in UCI notation
 }
 
 type SearchContext struct {
@@ -88,14 +106,30 @@ type SearchContext struct {
 	Stopped  bool
 	Deadline time.Time
 	mu       sync.Mutex
+	KillerMoves [64][2]string
+	History     [6][64]int
+	CounterMoves map[string]string
 }
 
 func NewSearchContext(tt *TranspositionTable, timeLimit time.Duration) *SearchContext {
 	sc := &SearchContext{
-		TT:       tt,
-		Deadline: time.Now().Add(timeLimit),
+		TT:           tt,
+		Deadline:     time.Now().Add(timeLimit),
+		CounterMoves: make(map[string]string),
 	}
 	return sc
+}
+
+func (sc *SearchContext) ResetMoveOrdering() {
+	for i := range sc.KillerMoves {
+		sc.KillerMoves[i] = [2]string{}
+	}
+	for i := range sc.History {
+		for j := range sc.History[i] {
+			sc.History[i][j] = 0
+		}
+	}
+	sc.CounterMoves = make(map[string]string)
 }
 
 func (sc *SearchContext) ShouldStop() bool {
@@ -135,6 +169,8 @@ func SearchWithTime(state *contracts.MatchState, maxDepth int, tt *Transposition
 	sc := NewSearchContext(tt, timeLimit)
 	sc.Nodes = 0
 
+	searchStart := time.Now()
+
 	for depth := 1; depth <= maxDepth; depth++ {
 		if depth > 1 && sc.ShouldStop() {
 			break
@@ -147,6 +183,10 @@ func SearchWithTime(state *contracts.MatchState, maxDepth int, tt *Transposition
 			alpha = prevScore - aspirationDelta
 			beta = prevScore + aspirationDelta
 		}
+
+		EmitSearchEvent(SearchEvent{
+			Type: EventSearchStart, Depth: depth, Nodes: nodes,
+		})
 
 		score, move := alphaBeta(state, depth, alpha, beta, turn == "white", sc, &nodes, 0)
 
@@ -168,25 +208,52 @@ func SearchWithTime(state *contracts.MatchState, maxDepth int, tt *Transposition
 			bestMove = *move
 			bestMove.Score = score
 		}
+
+		pv := []string{MoveToUCI(move)}
+		pvMoves := extractPV(state, tt, turn == "white", 8)
+		for _, pm := range pvMoves {
+			if pm != "" {
+				pv = append(pv, pm)
+			}
+		}
+		EmitSearchEvent(SearchEvent{
+			Type: EventDepthDone, Depth: depth, Score: score,
+			Move: MoveToUCI(move), Nodes: nodes, Pv: pv,
+			NPS: int(float64(nodes) / time.Since(searchStart).Seconds()),
+		})
 	}
 
 	sc.Stop()
+
+	pv := extractPV(state, tt, turn == "white", 8)
+
+	EmitSearchEvent(SearchEvent{
+		Type: EventBestMove, Move: MoveToUCI(&bestMove),
+		Score: bestMove.Score, Depth: maxDepth, Nodes: nodes,
+	})
 
 	return SearchResult{
 		BestMove: bestMove,
 		Score:    bestMove.Score,
 		Nodes:    nodes,
 		Depth:    maxDepth,
+		PV:       pv,
 	}
 }
 
 const (
-	lmrMinDepth    = 3       // Don't LMR at very shallow depths
-	lmrReduction   = 1       // Base reduction amount
-	nullMoveDepth  = 4       // Minimum depth for null-move pruning (avoids overhead at low depths)
-	nullMoveR      = 2       // Null-move reduction factor
-	aspirationDelta = 50     // Aspiration window delta around previous score
-	checkExtension = 0       // Check extension (0=disabled; enables deeper tactical search)
+	lmrMinDepth      = 3
+	lmrReduction     = 1
+	nullMoveDepth    = 4
+	nullMoveR        = 2
+	aspirationDelta  = 50
+	checkExtension   = 1
+	razorDepth       = 3
+	razorMargin      = 300
+	futilityDepth    = 3
+	futilityMargin   = 200
+	iidDepthReduce   = 2
+	iidMinDepth      = 4
 )
 
 func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing bool, sc *SearchContext, nodes *int, ply int) (int, *Move) {
@@ -197,15 +264,44 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 	}
 
 	hash := defaultHasher.Hash(state)
+
+	// Draw detection
+	if ply > 0 {
+		if state.HalfMoveClock >= 100 {
+			return 0, nil
+		}
+		if isInsufficientMaterial(state.Board) {
+			return 0, nil
+		}
+	}
+
+	ttBestMove := ""
 	if sc.TT != nil {
 		if ok, ttScore := sc.TT.Lookup(hash, depth, alpha, beta); ok {
 			return ttScore, nil
 		}
+		ttBestMove = sc.TT.GetBestMove(hash)
 	}
 
 	if depth <= 0 {
 		return quiescence(state, alpha, beta, maximizing, sc, nodes, ply, hash), nil
 	}
+
+	// Razoring: at shallow depths, if the static eval is far below alpha, drop to
+	// quiescence. Avoids searching hopeless positions.
+		if depth <= razorDepth && !isKingInCheck(state) {
+			staticEval := EvaluateWithModifiers(state.Board, state.Turn, state.LavaSquares, state.FortressZones, state.BombPieces, state.WhiteHand, state.BlackHand)
+			if !maximizing {
+				staticEval = -staticEval
+			}
+			margin := razorMargin + 50*(razorDepth-depth)
+			if staticEval+margin < alpha {
+				qScore := quiescence(state, alpha, beta, maximizing, sc, nodes, ply, hash)
+				if qScore < alpha+50 {
+					return qScore, nil
+				}
+			}
+		}
 
 	if ply > 0 && depth >= nullMoveDepth && !isKingInCheck(state) {
 		nullState := cloneMatchState(state)
@@ -219,6 +315,13 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 
 	inCheck := isKingInCheck(state)
 
+	// Internal Iterative Deepening: when depth is high and we have no TT move,
+	// search at reduced depth first to get a better move ordering.
+	iidSearch := false
+	if depth >= iidMinDepth && sc.TT != nil && ttBestMove == "" {
+		iidSearch = true
+	}
+
 	moves := generateAllMoves(state, maximizing)
 	if len(moves) == 0 {
 		if inCheck {
@@ -230,7 +333,20 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 		return 0, nil
 	}
 
-	orderMoves(moves, state, ply)
+	if iidSearch && len(moves) > 1 {
+		_, iidMove := alphaBeta(state, depth-iidDepthReduce, alpha, beta, maximizing, sc, nodes, ply)
+		if iidMove != nil {
+			// Move the IID best move to front.
+			for i := range moves {
+				if moves[i].From == iidMove.From && moves[i].To == iidMove.To {
+					moves[i].Score += 200
+					break
+				}
+			}
+		}
+	}
+
+	orderMoves(sc, moves, state, ply, ttBestMove)
 
 	bestMove := &moves[0]
 	improving := true
@@ -261,37 +377,61 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 			captured := state.Board[moves[i].To.Row][moves[i].To.Col]
 			isCapture := captured != nil
 			isPromo := moves[i].Promotion != ""
+
+			// Futility pruning: at shallow depths, prune quiet moves unlikely to improve alpha.
+			if i > 0 && depth <= futilityDepth && !isCapture && !isPromo && !isCheck && !inCheck {
+				if maxEval+futilityMargin <= alpha {
+					continue
+				}
+			}
+
 			if i >= 3 && depth >= lmrMinDepth && !isCapture && !isPromo && !isCheck {
-				reduction := lmrReduction
-				if i >= 6 {
+				reduction := 1
+				if depth >= 6 {
 					reduction = 2
+				}
+				if i >= 8 {
+					reduction++
 				}
 				if !improving {
 					reduction++
 				}
-				newDepth -= reduction
-				if newDepth < 0 {
-					newDepth = 0
+				reduced := depth - 1 - reduction
+				if reduced < 1 {
+					reduced = 1
 				}
+				newDepth = reduced
 			}
 
 			newState := applyMoveCopy(state, &moves[i])
-			eval, _ := alphaBeta(newState, newDepth, alpha, beta, false, sc, nodes, ply+1)
 
-			if newDepth < depth-1 && eval > alpha {
-				eval, _ = alphaBeta(newState, depth-1, alpha, beta, false, sc, nodes, ply+1)
+			var eval int
+			if i == 0 {
+				eval, _ = alphaBeta(newState, newDepth, alpha, beta, false, sc, nodes, ply+1)
+			} else {
+				// Null-window search: test if move can beat alpha.
+				eval, _ = alphaBeta(newState, newDepth, alpha, alpha+1, false, sc, nodes, ply+1)
+				if eval > alpha {
+					// Re-search at full depth with null window.
+					eval, _ = alphaBeta(newState, depth-1, alpha, alpha+1, false, sc, nodes, ply+1)
+					if eval > alpha && eval < beta {
+						// Re-search with full window (new PV candidate).
+						eval, _ = alphaBeta(newState, depth-1, alpha, beta, false, sc, nodes, ply+1)
+					}
+				}
 			}
 
-			if eval > maxEval {
-				maxEval = eval
-				bestMove = &moves[i]
-			}
-			alpha = max(alpha, eval)
-			if beta <= alpha {
-				storeKillerMove(ply, keyForSquare(moves[i].From)+keyForSquare(moves[i].To))
+		if eval > maxEval {
+			maxEval = eval
+			bestMove = &moves[i]
+		}
+		alpha = max(alpha, eval)
+		if beta <= alpha {
+				storeKillerMove(sc, ply, keyForSquare(moves[i].From)+keyForSquare(moves[i].To))
+				storeCounterMove(sc, state, &moves[i])
 				attacker := state.Board[moves[i].From.Row][moves[i].From.Col]
 				if attacker != nil && !isCapture {
-					updateHistory(attacker.Type, moves[i].To.Row*8+moves[i].To.Col, depth)
+					updateHistory(sc, attacker.Type, moves[i].To.Row*8+moves[i].To.Col, depth)
 				}
 				break
 			}
@@ -305,7 +445,7 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 			}
 			sc.TT.Store(hash, depth, maxEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
 		}
-		return maxEval, bestMove
+	return maxEval, bestMove
 	}
 
 	minEval := math.MaxInt - 1
@@ -333,25 +473,44 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 		captured := state.Board[moves[i].To.Row][moves[i].To.Col]
 		isCapture := captured != nil
 		isPromo := moves[i].Promotion != ""
+
+		if i > 0 && depth <= futilityDepth && !isCapture && !isPromo && !isCheck && !inCheck {
+			if minEval-futilityMargin >= beta {
+				continue
+			}
+		}
+
 		if i >= 3 && depth >= lmrMinDepth && !isCapture && !isPromo && !isCheck {
-			reduction := lmrReduction
-			if i >= 6 {
+			reduction := 1
+			if depth >= 6 {
 				reduction = 2
+			}
+			if i >= 8 {
+				reduction++
 			}
 			if !improving {
 				reduction++
 			}
-			newDepth -= reduction
-			if newDepth < 0 {
-				newDepth = 0
+			reduced := depth - 1 - reduction
+			if reduced < 1 {
+				reduced = 1
 			}
+			newDepth = reduced
 		}
 
 		newState := applyMoveCopy(state, &moves[i])
-		eval, _ := alphaBeta(newState, newDepth, alpha, beta, true, sc, nodes, ply+1)
 
-		if newDepth < depth-1 && eval < beta {
-			eval, _ = alphaBeta(newState, depth-1, alpha, beta, true, sc, nodes, ply+1)
+		var eval int
+		if i == 0 {
+			eval, _ = alphaBeta(newState, newDepth, alpha, beta, true, sc, nodes, ply+1)
+		} else {
+			eval, _ = alphaBeta(newState, newDepth, beta-1, beta, true, sc, nodes, ply+1)
+			if eval < beta {
+				eval, _ = alphaBeta(newState, depth-1, beta-1, beta, true, sc, nodes, ply+1)
+				if eval < beta {
+					eval, _ = alphaBeta(newState, depth-1, alpha, beta, true, sc, nodes, ply+1)
+				}
+			}
 		}
 
 		if eval < minEval {
@@ -360,24 +519,25 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 		}
 		beta = min(beta, eval)
 		if beta <= alpha {
-			storeKillerMove(ply, keyForSquare(moves[i].From)+keyForSquare(moves[i].To))
+			storeKillerMove(sc, ply, keyForSquare(moves[i].From)+keyForSquare(moves[i].To))
+			storeCounterMove(sc, state, &moves[i])
 			attacker := state.Board[moves[i].From.Row][moves[i].From.Col]
 			if attacker != nil && !isCapture {
-				updateHistory(attacker.Type, moves[i].To.Row*8+moves[i].To.Col, depth)
+				updateHistory(sc, attacker.Type, moves[i].To.Row*8+moves[i].To.Col, depth)
 			}
 			break
 		}
 	}
-	if sc.TT != nil {
-		flag := ExactScore
-		if minEval <= alpha {
-			flag = UpperBound
-		} else if minEval >= beta {
-			flag = LowerBound
+		if sc.TT != nil {
+			flag := ExactScore
+			if minEval <= alpha {
+				flag = UpperBound
+			} else if minEval >= beta {
+				flag = LowerBound
+			}
+			sc.TT.Store(hash, depth, minEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
 		}
-		sc.TT.Store(hash, depth, minEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
-	}
-	return minEval, bestMove
+		return minEval, bestMove
 }
 
 // quiescence searches captures at depth 0 (stand-pat) to reduce the horizon
@@ -390,7 +550,7 @@ func quiescence(state *contracts.MatchState, alpha, beta int, maximizing bool, s
 		return 0
 	}
 
-	standPat := EvaluateWithModifiers(state.Board, state.Turn, state.LavaSquares, state.FortressZones, state.BombPieces)
+	standPat := EvaluateWithModifiers(state.Board, state.Turn, state.LavaSquares, state.FortressZones, state.BombPieces, state.WhiteHand, state.BlackHand)
 	if !maximizing {
 		standPat = -standPat
 	}
@@ -449,25 +609,119 @@ func see(state *contracts.MatchState, move *Move) int {
 		return 0
 	}
 
-	targetValue := 0
+	targetSquare := move.To
+	// Simulate the exchange on the target square.
+	// We alternate between sides, always capturing with the least valuable piece.
+	sq := targetSquare
+	side := fromPiece.Color
+	value := 0
 	if toPiece != nil {
-		targetValue = pieceValue(toPiece.Type)
+		value = pieceValue(toPiece.Type)
 		if toPiece.FusedWith != "" {
-			targetValue = (targetValue + pieceValue(toPiece.FusedWith)) / 2
+			value = (value + pieceValue(toPiece.FusedWith)) / 2
 		}
 	}
 
-	attackerValue := pieceValue(fromPiece.Type)
+	// First capture by the moving side.
+	gain := value
+	// Remove the target piece.
+	attackerVal := pieceValue(fromPiece.Type)
 	if fromPiece.FusedWith != "" {
-		attackerValue = (attackerValue + pieceValue(fromPiece.FusedWith)) / 2
+		attackerVal = (attackerVal + pieceValue(fromPiece.FusedWith)) / 2
 	}
 
-	gain := targetValue - attackerValue
-	if gain <= 0 {
-		return gain
+	// Now check if the opponent can recapture on the same square.
+	opponent := oppositeColor(side)
+	// Get the least valuable opponent attacker.
+	for ply := 0; ply < 8; ply++ {
+		lva := leastValuableAttacker(state.Board, sq, opponent)
+		if lva == nil {
+			break
+		}
+		lvaVal := pieceValue(lva.Type)
+		if lva.FusedWith != "" {
+			lvaVal = (lvaVal + pieceValue(lva.FusedWith)) / 2
+		}
+		gain = -gain + lvaVal
+		opponent = side
+		side = oppositeColor(opponent)
 	}
-
 	return gain
+}
+
+// leastValuableAttacker finds the least valuable piece of the given color attacking the square.
+func leastValuableAttacker(board [][]*contracts.Piece, sq contracts.Square, color string) *contracts.Piece {
+	order := []string{"pawn", "knight", "bishop", "rook", "queen", "king"}
+	for _, ptype := range order {
+		for r := 0; r < 8; r++ {
+			for c := 0; c < 8; c++ {
+				piece := board[r][c]
+				if piece == nil || piece.Color != color || piece.Type != ptype {
+					continue
+				}
+				from := contracts.Square{Row: r, Col: c}
+				if pseudoAttacks(board, from, sq, piece) {
+					return piece
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// pseudoAttacks checks if a piece at 'from' can pseudo-legal attack 'to'.
+func pseudoAttacks(board [][]*contracts.Piece, from, to contracts.Square, piece *contracts.Piece) bool {
+	dr := to.Row - from.Row
+	dc := to.Col - from.Col
+	switch piece.Type {
+	case "pawn":
+		push := -1
+		if piece.Color == "black" {
+			push = 1
+		}
+		return dr == push && (dc == -1 || dc == 1)
+	case "knight":
+		return (dr*dr == 4 && dc*dc == 1) || (dr*dr == 1 && dc*dc == 4)
+	case "bishop":
+		if dr*dr != dc*dc {
+			return false
+		}
+		return rayClear(board, from, to)
+	case "rook":
+		if dr != 0 && dc != 0 {
+			return false
+		}
+		return rayClear(board, from, to)
+	case "queen":
+		if dr*dr != dc*dc && dr != 0 && dc != 0 {
+			return false
+		}
+		return rayClear(board, from, to)
+	case "king":
+		return dr*dr <= 1 && dc*dc <= 1 && (dr != 0 || dc != 0)
+	}
+	return false
+}
+
+// rayClear checks if the ray from -> to is unobstructed.
+func rayClear(board [][]*contracts.Piece, from, to contracts.Square) bool {
+	dr := to.Row - from.Row
+	dc := to.Col - from.Col
+	if dr != 0 {
+		dr /= abs(dr)
+	}
+	if dc != 0 {
+		dc /= abs(dc)
+	}
+	r, c := from.Row+dr, from.Col+dc
+	for r != to.Row || c != to.Col {
+		if board[r][c] != nil {
+			return false
+		}
+		r += dr
+		c += dc
+	}
+	return true
 }
 
 // generateCaptureMoves returns only moves that capture an enemy piece.
@@ -617,23 +871,27 @@ func generateAllMoves(state *contracts.MatchState, forWhite bool) []Move {
 	return moves
 }
 
-// killerMoves tracks two best non-capture moves per ply as candidates for
-// move ordering (they caused a beta cutoff in a sibling node).
-var killerMoves [64][2]string // [ply][slot] → "from-to" key
+// Move ordering tables are now on SearchContext for thread safety.
 
-// historyHeuristic tracks how often a move (from→to for a given piece type)
-// causes a beta cutoff, indexed by [pieceTypeIndex][toSquare].
-var historyHeuristic [6][64]int
+// counterMoveKey builds a key from the last move for countermove lookup.
+func counterMoveKey(state *contracts.MatchState) string {
+	if state.LastMove == nil {
+		return ""
+	}
+	from := state.LastMove.From
+	to := state.LastMove.To
+	// Use from/to of the last move as the key.
+	return fmt.Sprintf("%d.%d.%d.%d", from.Row, from.Col, to.Row, to.Col)
+}
 
-func resetKillersAndHistory() {
-	for i := range killerMoves {
-		killerMoves[i] = [2]string{}
+// storeCounterMove records a counter move that caused a beta cutoff.
+func storeCounterMove(sc *SearchContext, state *contracts.MatchState, move *Move) {
+	key := counterMoveKey(state)
+	if key == "" {
+		return
 	}
-	for i := range historyHeuristic {
-		for j := range historyHeuristic[i] {
-			historyHeuristic[i][j] = 0
-		}
-	}
+	moveKey := keyForSquare(move.From) + keyForSquare(move.To)
+	sc.CounterMoves[key] = moveKey
 }
 
 func pieceTypeIndex(pieceType string) int {
@@ -654,17 +912,25 @@ func pieceTypeIndex(pieceType string) int {
 	return 0
 }
 
-func orderMoves(moves []Move, state *contracts.MatchState, ply int) {
+func orderMoves(sc *SearchContext, moves []Move, state *contracts.MatchState, ply int, ttBestMove string) {
+	ttKey := ""
+	_ = ttKey
 	for i := range moves {
 		score := 0
+		// TT best move gets the highest priority.
+		if ttBestMove != "" {
+			key := keyForSquare(moves[i].From) + keyForSquare(moves[i].To)
+			if key == ttBestMove {
+				ttKey = key
+				score += 10000
+			}
+		}
 		captured := state.Board[moves[i].To.Row][moves[i].To.Col]
 		if captured != nil {
 			seeScore := see(state, &moves[i])
 			if seeScore >= 0 {
-				// Winning or equal capture: high priority
 				score += 1000 + seeScore
 			} else {
-				// Losing capture: low priority
 				score -= 500 - seeScore
 			}
 		}
@@ -686,11 +952,15 @@ func orderMoves(moves []Move, state *contracts.MatchState, ply int) {
 
 	for i := range moves {
 		key := keyForSquare(moves[i].From) + keyForSquare(moves[i].To)
+		// Skip TT best move — already scored highest.
+		if key == ttKey {
+			continue
+		}
 		kp := ply
-		if kp >= len(killerMoves) {
+		if kp >= len(sc.KillerMoves) {
 			kp = 0
 		}
-		for _, k := range killerMoves[kp] {
+		for _, k := range sc.KillerMoves[kp] {
 			if k == key && k != "" {
 				moves[i].Score += 500
 				break
@@ -699,7 +969,14 @@ func orderMoves(moves []Move, state *contracts.MatchState, ply int) {
 		attacker := state.Board[moves[i].From.Row][moves[i].From.Col]
 		if attacker != nil {
 			idx := pieceTypeIndex(attacker.Type)
-			moves[i].Score += historyHeuristic[idx][moves[i].To.Row*8+moves[i].To.Col]
+			moves[i].Score += sc.History[idx][moves[i].To.Row*8+moves[i].To.Col]
+		}
+		// Counter move bonus.
+		cmKey := counterMoveKey(state)
+		if cmKey != "" {
+			if cm, ok := sc.CounterMoves[cmKey]; ok && cm == key {
+				moves[i].Score += 400
+			}
 		}
 	}
 
@@ -709,19 +986,19 @@ func orderMoves(moves []Move, state *contracts.MatchState, ply int) {
 }
 
 // storeKillerMove records a move that caused a beta cutoff at the given ply.
-func storeKillerMove(ply int, moveKey string) {
-	if ply >= len(killerMoves) {
+func storeKillerMove(sc *SearchContext, ply int, moveKey string) {
+	if ply >= len(sc.KillerMoves) {
 		return
 	}
 	// Shift and store in the first slot (most recent).
-	killerMoves[ply][1] = killerMoves[ply][0]
-	killerMoves[ply][0] = moveKey
+	sc.KillerMoves[ply][1] = sc.KillerMoves[ply][0]
+	sc.KillerMoves[ply][0] = moveKey
 }
 
 // updateHistory increments the history counter for a move that caused a cutoff.
-func updateHistory(pieceType string, toSquare int, depth int) {
+func updateHistory(sc *SearchContext, pieceType string, toSquare int, depth int) {
 	idx := pieceTypeIndex(pieceType)
-	historyHeuristic[idx][toSquare] += depth * depth
+	sc.History[idx][toSquare] += depth * depth
 }
 
 func ApplyMoveCopy(state *contracts.MatchState, move *Move) *contracts.MatchState {
@@ -827,12 +1104,116 @@ func IsKingInCheck(state *contracts.MatchState) bool {
 	return isKingInCheck(state)
 }
 
+// extractPV follows the TT best moves from the root to build a principal variation.
+func extractPV(state *contracts.MatchState, tt *TranspositionTable, maximizing bool, maxLen int) []string {
+	if tt == nil {
+		return nil
+	}
+	pv := make([]string, 0, maxLen)
+	cur := state
+	for i := 0; i < maxLen; i++ {
+		hash := defaultHasher.Hash(cur)
+		moveStr := tt.GetBestMove(hash)
+		if moveStr == "" {
+			break
+		}
+		// Parse the best move string (e.g., "e2e4") and apply it.
+		move := parseUCIMove(cur, moveStr, maximizing)
+		if move == nil {
+			break
+		}
+		pv = append(pv, moveStr)
+		cur = applyMoveCopy(cur, move)
+		maximizing = !maximizing
+	}
+	return pv
+}
+
+// parseUCIMove converts a UCI string like "e2e4" or "e7e8q" into a Move.
+func parseUCIMove(state *contracts.MatchState, uci string, maximizing bool) *Move {
+	if len(uci) < 4 {
+		return nil
+	}
+	fromFile := int(uci[0] - 'a')
+	fromRank := int(uci[1] - '1')
+	toFile := int(uci[2] - 'a')
+	toRank := int(uci[3] - '1')
+	if fromFile < 0 || fromFile > 7 || fromRank < 0 || fromRank > 7 ||
+		toFile < 0 || toFile > 7 || toRank < 0 || toRank > 7 {
+		return nil
+	}
+	move := &Move{
+		From: contracts.Square{Row: fromRank, Col: fromFile},
+		To:   contracts.Square{Row: toRank, Col: toFile},
+	}
+	if len(uci) >= 5 {
+		promo := uci[4]
+		switch promo {
+		case 'q':
+			move.Promotion = "queen"
+		case 'r':
+			move.Promotion = "rook"
+		case 'b':
+			move.Promotion = "bishop"
+		case 'n':
+			move.Promotion = "knight"
+		}
+	}
+	return move
+}
+
 func isKingInCheck(state *contracts.MatchState) bool {
 	king := findKingPos(state.Board, state.Turn)
 	if king == nil {
 		return false
 	}
 	return isAttackedWithFusion(state.Board, *king, oppositeColor(state.Turn))
+}
+
+func isInsufficientMaterial(board [][]*contracts.Piece) bool {
+	whitePieces := 0
+	blackPieces := 0
+	whiteBishopSq := -1
+	blackBishopSq := -1
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece == nil || piece.Type == "king" {
+				continue
+			}
+			if piece.Color == "white" {
+				whitePieces++
+				if piece.Type == "bishop" {
+					whiteBishopSq = r*8 + c
+				}
+			} else {
+				blackPieces++
+				if piece.Type == "bishop" {
+					blackBishopSq = r*8 + c
+				}
+			}
+		}
+	}
+	// K vs K
+	if whitePieces == 0 && blackPieces == 0 {
+		return true
+	}
+	// K+B vs K or K+N vs K
+	if whitePieces == 1 && blackPieces == 0 {
+		return true
+	}
+	if whitePieces == 0 && blackPieces == 1 {
+		return true
+	}
+	// K+B vs K+B with same-colored bishops
+	if whitePieces == 1 && blackPieces == 1 {
+		if whiteBishopSq >= 0 && blackBishopSq >= 0 {
+			if whiteBishopSq%2 == blackBishopSq%2 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func cloneMatchState(state *contracts.MatchState) *contracts.MatchState {

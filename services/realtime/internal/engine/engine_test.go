@@ -111,7 +111,7 @@ func TestEvalWhiteAdvantage(t *testing.T) {
 	place(b, 4, 4, "pawn", "black")
 	place(b, 7, 4, "king", "white")
 	place(b, 0, 4, "king", "black")
-	score := Evaluate(b, "white")
+	score := ClassicalEval(b, "white", nil, nil, nil)
 	if score < 100 {
 		t.Errorf("expected white advantage > 100, got %d", score)
 	}
@@ -123,7 +123,7 @@ func TestEvalBlackAdvantage(t *testing.T) {
 	place(b, 4, 4, "pawn", "white")
 	place(b, 7, 4, "king", "white")
 	place(b, 0, 4, "king", "black")
-	score := Evaluate(b, "white")
+	score := ClassicalEval(b, "white", nil, nil, nil)
 	if score > -100 {
 		t.Errorf("expected black advantage < -100, got %d", score)
 	}

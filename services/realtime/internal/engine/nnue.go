@@ -25,9 +25,22 @@ const (
 	nnuePieceTypes = 12  // 6 piece types * 2 colors
 	nnueSquares    = 64  // 8×8 board
 	nnueModifiers  = 5   // lava, bomb, fortress, fog, blackhole
-	nnueInputSize  = nnuePieceTypes*nnueSquares + nnueModifiers
-	nnueHiddenSize = 256
+	nnueHandSize   = 74  // 37 mechanics * 2 players
+	nnueInputSize  = nnuePieceTypes*nnueSquares + nnueModifiers + nnueHandSize
+	nnueHiddenSize = 512
 )
+
+// mechanicNames defines the fixed ordering of hand card features for NNUE.
+// Must match the Python training script ordering exactly.
+var mechanicNames = [37]string{
+	"freeze", "shield", "sniper", "badsniper", "teleport", "jump",
+	"swapme", "swapus", "swaphim", "clone", "halffuse", "fullfusion",
+	"doublemove_same", "doublemove_diff", "promote", "demote", "demotehim", "promotehim",
+	"mindcontrol", "borrow", "reverse", "undo", "mirror", "invisible",
+	"lavaground", "fog_village", "fortress", "radar",
+	"unabomber", "blackhole", "parasite", "fakepiece", "cheater", "gambler",
+	"smallsacrifice", "bigsacrifice", "joker",
+}
 
 var defaultNNUE *NNUE
 
@@ -46,7 +59,15 @@ func NewNNUE() *NNUE {
 }
 
 func (n *NNUE) Load(path string) error {
-	data, err := os.ReadFile(path)
+	var data []byte
+	var err error
+	paths := []string{path, "../" + path, "../../" + path}
+	for _, p := range paths {
+		data, err = os.ReadFile(p)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -56,8 +77,7 @@ func (n *NNUE) Load(path string) error {
 	inputSize := int(binary.LittleEndian.Uint32(data[0:4]))
 	hiddenSize := int(binary.LittleEndian.Uint32(data[4:8]))
 	if inputSize != nnueInputSize || hiddenSize != nnueHiddenSize {
-		inputSize = nnueInputSize
-		hiddenSize = nnueHiddenSize
+		return os.ErrClosed
 	}
 	n.InputSize = inputSize
 	n.HiddenSize = hiddenSize
@@ -96,13 +116,14 @@ func (n *NNUE) Load(path string) error {
 }
 
 // Evaluate returns the NNUE evaluation from white's perspective.
-func (n *NNUE) Evaluate(board [][]*contracts.Piece, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece, fogs []contracts.FogZone, blackHoles []contracts.BlackHoleZone) int {
+func (n *NNUE) Evaluate(board [][]*contracts.Piece, lavas []contracts.LavaSquare, fortresses []contracts.FortressZone, bombs []contracts.BombPiece, fogs []contracts.FogZone, blackHoles []contracts.BlackHoleZone, whiteHand, blackHand []contracts.GameCard) int {
 	if !n.loaded {
 		return 0
 	}
 	input := make([]float32, nnueInputSize)
 	n.encodeBoard(board, input)
 	n.encodeModifiers(lavas, fortresses, bombs, fogs, blackHoles, input)
+	n.encodeHand(whiteHand, blackHand, input)
 
 	hidden := make([]float32, n.HiddenSize)
 	for j := range hidden {
@@ -177,6 +198,31 @@ func (n *NNUE) encodeModifiers(lavas []contracts.LavaSquare, fortresses []contra
 	modOffset++
 	if len(blackHoles) > 0 && modOffset < nnueInputSize {
 		input[modOffset] = 1.0
+	}
+}
+
+// encodeHand fills the hand card input features (74 binary flags: 37 per side).
+func (n *NNUE) encodeHand(whiteHand, blackHand []contracts.GameCard, input []float32) {
+	handOffset := nnuePieceTypes*nnueSquares + nnueModifiers
+
+	whiteMap := make(map[string]bool, len(whiteHand))
+	for _, c := range whiteHand {
+		whiteMap[c.Mechanic] = true
+	}
+	blackMap := make(map[string]bool, len(blackHand))
+	for _, c := range blackHand {
+		blackMap[c.Mechanic] = true
+	}
+
+	for i, mechanic := range mechanicNames {
+		idx := handOffset + i
+		if idx < nnueInputSize && whiteMap[mechanic] {
+			input[idx] = 1.0
+		}
+		idx2 := handOffset + 37 + i
+		if idx2 < nnueInputSize && blackMap[mechanic] {
+			input[idx2] = 1.0
+		}
 	}
 }
 
