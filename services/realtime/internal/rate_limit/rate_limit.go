@@ -127,6 +127,12 @@ func NewRedis(redisURL string) (*RedisRateLimiter, error) {
 	if err != nil {
 		return nil, err
 	}
+	// See the matching comment in platform/match_claims_redis.go: go-redis's
+	// 3s default leaves no margin against a remote managed Redis and causes
+	// spurious "Conn has unread data" pool churn under any latency spike.
+	opts.DialTimeout = 10 * time.Second
+	opts.ReadTimeout = 10 * time.Second
+	opts.WriteTimeout = 10 * time.Second
 	client := redis.NewClient(opts)
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		_ = client.Close()

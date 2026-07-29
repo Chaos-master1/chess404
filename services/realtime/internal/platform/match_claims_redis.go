@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -19,6 +20,15 @@ func newRedisClaimStore(redisURL, key string) (*redisClaimStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	// go-redis's 3s default read/write timeout leaves no margin against a
+	// remote managed Redis (Upstash): a response that arrives just after the
+	// client gives up lands on the connection as unread bytes, which the
+	// pool's next health check reports as "Conn has unread data (not push
+	// notification)" and discards -- one wasted connection (and, if the
+	// caller doesn't retry, one failed request) per slow round trip.
+	options.DialTimeout = 10 * time.Second
+	options.ReadTimeout = 10 * time.Second
+	options.WriteTimeout = 10 * time.Second
 	client := redis.NewClient(options)
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		_ = client.Close()

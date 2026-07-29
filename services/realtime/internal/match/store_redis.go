@@ -44,6 +44,12 @@ func NewRedisMatchStore(redisURL, keyPrefix string) (*RedisMatchStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse redis url: %w", err)
 	}
+	// See the matching comment in platform/match_claims_redis.go: go-redis's
+	// 3s default leaves no margin against a remote managed Redis and causes
+	// spurious "Conn has unread data" pool churn under any latency spike.
+	opts.DialTimeout = 10 * time.Second
+	opts.ReadTimeout = 10 * time.Second
+	opts.WriteTimeout = 10 * time.Second
 	client := redis.NewClient(opts)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

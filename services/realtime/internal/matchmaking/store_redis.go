@@ -3,6 +3,7 @@ package matchmaking
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -19,6 +20,12 @@ func newRedisTicketStore(redisURL, key string) (*redisTicketStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	// See the matching comment in platform/match_claims_redis.go: go-redis's
+	// 3s default leaves no margin against a remote managed Redis and causes
+	// spurious "Conn has unread data" pool churn under any latency spike.
+	options.DialTimeout = 10 * time.Second
+	options.ReadTimeout = 10 * time.Second
+	options.WriteTimeout = 10 * time.Second
 	client := redis.NewClient(options)
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		_ = client.Close()
