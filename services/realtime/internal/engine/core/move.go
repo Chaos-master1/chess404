@@ -105,15 +105,36 @@ func (p *Position) MakeMove(m Move) undo {
 		}
 	}
 
+	p.hash ^= enPassantZobristKey(p.enPassant) // remove the outgoing ep contribution
 	p.enPassant = NoSquare
 	if m.Flag == DoublePawnPush {
 		p.enPassant = NewSquare(m.From.File(), (m.From.Rank()+m.To.Rank())/2)
 	}
+	p.hash ^= enPassantZobristKey(p.enPassant) // add the new one (both are 0/no-op when there's no ep square)
 
+	oldCastling := p.castling
 	p.castling &^= castlingRightsClearedBy(m.From) | castlingRightsClearedBy(m.To)
+	p.hash ^= castlingHashDelta(oldCastling, p.castling)
 
 	p.sideToMove = p.sideToMove.Opposite()
+	p.hash ^= zobristSideKey
 	return u
+}
+
+// castlingHashDelta returns the XOR of every castling-right key whose bit
+// differs between old and new -- shared by MakeMove (rights only ever clear)
+// and UnmakeMove (rights are restored via direct assignment, so a right can
+// "change" in either direction there), so both sides of a make/unmake pair
+// compute the castling contribution the exact same way.
+func castlingHashDelta(oldRights, newRights uint8) uint64 {
+	changed := oldRights ^ newRights
+	var delta uint64
+	for _, right := range [4]uint8{CastleWhiteKingside, CastleWhiteQueenside, CastleBlackKingside, CastleBlackQueenside} {
+		if changed&right != 0 {
+			delta ^= castleZobristKey(right)
+		}
+	}
+	return delta
 }
 
 // UnmakeMove reverses exactly the change MakeMove made, given the undo token
@@ -123,6 +144,7 @@ func (p *Position) MakeMove(m Move) undo {
 // stack).
 func (p *Position) UnmakeMove(u undo) {
 	p.sideToMove = p.sideToMove.Opposite()
+	p.hash ^= zobristSideKey
 	m := u.move
 	mover := p.PieceAt(m.To) // after un-flipping side, m.To still holds the piece that just moved (or its promoted form)
 
@@ -152,7 +174,9 @@ func (p *Position) UnmakeMove(u undo) {
 	if p.sideToMove == Black {
 		p.fullMoveNum--
 	}
+	p.hash ^= castlingHashDelta(p.castling, u.prevCastling)
 	p.castling = u.prevCastling
+	p.hash ^= enPassantZobristKey(p.enPassant) ^ enPassantZobristKey(u.prevEnPassant)
 	p.enPassant = u.prevEnPassant
 	p.halfMoveClock = u.prevHalfMoveClock
 }

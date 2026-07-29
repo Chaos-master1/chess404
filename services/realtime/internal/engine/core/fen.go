@@ -96,6 +96,9 @@ func ParseFEN(fen string) (*Position, error) {
 		}
 	}
 
+	// Side/castling/en-passant above were set directly, bypassing the
+	// hash-aware helpers -- see the matching comment in NewStartingPosition.
+	p.hash = computeHash(p)
 	return p, nil
 }
 

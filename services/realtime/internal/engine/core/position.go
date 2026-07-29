@@ -40,6 +40,12 @@ type Position struct {
 
 	halfMoveClock int
 	fullMoveNum   int
+
+	// hash is the position's Zobrist key, maintained incrementally by
+	// SetPiece/removePiece/movePiece (the piece-placement contribution) and
+	// MakeMove/UnmakeMove (the side/castling/en-passant contribution). See
+	// zobrist.go.
+	hash uint64
 }
 
 const (
@@ -72,6 +78,14 @@ func NewStartingPosition() *Position {
 	}
 	p.castling = CastleWhiteKingside | CastleWhiteQueenside | CastleBlackKingside | CastleBlackQueenside
 	p.fullMoveNum = 1
+	// SetPiece above kept the piece-placement part of the hash correct
+	// incrementally, but castling/side/en-passant were just set directly
+	// above and in NewEmptyPosition, bypassing the hash-aware helpers (there
+	// would be little point making one-time setup code incremental) -- a
+	// full recompute is the simple, obviously-correct way to finish
+	// initializing hash for any construction path, done once here and again
+	// at the end of ParseFEN, never per-move.
+	p.hash = computeHash(p)
 	return p
 }
 
@@ -108,11 +122,16 @@ func (p *Position) PieceAt(sq Square) Piece {
 // SetPiece places piece on sq. sq must currently be empty -- this is a raw
 // board-setup primitive (used by NewStartingPosition and FEN parsing), not a
 // move; it does not touch castling/en-passant/clocks and does not check
-// legality.
+// legality. Maintains Hash() incrementally, same as the move-application
+// primitives below -- setup calls simply XOR each piece's key in one at a
+// time, which is exactly equivalent to a bulk recompute afterward (XOR is
+// order-independent), so board setup and move application share one
+// hash-correctness story instead of two.
 func (p *Position) SetPiece(sq Square, piece Piece) {
 	p.pieces[piece.Index()] = p.pieces[piece.Index()].Set(sq)
 	p.occupied[piece.Color] = p.occupied[piece.Color].Set(sq)
 	p.occupiedAll = p.occupiedAll.Set(sq)
+	p.hash ^= pieceZobristKey(piece, sq)
 }
 
 // removePiece clears whatever piece (if any) sits on sq from all bitboards.
@@ -122,6 +141,7 @@ func (p *Position) removePiece(sq Square, piece Piece) {
 	p.pieces[piece.Index()] = p.pieces[piece.Index()].Clear(sq)
 	p.occupied[piece.Color] = p.occupied[piece.Color].Clear(sq)
 	p.occupiedAll = p.occupiedAll.Clear(sq)
+	p.hash ^= pieceZobristKey(piece, sq)
 }
 
 func (p *Position) movePiece(from, to Square, piece Piece) {
@@ -129,4 +149,5 @@ func (p *Position) movePiece(from, to Square, piece Piece) {
 	p.pieces[piece.Index()] ^= mask
 	p.occupied[piece.Color] ^= mask
 	p.occupiedAll ^= mask
+	p.hash ^= pieceZobristKey(piece, from) ^ pieceZobristKey(piece, to)
 }
