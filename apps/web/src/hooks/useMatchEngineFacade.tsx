@@ -1199,6 +1199,18 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
           const message = err instanceof Error ? err.message : 'Backend rejected move';
           setCardMsg(`Backend move failed: ${message}`);
           setTimeout(() => setCardMsg(''), 2500);
+          // A failed move (stale expectedSeqNum being the most common cause --
+          // e.g. a missed WebSocket update, or a brief reconnect) previously
+          // left the client's tracked sequence number untouched: every retry
+          // resent that same now-permanently-stale value and got rejected
+          // the same way, forever, with no path back to a working state
+          // short of a full page reload. Refetching here feeds a fresh
+          // snapshot (and its seqNum) through the same applyAuthoritativeSnapshot
+          // path a successful move already uses, so the next attempt starts
+          // from current state instead of repeating the same failure.
+          void fetchMatch(matchId).then(snapshot => {
+            applyAuthoritativeSnapshot(snapshot);
+          }).catch(() => {});
         });
         return;
       }

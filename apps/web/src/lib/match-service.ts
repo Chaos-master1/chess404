@@ -167,11 +167,31 @@ export async function applyIntent(matchId: string, intent: Omit<PlayerIntent, 'm
     })
   });
 
-  const snapshot = await unwrapResponse<MatchSnapshotMessage>(response);
-  if (snapshot?.seqNum && snapshot.seqNum > 0) {
-    latestSeqByMatch.set(matchId, snapshot.seqNum);
+  try {
+    const snapshot = await unwrapResponse<MatchSnapshotMessage>(response);
+    if (snapshot?.seqNum && snapshot.seqNum > 0) {
+      latestSeqByMatch.set(matchId, snapshot.seqNum);
+    }
+    return snapshot;
+  } catch (err) {
+    // The most common rejection here is the server's staleness check
+    // (expectedSeqNum behind its current counter) -- typically because a
+    // WebSocket update was missed during a brief disconnect. Every caller
+    // of applyIntent (moves, card plays, target selection, joker picks...)
+    // read latestSeqByMatch fresh on each attempt but nothing wrote to it
+    // again after a failure, so a client that fell behind once resent that
+    // same now-permanently-stale value on every retry and failed the same
+    // way forever, with no path back short of a full page reload. This
+    // does not change what the caller sees -- the same error still
+    // rejects the same way -- it just refreshes the tracked seq in the
+    // background so the *next* attempt has a chance of succeeding.
+    void fetchMatch(matchId).then(fresh => {
+      if (fresh?.seqNum && fresh.seqNum > 0) {
+        latestSeqByMatch.set(matchId, fresh.seqNum);
+      }
+    }).catch(() => {});
+    throw err;
   }
-  return snapshot;
 }
 
 export async function sendMatchPresenceHeartbeat(
