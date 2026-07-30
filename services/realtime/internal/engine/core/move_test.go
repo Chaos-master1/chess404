@@ -273,6 +273,132 @@ func TestEnPassantSquareClearsAfterAnyNonDoublePushMove(t *testing.T) {
 	p.UnmakeMove(u1)
 }
 
+// pieceBitboardsAreConsistent reports whether every piece-type bitboard
+// is pairwise disjoint and their union matches Occupied/OccupiedAll --
+// the invariant TestMakeMoveIgnoresPawnOnlyFlagsForANonPawnMover checks,
+// since a two-piece-types-claim-the-same-square corruption wouldn't
+// necessarily show up in assertRestored's before/after diff if the
+// corruption happens to leave the FINAL restored state looking correct
+// while the intermediate (post-MakeMove, pre-Unmake) state is broken.
+func pieceBitboardsAreConsistent(p *Position) bool {
+	var union, whiteUnion, blackUnion Bitboard
+	for _, pt := range []PieceType{Pawn, Knight, Bishop, Rook, Queen, King} {
+		for _, c := range []Color{White, Black} {
+			bb := p.PieceBitboard(pt, c)
+			if bb&union != 0 {
+				return false
+			}
+			union |= bb
+			if c == White {
+				whiteUnion |= bb
+			} else {
+				blackUnion |= bb
+			}
+		}
+	}
+	return union == p.OccupiedAll() && whiteUnion == p.Occupied(White) && blackUnion == p.Occupied(Black)
+}
+
+// TestMakeMoveIgnoresPawnOnlyFlagsForANonPawnMover is a permanent
+// regression test for a real corruption bug: engine/core/overlays_movegen.go's
+// generateFusionMoves lets a piece fused with Pawn (CardOverlay.fusedWith)
+// generate moves via the full pawn move pattern -- including
+// DoublePawnPush, EnPassantCapture, and promotion -- matching
+// internal/match's own legalMovesWithFusion, which generates candidates
+// against a board with the piece temporarily RELABELED as its fused type.
+// But the reference gates every pawn-specific CONSEQUENCE of applying
+// such a move (chess.go's `moving.Type == "pawn"` checks in movePiece)
+// on the piece's REAL type, never on how the candidate was generated --
+// and this package's MakeMove/UnmakeMove used to trust
+// m.Flag/m.IsPromotion() unconditionally instead. Applying a
+// promotion-flagged move for a REAL Knight (e.g. fused with Pawn,
+// "promoting" via the fabricated pattern on reaching the back rank)
+// moved the Knight to the destination via movePiece, then ALSO set the
+// promoted piece type there without ever clearing the Knight's own bit --
+// two piece-type bitboards claiming the same square. Found via a real
+// gauntlet run (Task 10) crashing with exactly this shape of corruption
+// several plies later, root-caused via an isolated
+// actions.ApplyCardAction consistency test (actions/fusion_diag_test.go)
+// that first showed applyFusion itself was clean, narrowing it down to
+// this file. Fixed via undo.realPawnMove, decided once from the mover's
+// ACTUAL type at MakeMove time and consulted symmetrically by UnmakeMove.
+func TestMakeMoveIgnoresPawnOnlyFlagsForANonPawnMover(t *testing.T) {
+	t.Run("promotion-flagged move for a real Knight does not corrupt bitboards", func(t *testing.T) {
+		p := NewEmptyPosition()
+		p.SetPiece(NewSquare(4, 0), Piece{Type: King, Color: White})
+		p.SetPiece(NewSquare(4, 7), Piece{Type: King, Color: Black})
+		knightSq := NewSquare(2, 6) // c7, one step from a fabricated "promotion" on rank 8
+		p.SetPiece(knightSq, Piece{Type: Knight, Color: White})
+		before := snapshot(p)
+		if !pieceBitboardsAreConsistent(p) {
+			t.Fatal("test setup itself is inconsistent")
+		}
+
+		// A move no REAL knight move generator would ever produce (a
+		// diagonal one-step landing on the promotion rank with a
+		// Promotion field set) -- exactly the shape generateFusionMoves
+		// can fabricate for a Knight fused with Pawn.
+		fake := Move{From: knightSq, To: NewSquare(3, 7), Promotion: Queen, Flag: Quiet}
+		u := p.MakeMove(fake)
+		if !pieceBitboardsAreConsistent(p) {
+			t.Fatalf("bitboards inconsistent after MakeMove: FEN=%q", p.ToFEN())
+		}
+		if got := p.PieceAt(fake.To); got.Type != Knight || got.Color != White {
+			t.Fatalf("expected the REAL knight (not a queen) to have moved to %v, got %+v", fake.To, got)
+		}
+		if !p.PieceAt(fake.From).IsNone() {
+			t.Fatalf("expected %v to be empty after the knight moved away", fake.From)
+		}
+
+		p.UnmakeMove(u)
+		assertRestored(t, before, snapshot(p))
+	})
+
+	t.Run("en-passant-flagged move for a real Bishop is a plain relocation", func(t *testing.T) {
+		p := NewEmptyPosition()
+		p.SetPiece(NewSquare(4, 0), Piece{Type: King, Color: White})
+		p.SetPiece(NewSquare(4, 7), Piece{Type: King, Color: Black})
+		bishopSq := NewSquare(3, 3) // d4
+		p.SetPiece(bishopSq, Piece{Type: Bishop, Color: White})
+		// A real pawn sitting where EnPassantCapture's capture-square math
+		// would look -- if the bug were present, this pawn would be
+		// wrongly removed even though the REAL mover isn't a pawn.
+		phantomVictimSq := NewSquare(4, 3) // e4
+		p.SetPiece(phantomVictimSq, Piece{Type: Pawn, Color: Black})
+		before := snapshot(p)
+
+		fake := Move{From: bishopSq, To: NewSquare(4, 2), Flag: EnPassantCapture} // d4 -> e3
+		u := p.MakeMove(fake)
+		if !pieceBitboardsAreConsistent(p) {
+			t.Fatalf("bitboards inconsistent after MakeMove: FEN=%q", p.ToFEN())
+		}
+		if got := p.PieceAt(phantomVictimSq); got.Type != Pawn || got.Color != Black {
+			t.Fatalf("expected the real black pawn on e4 to be untouched (mover wasn't really a pawn), got %+v", got)
+		}
+		if got := p.PieceAt(fake.To); got.Type != Bishop || got.Color != White {
+			t.Fatalf("expected the bishop to have relocated to %v, got %+v", fake.To, got)
+		}
+
+		p.UnmakeMove(u)
+		assertRestored(t, before, snapshot(p))
+	})
+
+	t.Run("double-pawn-push-flagged move for a real Rook does not open an en passant square", func(t *testing.T) {
+		p := NewEmptyPosition()
+		p.SetPiece(NewSquare(4, 0), Piece{Type: King, Color: White})
+		p.SetPiece(NewSquare(4, 7), Piece{Type: King, Color: Black})
+		rookSq := NewSquare(0, 1) // a2
+		p.SetPiece(rookSq, Piece{Type: Rook, Color: White})
+
+		fake := Move{From: rookSq, To: NewSquare(0, 3), Flag: DoublePawnPush} // a2 -> a4
+		u := p.MakeMove(fake)
+		if p.EnPassant() != NoSquare {
+			t.Fatalf("expected no en-passant square to open for a non-pawn's move, got %v", p.EnPassant())
+		}
+		p.UnmakeMove(u)
+	})
+}
+
 // TestMakeUnmakeSequenceRestoresStartingPosition plays a short, ordinary
 // sequence of moves (including a capture) and unmakes them in reverse order,
 // checking that the ENTIRE chain returns exactly to the starting position --

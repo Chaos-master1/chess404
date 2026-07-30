@@ -3,6 +3,7 @@ package search
 import (
 	"math/rand"
 	"sort"
+	"time"
 
 	"github.com/chess404/realtime/internal/engine/actions"
 	"github.com/chess404/realtime/internal/engine/core"
@@ -47,6 +48,60 @@ func FairPlaySearch(p *core.Position, ov *core.CardOverlay, myHand actions.Hand,
 		for i, a := range root {
 			score := s.applyAndRecurse(p, ov, hands, myColor, a, true, depth, 1, -scoreInfinity, scoreInfinity)
 			totals[i] += float64(score)
+		}
+	}
+
+	results := make([]SearchResult, len(root))
+	for i, a := range root {
+		results[i] = SearchResult{Action: a, Score: totals[i] / float64(samples)}
+	}
+	sort.Slice(results, func(i, j int) bool { return results[i].Score > results[j].Score })
+	return results
+}
+
+// FairPlaySearchTimed is FairPlaySearch's wall-clock-budgeted counterpart
+// -- FairPlaySearch alone only takes a fixed depth, with no way to say
+// "think for up to 500ms", which a real difficulty ladder (matching the
+// OLD engine's own time-budget-driven design, see opponent.go's
+// Difficulty.TimeLimit) needs. The overall timeLimit is split evenly
+// across the `samples` PIMC iterations (each imagined opponent hand gets
+// an equal time slice); WITHIN each sample, every root action is
+// iteratively deepened together (depth 1, 2, 3, ...) so every action in
+// that sample is always compared at the SAME depth -- deepening one
+// action further than its siblings within a single sample would make
+// that sample's aggregate score incomparable across actions. Each
+// sample's contribution to totals is its last FULLY completed depth,
+// exactly like BestMoveTimed never uses a partially-searched depth.
+func FairPlaySearchTimed(p *core.Position, ov *core.CardOverlay, myHand actions.Hand, myColor core.Color, opponentHandSize, samples int, timeLimit time.Duration, maxDepth int, rng *rand.Rand) []SearchResult {
+	root := actions.GenerateActions(p, ov, myHand, true)
+	if len(root) == 0 {
+		return nil
+	}
+
+	perSampleBudget := timeLimit / time.Duration(samples)
+	totals := make([]float64, len(root))
+
+	for iter := 0; iter < samples; iter++ {
+		opponentHand := actions.SampleHand(rng, opponentHandSize)
+		hands := Hands{}.With(myColor, myHand).With(myColor.Opposite(), opponentHand)
+		s := NewSearcher()
+		deadline := time.Now().Add(perSampleBudget)
+
+		lastCompleted := make([]float64, len(root))
+		for depth := 1; depth <= maxDepth; depth++ {
+			if depth > 1 && time.Now().After(deadline) {
+				break
+			}
+			for i, a := range root {
+				score := s.applyAndRecurse(p, ov, hands, myColor, a, true, depth, 1, -scoreInfinity, scoreInfinity)
+				lastCompleted[i] = float64(score)
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+		}
+		for i := range totals {
+			totals[i] += lastCompleted[i]
 		}
 	}
 

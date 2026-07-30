@@ -40,11 +40,15 @@ func (m Move) IsPromotion() bool { return m.Promotion != NoPieceType }
 // position snapshot per ply -- the entire point of make/unmake over the
 // previous engine's per-node deep copy.
 type undo struct {
-	move             Move
-	captured         PieceType // NoPieceType if the move was not a capture
-	prevCastling     uint8
-	prevEnPassant    Square
+	move              Move
+	captured          PieceType // NoPieceType if the move was not a capture
+	prevCastling      uint8
+	prevEnPassant     Square
 	prevHalfMoveClock int
+	// realPawnMove records whether the piece ACTUALLY on m.From was a
+	// pawn, decided once at MakeMove time -- see its doc comment for why
+	// this can't just be re-derived from m.Flag/m.IsPromotion() alone.
+	realPawnMove bool
 }
 
 // MakeMove applies move to the position in place and returns an undo token
@@ -53,8 +57,35 @@ type undo struct {
 // self-check afterward) move -- MakeMove does not validate legality, matching
 // standard engine practice: legality filtering happens once during move
 // generation, not redundantly on every apply.
+//
+// realPawnMove (mover.Type == Pawn, decided ONCE here from what's actually
+// on m.From) gates every pawn-specific consequence below -- en passant's
+// phantom-pawn removal, opening a NEW en-passant square, and the
+// promotion piece-swap -- rather than trusting m.Flag/m.IsPromotion()
+// alone. Those fields describe the SHAPE of the destination square (a
+// diagonal move to a square the mover doesn't defend, a two-square
+// forward hop, landing on the back rank), which a card-fused piece
+// generating moves "as if" it were a pawn (engine/core's
+// generateFusionMoves, for a piece whose CardOverlay.fusedWith secondary
+// type is Pawn) can produce too -- matching internal/match's own
+// legalMovesWithFusion, which generates candidates against a temporarily
+// RELABELED board. The reference gates every one of these consequences on
+// the piece's REAL type at application time instead (chess.go's
+// `moving.Type == "pawn"` checks in movePiece/hasLegalMoveWithFusion,
+// never on how the candidate was generated), and mirroring that split
+// here is not optional: applying a promotion-flagged move for the mover's
+// REAL type (e.g. a Knight, fused with Pawn, "promoting" on the back rank
+// via the fabricated pattern) without this gate corrupts the board --
+// movePiece already placed the real Knight at m.To, then the promotion
+// swap below would ALSO set the promoted type there without ever
+// clearing the Knight's own bit, leaving two piece-type bitboards
+// claiming the same square. Caught via an isolated fusion consistency
+// test after a gauntlet run crashed on exactly this shape of corruption
+// (core_test.go's TestMakeMoveIgnoresPawnOnlyFlagsForANonPawnMover and
+// actions/fusion_diag_test.go).
 func (p *Position) MakeMove(m Move) undo {
 	mover := p.PieceAt(m.From)
+	realPawnMove := mover.Type == Pawn
 	captured := NoPieceType
 	if capPiece := p.PieceAt(m.To); !capPiece.IsNone() && m.Flag != CastleKingside && m.Flag != CastleQueenside {
 		captured = capPiece.Type
@@ -66,12 +97,13 @@ func (p *Position) MakeMove(m Move) undo {
 		prevCastling:      p.castling,
 		prevEnPassant:     p.enPassant,
 		prevHalfMoveClock: p.halfMoveClock,
+		realPawnMove:      realPawnMove,
 	}
 
 	// Clock bookkeeping happens before mutating the board: both the "was
 	// this a pawn move" and "was this a capture" checks need the
 	// pre-move state.
-	if mover.Type == Pawn || captured != NoPieceType {
+	if realPawnMove || captured != NoPieceType {
 		p.halfMoveClock = 0
 	} else {
 		p.halfMoveClock++
@@ -82,10 +114,12 @@ func (p *Position) MakeMove(m Move) undo {
 
 	switch m.Flag {
 	case EnPassantCapture:
-		capSq := NewSquare(m.To.File(), m.From.Rank())
-		p.removePiece(capSq, Piece{Type: Pawn, Color: mover.Color.Opposite()})
+		if realPawnMove {
+			capSq := NewSquare(m.To.File(), m.From.Rank())
+			p.removePiece(capSq, Piece{Type: Pawn, Color: mover.Color.Opposite()})
+			u.captured = Pawn // en passant is always a pawn capture; PieceAt(m.To) above found nothing, since the captured pawn isn't on m.To
+		}
 		p.movePiece(m.From, m.To, mover)
-		u.captured = Pawn // en passant is always a pawn capture; PieceAt(m.To) above found nothing, since the captured pawn isn't on m.To
 
 	case CastleKingside, CastleQueenside:
 		p.movePiece(m.From, m.To, mover)
@@ -97,7 +131,7 @@ func (p *Position) MakeMove(m Move) undo {
 			p.removePiece(m.To, Piece{Type: captured, Color: mover.Color.Opposite()})
 		}
 		p.movePiece(m.From, m.To, mover)
-		if m.IsPromotion() {
+		if m.IsPromotion() && realPawnMove {
 			// The pawn already "moved" to m.To above; swap it for the
 			// promoted piece there.
 			p.removePiece(m.To, Piece{Type: Pawn, Color: mover.Color})
@@ -107,7 +141,7 @@ func (p *Position) MakeMove(m Move) undo {
 
 	p.hash ^= enPassantZobristKey(p.enPassant) // remove the outgoing ep contribution
 	p.enPassant = NoSquare
-	if m.Flag == DoublePawnPush {
+	if m.Flag == DoublePawnPush && realPawnMove {
 		p.enPassant = NewSquare(m.From.File(), (m.From.Rank()+m.To.Rank())/2)
 	}
 	p.hash ^= enPassantZobristKey(p.enPassant) // add the new one (both are 0/no-op when there's no ep square)
@@ -151,8 +185,10 @@ func (p *Position) UnmakeMove(u undo) {
 	switch m.Flag {
 	case EnPassantCapture:
 		p.movePiece(m.To, m.From, mover)
-		capSq := NewSquare(m.To.File(), m.From.Rank())
-		p.SetPiece(capSq, Piece{Type: Pawn, Color: mover.Color.Opposite()})
+		if u.realPawnMove {
+			capSq := NewSquare(m.To.File(), m.From.Rank())
+			p.SetPiece(capSq, Piece{Type: Pawn, Color: mover.Color.Opposite()})
+		}
 
 	case CastleKingside, CastleQueenside:
 		p.movePiece(m.To, m.From, mover)
@@ -160,7 +196,7 @@ func (p *Position) UnmakeMove(u undo) {
 		p.movePiece(rookTo, rookFrom, Piece{Type: Rook, Color: mover.Color})
 
 	default:
-		if m.IsPromotion() {
+		if m.IsPromotion() && u.realPawnMove {
 			p.removePiece(m.To, Piece{Type: m.Promotion, Color: mover.Color})
 			p.SetPiece(m.To, Piece{Type: Pawn, Color: mover.Color})
 			mover = Piece{Type: Pawn, Color: mover.Color}

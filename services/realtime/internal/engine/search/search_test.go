@@ -3,6 +3,7 @@ package search
 import (
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/chess404/realtime/internal/engine/actions"
 	"github.com/chess404/realtime/internal/engine/core"
@@ -126,6 +127,30 @@ func TestFairPlaySearchReturnsSortedAggregatedResults(t *testing.T) {
 	top := results[0]
 	if top.Action.Kind != actions.ActionMove || top.Action.Move.To != core.NewSquare(0, 7) {
 		t.Errorf("expected the top-ranked action to still be capturing the hanging queen despite hidden-hand sampling, got %+v", top.Action)
+	}
+}
+
+func TestFairPlaySearchTimedReturnsSortedAggregatedResults(t *testing.T) {
+	p := core.NewEmptyPosition()
+	p.SetPiece(core.NewSquare(4, 0), core.Piece{Type: core.King, Color: core.White})
+	p.SetPiece(core.NewSquare(0, 0), core.Piece{Type: core.Rook, Color: core.White})
+	p.SetPiece(core.NewSquare(4, 7), core.Piece{Type: core.King, Color: core.Black})
+	p.SetPiece(core.NewSquare(0, 7), core.Piece{Type: core.Queen, Color: core.Black})
+	ov := core.NewCardOverlay()
+	rng := rand.New(rand.NewSource(1))
+
+	results := FairPlaySearchTimed(p, ov, nil, core.White, 3, 4, 200*time.Millisecond, 32, rng)
+	if len(results) == 0 {
+		t.Fatal("expected at least one root action")
+	}
+	for i := 1; i < len(results); i++ {
+		if results[i].Score > results[i-1].Score {
+			t.Fatalf("expected results sorted descending by score, index %d (%v) > index %d (%v)", i, results[i].Score, i-1, results[i-1].Score)
+		}
+	}
+	top := results[0]
+	if top.Action.Kind != actions.ActionMove || top.Action.Move.To != core.NewSquare(0, 7) {
+		t.Errorf("expected the top-ranked action to still be capturing the hanging queen despite hidden-hand sampling and a time budget, got %+v", top.Action)
 	}
 }
 
