@@ -3,6 +3,7 @@ package search
 import (
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/chess404/realtime/internal/engine/core"
 )
@@ -52,5 +53,22 @@ func TestSelfPlayActuallyPlaysCards(t *testing.T) {
 	}
 	if !cardWasPlayed {
 		t.Fatal("expected at least one card to be played across 15 self-play games, but no hand size ever decreased")
+	}
+}
+
+func TestGenerateSelfPlayGameTimedProducesValidRecords(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	records := GenerateSelfPlayGameTimed(defaultEvaluator, rng, 20*time.Millisecond, 32, 20, 4)
+
+	if len(records) == 0 {
+		t.Fatal("expected at least one recorded position")
+	}
+	for i, r := range records {
+		if _, err := core.ParseFEN(r.FEN); err != nil {
+			t.Fatalf("record %d: FEN %q does not parse: %v", i, r.FEN, err)
+		}
+		if r.Label < -outcomeScale || r.Label > outcomeScale {
+			t.Fatalf("record %d: expected Label within [-%v, %v], got %v", i, outcomeScale, outcomeScale, r.Label)
+		}
 	}
 }
