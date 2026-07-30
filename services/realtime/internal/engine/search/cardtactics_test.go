@@ -37,8 +37,11 @@ func TestBestMoveCoordinatesShieldThenSurvive(t *testing.T) {
 	hands := Hands{White: actions.Hand{{ID: "c1", Mechanic: actions.MechanicShield}}}
 
 	s := NewSearcher()
-	best, _ := s.BestMove(p, ov, hands, core.White, true, 2)
+	best, _, ok := s.BestMove(p, ov, hands, core.White, true, 2)
 
+	if !ok {
+		t.Fatal("expected BestMove to find an action")
+	}
 	if best.Kind != actions.ActionCard || best.Card.Mechanic != actions.MechanicShield {
 		t.Fatalf("expected the engine to shield the hanging queen before Black can take it, got %+v", best)
 	}
@@ -65,8 +68,11 @@ func TestBestMoveCoordinatesFusionThenCapture(t *testing.T) {
 	hands := Hands{White: actions.Hand{{ID: "c1", Mechanic: actions.MechanicFullFusion}}}
 
 	s := NewSearcher()
-	best, _ := s.BestMove(p, ov, hands, core.White, true, 2)
+	best, _, ok := s.BestMove(p, ov, hands, core.White, true, 2)
 
+	if !ok {
+		t.Fatal("expected BestMove to find an action")
+	}
 	if best.Kind != actions.ActionCard || best.Card.Mechanic != actions.MechanicFullFusion {
 		t.Fatalf("expected the engine to fuse the rook and bishop before capturing the queen, got %+v", best)
 	}

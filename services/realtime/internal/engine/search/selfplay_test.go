@@ -18,8 +18,13 @@ func TestGenerateSelfPlayGameProducesValidRecords(t *testing.T) {
 		if _, err := core.ParseFEN(r.FEN); err != nil {
 			t.Fatalf("record %d: FEN %q does not parse: %v", i, r.FEN, err)
 		}
-		if r.Label != -outcomeScale && r.Label != 0 && r.Label != outcomeScale {
-			t.Fatalf("record %d: expected Label to be one of {-%v, 0, %v}, got %v", i, outcomeScale, outcomeScale, r.Label)
+		// Label is +/-outcomeScale for a genuine checkmate, 0 for a genuine
+		// stalemate, or (GenerateSelfPlayGame's `decided` handling) any
+		// value in between for a game adjudicated by final material
+		// balance -- so the only universal invariant is the same [-scale,
+		// scale] range a checkmate itself produces.
+		if r.Label < -outcomeScale || r.Label > outcomeScale {
+			t.Fatalf("record %d: expected Label within [-%v, %v], got %v", i, outcomeScale, outcomeScale, r.Label)
 		}
 		if r.WhiteHandSize < 0 || r.BlackHandSize < 0 {
 			t.Fatalf("record %d: negative hand size (white=%d black=%d)", i, r.WhiteHandSize, r.BlackHandSize)

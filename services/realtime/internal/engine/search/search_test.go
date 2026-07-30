@@ -19,8 +19,11 @@ func TestBestMoveFindsMateInOne(t *testing.T) {
 	ov := core.NewCardOverlay()
 
 	s := NewSearcher()
-	best, score := s.BestMove(p, ov, Hands{}, core.White, true, 2)
+	best, score, ok := s.BestMove(p, ov, Hands{}, core.White, true, 2)
 
+	if !ok {
+		t.Fatal("expected BestMove to find an action")
+	}
 	if best.Kind != actions.ActionMove || best.Move.To != core.NewSquare(0, 7) {
 		t.Fatalf("expected Ra1-a8# (mate on the back rank), got %+v", best)
 	}
@@ -38,8 +41,11 @@ func TestBestMoveFindsHangingCapture(t *testing.T) {
 	ov := core.NewCardOverlay()
 
 	s := NewSearcher()
-	best, _ := s.BestMove(p, ov, Hands{}, core.White, true, 2)
+	best, _, ok := s.BestMove(p, ov, Hands{}, core.White, true, 2)
 
+	if !ok {
+		t.Fatal("expected BestMove to find an action")
+	}
 	if best.Kind != actions.ActionMove || best.Move.To != core.NewSquare(0, 7) {
 		t.Fatalf("expected Rxa8 capturing the undefended queen, got %+v", best)
 	}
@@ -65,8 +71,11 @@ func TestBestMoveCoordinatesFreezeThenCapture(t *testing.T) {
 	hands := Hands{White: actions.Hand{{ID: "c1", Mechanic: actions.MechanicFreeze}}}
 
 	s := NewSearcher()
-	best, _ := s.BestMove(p, ov, hands, core.White, true, 2)
+	best, _, ok := s.BestMove(p, ov, hands, core.White, true, 2)
 
+	if !ok {
+		t.Fatal("expected BestMove to find an action")
+	}
 	if best.Kind != actions.ActionCard || best.Card.Mechanic != actions.MechanicFreeze {
 		t.Fatalf("expected the engine to play Freeze on the defending knight before capturing, got %+v", best)
 	}
@@ -80,9 +89,9 @@ func TestNegamaxIsScoreConsistentAcrossPerspectives(t *testing.T) {
 	ov := core.NewCardOverlay()
 	s := NewSearcher()
 
-	_, whiteScore := s.BestMove(p, ov, Hands{}, core.White, true, 2)
+	_, whiteScore, _ := s.BestMove(p, ov, Hands{}, core.White, true, 2)
 	s2 := NewSearcher()
-	_, blackScore := s2.BestMove(p, ov, Hands{}, core.Black, true, 2)
+	_, blackScore, _ := s2.BestMove(p, ov, Hands{}, core.Black, true, 2)
 
 	// The symmetric starting position should score close to 0 for either
 	// side to move (not an exact equality -- search finds a real best line
@@ -120,18 +129,71 @@ func TestFairPlaySearchReturnsSortedAggregatedResults(t *testing.T) {
 	}
 }
 
+// TestBestMoveReportsNoActionWhenEveryMobilePieceIsFrozen is a permanent
+// regression test for a real corruption bug: BestMove used to return a
+// zero-valued actions.Action{} (Move{From:a1,To:a1}, a degenerate
+// same-square "move") whenever GenerateActions found nothing, and every
+// caller trusted it blindly. core.Position.movePiece's `from.Bit() |
+// to.Bit()` mask collapses to a SINGLE bit when From==To, so the XOR
+// toggles that bit OFF instead of leaving the piece in place -- silently
+// deleting whatever piece sat on a1 from the board. Caught by self-play
+// hitting exactly this position shape ~40 plies into a real game: every
+// mobile piece frozen, nothing submittable, but not checkmate/stalemate
+// (TerminalStatus is deliberately Frozen-blind, see actions/terminal.go).
+// selfplay.go's GenerateSelfPlayGame now checks BestMove's ok return and
+// ends the game gracefully instead of applying the placeholder Action.
+//
+// This position: White's king on a1 is boxed in NOT by occupancy but by
+// three Black knights covering all three of its escape squares (a2, b1,
+// b2) without attacking a1 itself -- so the king has zero legal moves but
+// isn't in check. White's only other piece, a knight on g5, has several
+// real legal moves (so raw GenerateLegalMovesWithOverlay is non-empty --
+// not stalemate) but is Frozen, so GenerateSubmittableMoves filters it
+// out -- leaving GenerateActions with literally nothing for White's
+// (cardless) turn.
+func TestBestMoveReportsNoActionWhenEveryMobilePieceIsFrozen(t *testing.T) {
+	p := core.NewEmptyPosition()
+	p.SetPiece(core.NewSquare(0, 0), core.Piece{Type: core.King, Color: core.White})   // a1
+	knight := core.NewSquare(6, 4)                                                     // g5
+	p.SetPiece(knight, core.Piece{Type: core.Knight, Color: core.White})
+	p.SetPiece(core.NewSquare(7, 7), core.Piece{Type: core.King, Color: core.Black})    // h8
+	p.SetPiece(core.NewSquare(1, 3), core.Piece{Type: core.Knight, Color: core.Black})  // b4, covers a2
+	p.SetPiece(core.NewSquare(3, 1), core.Piece{Type: core.Knight, Color: core.Black})  // d2, covers b1
+	p.SetPiece(core.NewSquare(2, 3), core.Piece{Type: core.Knight, Color: core.Black})  // c4, covers b2
+	ov := core.NewCardOverlay()
+	ov.SetFrozen(knight, true)
+
+	if status := actions.TerminalStatus(p, ov, nil); status != core.Ongoing {
+		t.Fatalf("expected Ongoing (Frozen-blind: the knight's raw moves keep this from being stalemate), got %v", status)
+	}
+	if len(core.GenerateSubmittableMoves(p, ov)) != 0 {
+		t.Fatal("expected zero submittable moves: the king is boxed in and the only mobile piece is frozen")
+	}
+
+	posBefore := *p
+	s := NewSearcher()
+	best, _, ok := s.BestMove(p, ov, Hands{}, core.White, true, 2)
+
+	if ok {
+		t.Fatalf("expected BestMove to report no action available, got ok=true best=%+v", best)
+	}
+	if *p != posBefore {
+		t.Fatal("BestMove must not mutate the position when it finds no action")
+	}
+}
+
 func TestTranspositionTableExactBoundMatchesFreshSearch(t *testing.T) {
 	p := core.NewStartingPosition()
 	ov := core.NewCardOverlay()
 
 	fresh := NewSearcher()
-	_, freshScore := fresh.BestMove(p, ov, Hands{}, core.White, true, 2)
+	_, freshScore, _ := fresh.BestMove(p, ov, Hands{}, core.White, true, 2)
 
 	// Warm start: reuse the same Searcher (and its populated TT) for a
 	// second, identical search -- if the TT's bound classification were
 	// wrong (the exact bug the plan flags in the old engine), a stale
 	// cutoff could return a different, wrong answer here.
-	_, warmScore := fresh.BestMove(p, ov, Hands{}, core.White, true, 2)
+	_, warmScore, _ := fresh.BestMove(p, ov, Hands{}, core.White, true, 2)
 
 	if freshScore != warmScore {
 		t.Errorf("expected the TT-warmed search to reach the identical score, got %d fresh vs %d warm", freshScore, warmScore)

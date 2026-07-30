@@ -49,6 +49,11 @@ func defaultEvaluator(p *core.Position, ov *core.CardOverlay, _ Hands, mover cor
 	return evaluateForMover(p, ov, mover)
 }
 
+// DefaultEvaluator exposes the placeholder material+overlay Evaluator to
+// callers outside this package (e.g. cmd/nnue-selfplay) that need a
+// working Evaluator without training or loading an nnue.Network.
+var DefaultEvaluator Evaluator = defaultEvaluator
+
 // Searcher holds the transposition table, node counter, and evaluator for
 // one search (or one PIMC sample's search -- pimc.go creates a fresh
 // Searcher per sample so samples don't share/pollute each other's TT).
@@ -70,6 +75,19 @@ func NewSearcherWithEval(eval Evaluator) *Searcher {
 	return &Searcher{tt: NewTranspositionTable(defaultTTSlots), eval: eval}
 }
 
+// NewSearcherWithEvalAndTTSize is NewSearcherWithEval with an explicit TT
+// slot count, for callers that construct a fresh Searcher per DECISION
+// rather than per game/session (selfplay.go: a new Searcher for every
+// ply, sometimes twice). defaultTTSlots (1<<20, ~33MB of ttEntry) is sized
+// for one long-lived search, not for being allocated thousands of times
+// in a tight loop -- doing that anyway is what caused a real out-of-memory
+// runtime crash generating a multi-hundred-game, 200-ply self-play
+// dataset (GC couldn't keep up with the allocation churn). A shallow,
+// throwaway search needs nowhere near a million slots.
+func NewSearcherWithEvalAndTTSize(eval Evaluator, ttSlots int) *Searcher {
+	return &Searcher{tt: NewTranspositionTable(ttSlots), eval: eval}
+}
+
 func (s *Searcher) Nodes() int64 { return s.nodes }
 
 // BestMove runs a fixed-depth negamax from (p, ov, hands) for mover, with
@@ -84,10 +102,26 @@ func (s *Searcher) Nodes() int64 { return s.nodes }
 // and apply each step itself -- calls BestMove a second time with
 // allowCard=false to get just the mandatory move that completes a turn
 // after a card was already played.
-func (s *Searcher) BestMove(p *core.Position, ov *core.CardOverlay, hands Hands, mover core.Color, allowCard bool, depth int) (actions.Action, int) {
+//
+// The third return value reports whether any action exists at all. A
+// mover can legitimately have ZERO submittable actions here without the
+// position being checkmate/stalemate: TerminalStatus is deliberately
+// Frozen-blind (matching internal/match), but GenerateActions' move half
+// is Frozen-aware, so "every mobile piece happens to be frozen right now"
+// falls through Terminal Status's check and lands here instead. When ok
+// is false, Action/score are meaningless placeholders -- callers must NOT
+// apply the returned Move. This used to return a zero-valued
+// actions.Action{} in that case, which callers trusted blindly: its zero
+// Move is {From: a1, To: a1} (Square 0), a degenerate same-square "move"
+// that core.Position.movePiece's `from.Bit()|to.Bit()` XOR trick corrupts
+// silently -- collapsing to a single bit toggles the mover's own piece
+// OFF the board instead of leaving it in place. Caught by self-play
+// hitting exactly this frozen-lockout scenario deep into a real game (see
+// selfplay_test.go's TestGenerateSelfPlayGameHandlesNoAvailableAction).
+func (s *Searcher) BestMove(p *core.Position, ov *core.CardOverlay, hands Hands, mover core.Color, allowCard bool, depth int) (actions.Action, int, bool) {
 	acts := actions.GenerateActions(p, ov, hands.For(mover), allowCard)
 	if len(acts) == 0 {
-		return actions.Action{}, s.eval(p, ov, hands, mover)
+		return actions.Action{}, s.eval(p, ov, hands, mover), false
 	}
 	orderActions(p, acts)
 
@@ -104,7 +138,7 @@ func (s *Searcher) BestMove(p *core.Position, ov *core.CardOverlay, hands Hands,
 			alpha = bestScore
 		}
 	}
-	return best, bestScore
+	return best, bestScore, true
 }
 
 // negamax is the recursive alpha-beta core. depth counts remaining move
