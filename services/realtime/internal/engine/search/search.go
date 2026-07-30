@@ -68,7 +68,7 @@ func (s *Searcher) BestMove(p *core.Position, ov *core.CardOverlay, hands Hands,
 	bestScore := -scoreInfinity
 	alpha, beta := -scoreInfinity, scoreInfinity
 	for _, a := range acts {
-		score := s.applyAndRecurse(p, ov, hands, mover, a, depth, 1, alpha, beta)
+		score := s.applyAndRecurse(p, ov, hands, mover, a, true, depth, 1, alpha, beta)
 		if score > bestScore {
 			bestScore = score
 			best = a
@@ -121,7 +121,7 @@ func (s *Searcher) negamax(p *core.Position, ov *core.CardOverlay, hands Hands, 
 
 	best := -scoreInfinity
 	for _, a := range acts {
-		child := s.applyAndRecurse(p, ov, hands, mover, a, depth, plyFromRoot, alpha, beta)
+		child := s.applyAndRecurse(p, ov, hands, mover, a, allowCard, depth, plyFromRoot, alpha, beta)
 		if child > best {
 			best = child
 		}
@@ -153,8 +153,10 @@ func (s *Searcher) negamax(p *core.Position, ov *core.CardOverlay, hands Hands, 
 // whichever piece it should least prefer to freeze.
 //
 // Shared by BestMove's root loop and negamax's inner loop so both apply
-// actions identically.
-func (s *Searcher) applyAndRecurse(p *core.Position, ov *core.CardOverlay, hands Hands, mover core.Color, a actions.Action, depth, plyFromRoot, alpha, beta int) int {
+// actions identically. allowCard is the CURRENT mover's own remaining
+// card-availability -- needed here (not just by the caller) because a
+// shielded capture (see below) preserves it unchanged on a voided attempt.
+func (s *Searcher) applyAndRecurse(p *core.Position, ov *core.CardOverlay, hands Hands, mover core.Color, a actions.Action, allowCard bool, depth, plyFromRoot, alpha, beta int) int {
 	if a.Kind == actions.ActionCard {
 		u := actions.ApplyCardAction(p, ov, a)
 		newHand := hands.For(mover).Without(a.Card.ID)
@@ -165,6 +167,28 @@ func (s *Searcher) applyAndRecurse(p *core.Position, ov *core.CardOverlay, hands
 		actions.UndoCardAction(p, ov, u)
 		return score
 	}
+
+	if target := p.PieceAt(a.Move.To); !target.IsNone() && target.Color != mover && ov.IsShielded(a.Move.To) {
+		// Shield is an apply-time interceptor, not a legality rule (see
+		// overlays.go's package comment) -- core.GenerateSubmittableMoves
+		// happily generates a capture of a shielded piece, exactly like
+		// internal/match's own movegen. internal/match voids the capture
+		// entirely at application time instead (match_actions.go:73-84):
+		// the board is untouched, the shield is spent, and -- the part
+		// easy to miss -- the turn is NOT passed, so the attacker "wastes"
+		// the attempt for free and keeps acting. Modeled here as: consume
+		// the shield, then let mover choose AGAIN at the same depth/ply
+		// with the same allowCard -- correct and loop-safe, since the
+		// shield is gone by the second attempt, so retrying the identical
+		// capture the next time around applies for real instead of
+		// voiding again.
+		ovSnapshot := ov.Clone()
+		ov.TryConsumeShield(a.Move.To)
+		score := s.negamax(p, ov, hands, mover, allowCard, depth, plyFromRoot, alpha, beta)
+		*ov = *ovSnapshot
+		return score
+	}
+
 	undo := applyMoveWithTicks(p, ov, mover, a.Move)
 	// The turn passes -- standard negamax child call: negate and swap the
 	// window, negate the result to convert from the opponent's returned

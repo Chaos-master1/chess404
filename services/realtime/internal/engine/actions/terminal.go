@@ -27,6 +27,25 @@ type GameStatus = core.GameStatus
 // conformant engine reproduces it rather than "fixing" it -- exactly the
 // same posture Task 19 took with Frozen-blind stalemate detection.
 func TerminalStatus(p *core.Position, ov *core.CardOverlay, hand Hand) GameStatus {
+	mover := p.SideToMove()
+	if p.KingSquare(mover) == core.NoSquare {
+		// The mover's king isn't on the board at all. In ordinary chess
+		// this never happens (checkmate always ends the game first), but
+		// it IS reachable here: a card action can open a brand-new
+		// attacking line onto the enemy king mid-turn (e.g. Fusion
+		// collapsing a bishop+rook into a queen with a fresh diagonal),
+		// and the subsequent move within that same turn can then capture
+		// it before any end-of-turn terminal check would have caught it as
+		// checkmate. internal/match's own movegen doesn't specially
+		// exclude the enemy king as a capture target either (chess.go's
+		// canTarget checks color only), so this is a latent possibility
+		// there too, just vanishingly rare. Treated as the decisive loss it
+		// obviously is, rather than letting a missing king reach
+		// core.KingSquare's documented "caller bug" contract and panic
+		// deep in the attack tables (core.NoSquare fed to a leaper-attack
+		// table lookup).
+		return core.Checkmate
+	}
 	status := core.TerminalStatusWithOverlay(p, ov)
 	if status != core.Ongoing && hand.HasAnyCard() {
 		return core.Ongoing

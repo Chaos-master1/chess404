@@ -45,7 +45,7 @@ func FairPlaySearch(p *core.Position, ov *core.CardOverlay, myHand actions.Hand,
 		hands := Hands{}.With(myColor, myHand).With(myColor.Opposite(), opponentHand)
 		s := NewSearcher()
 		for i, a := range root {
-			score := s.applyAndRecurse(p, ov, hands, myColor, a, depth, 1, -scoreInfinity, scoreInfinity)
+			score := s.applyAndRecurse(p, ov, hands, myColor, a, true, depth, 1, -scoreInfinity, scoreInfinity)
 			totals[i] += float64(score)
 		}
 	}
