@@ -77,8 +77,15 @@ func (s *Searcher) Nodes() int64 { return s.nodes }
 // pimc.go's job). Useful directly wherever both hands are legitimately
 // known: tests, the card-tactics suite, self-play, and the gauntlet, none
 // of which involve genuine hidden information.
-func (s *Searcher) BestMove(p *core.Position, ov *core.CardOverlay, hands Hands, mover core.Color, depth int) (actions.Action, int) {
-	acts := actions.GenerateActions(p, ov, hands.For(mover), true)
+//
+// allowCard is normally true (a fresh turn starting from scratch); a
+// caller driving a turn as two explicit steps -- self-play needs to know
+// separately whether the root decision was a card or a move, to record
+// and apply each step itself -- calls BestMove a second time with
+// allowCard=false to get just the mandatory move that completes a turn
+// after a card was already played.
+func (s *Searcher) BestMove(p *core.Position, ov *core.CardOverlay, hands Hands, mover core.Color, allowCard bool, depth int) (actions.Action, int) {
+	acts := actions.GenerateActions(p, ov, hands.For(mover), allowCard)
 	if len(acts) == 0 {
 		return actions.Action{}, s.eval(p, ov, hands, mover)
 	}
@@ -88,7 +95,7 @@ func (s *Searcher) BestMove(p *core.Position, ov *core.CardOverlay, hands Hands,
 	bestScore := -scoreInfinity
 	alpha, beta := -scoreInfinity, scoreInfinity
 	for _, a := range acts {
-		score := s.applyAndRecurse(p, ov, hands, mover, a, true, depth, 1, alpha, beta)
+		score := s.applyAndRecurse(p, ov, hands, mover, a, allowCard, depth, 1, alpha, beta)
 		if score > bestScore {
 			bestScore = score
 			best = a

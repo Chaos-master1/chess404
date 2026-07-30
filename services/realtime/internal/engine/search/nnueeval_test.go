@@ -24,7 +24,7 @@ func TestNNUEBackedSearcherFindsHangingCapture(t *testing.T) {
 	net := nnue.NewRandomNetwork(rand.New(rand.NewSource(3)))
 	s := NewSearcherWithEval(NNUEEvaluator(net))
 
-	best, _ := s.BestMove(p, ov, Hands{}, core.White, 2)
+	best, _ := s.BestMove(p, ov, Hands{}, core.White, true, 2)
 	if best.Kind != actions.ActionMove || (best.Move.From != core.NewSquare(0, 0) && best.Move.From != core.NewSquare(4, 0)) {
 		t.Fatalf("expected a move from White's rook or king (the only pieces on the board), got %+v", best)
 	}

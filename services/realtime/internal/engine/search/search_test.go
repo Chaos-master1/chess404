@@ -19,7 +19,7 @@ func TestBestMoveFindsMateInOne(t *testing.T) {
 	ov := core.NewCardOverlay()
 
 	s := NewSearcher()
-	best, score := s.BestMove(p, ov, Hands{}, core.White, 2)
+	best, score := s.BestMove(p, ov, Hands{}, core.White, true, 2)
 
 	if best.Kind != actions.ActionMove || best.Move.To != core.NewSquare(0, 7) {
 		t.Fatalf("expected Ra1-a8# (mate on the back rank), got %+v", best)
@@ -38,7 +38,7 @@ func TestBestMoveFindsHangingCapture(t *testing.T) {
 	ov := core.NewCardOverlay()
 
 	s := NewSearcher()
-	best, _ := s.BestMove(p, ov, Hands{}, core.White, 2)
+	best, _ := s.BestMove(p, ov, Hands{}, core.White, true, 2)
 
 	if best.Kind != actions.ActionMove || best.Move.To != core.NewSquare(0, 7) {
 		t.Fatalf("expected Rxa8 capturing the undefended queen, got %+v", best)
@@ -55,17 +55,17 @@ func TestBestMoveFindsHangingCapture(t *testing.T) {
 // direct capture.
 func TestBestMoveCoordinatesFreezeThenCapture(t *testing.T) {
 	p := core.NewEmptyPosition()
-	p.SetPiece(core.NewSquare(0, 0), core.Piece{Type: core.King, Color: core.White}) // a1
-	p.SetPiece(core.NewSquare(3, 0), core.Piece{Type: core.Rook, Color: core.White}) // d1
-	p.SetPiece(core.NewSquare(7, 7), core.Piece{Type: core.King, Color: core.Black}) // h8
-	p.SetPiece(core.NewSquare(3, 7), core.Piece{Type: core.Rook, Color: core.Black}) // d8
+	p.SetPiece(core.NewSquare(0, 0), core.Piece{Type: core.King, Color: core.White})   // a1
+	p.SetPiece(core.NewSquare(3, 0), core.Piece{Type: core.Rook, Color: core.White})   // d1
+	p.SetPiece(core.NewSquare(7, 7), core.Piece{Type: core.King, Color: core.Black})   // h8
+	p.SetPiece(core.NewSquare(3, 7), core.Piece{Type: core.Rook, Color: core.Black})   // d8
 	p.SetPiece(core.NewSquare(1, 6), core.Piece{Type: core.Knight, Color: core.Black}) // b7, defends d8
 	ov := core.NewCardOverlay()
 
 	hands := Hands{White: actions.Hand{{ID: "c1", Mechanic: actions.MechanicFreeze}}}
 
 	s := NewSearcher()
-	best, _ := s.BestMove(p, ov, hands, core.White, 2)
+	best, _ := s.BestMove(p, ov, hands, core.White, true, 2)
 
 	if best.Kind != actions.ActionCard || best.Card.Mechanic != actions.MechanicFreeze {
 		t.Fatalf("expected the engine to play Freeze on the defending knight before capturing, got %+v", best)
@@ -80,9 +80,9 @@ func TestNegamaxIsScoreConsistentAcrossPerspectives(t *testing.T) {
 	ov := core.NewCardOverlay()
 	s := NewSearcher()
 
-	_, whiteScore := s.BestMove(p, ov, Hands{}, core.White, 2)
+	_, whiteScore := s.BestMove(p, ov, Hands{}, core.White, true, 2)
 	s2 := NewSearcher()
-	_, blackScore := s2.BestMove(p, ov, Hands{}, core.Black, 2)
+	_, blackScore := s2.BestMove(p, ov, Hands{}, core.Black, true, 2)
 
 	// The symmetric starting position should score close to 0 for either
 	// side to move (not an exact equality -- search finds a real best line
@@ -125,13 +125,13 @@ func TestTranspositionTableExactBoundMatchesFreshSearch(t *testing.T) {
 	ov := core.NewCardOverlay()
 
 	fresh := NewSearcher()
-	_, freshScore := fresh.BestMove(p, ov, Hands{}, core.White, 2)
+	_, freshScore := fresh.BestMove(p, ov, Hands{}, core.White, true, 2)
 
 	// Warm start: reuse the same Searcher (and its populated TT) for a
 	// second, identical search -- if the TT's bound classification were
 	// wrong (the exact bug the plan flags in the old engine), a stale
 	// cutoff could return a different, wrong answer here.
-	_, warmScore := fresh.BestMove(p, ov, Hands{}, core.White, 2)
+	_, warmScore := fresh.BestMove(p, ov, Hands{}, core.White, true, 2)
 
 	if freshScore != warmScore {
 		t.Errorf("expected the TT-warmed search to reach the identical score, got %d fresh vs %d warm", freshScore, warmScore)

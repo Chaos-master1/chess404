@@ -30,25 +30,33 @@ import (
 // tick/explode -- Fog is skipped, matching engine/core's own scope), in the
 // same relative order internal/match uses (match_actions.go: Lava right
 // after the move, then the cleanup batch: thaw+shield, fortress, bomb,
-// blackhole). Returns a closure that undoes ALL of it: core's own
-// incremental undo for the position, plus a full CardOverlay snapshot
-// restore for everything else, since none of Thaw/ExpireShields/
-// TickFortresses/ResolveLava/ResolveBombs/TickBlackHoles has an
-// incremental undo of its own (they were built for one-shot application in
-// Task 19's overlay work, not search backtracking). This is a deliberate
-// simplicity/performance tradeoff for Phase 2's MVP -- CardOverlay.Clone()
-// is cheap when its zone lists are short, which is the common case, but a
-// real search hot path would eventually want incremental undo here too.
+// blackhole). Returns a closure that undoes all of it.
 //
-// The returned closure is the ONLY way to reference the position's own
-// undo token: core.MakeMoveWithOverlay returns an unexported type that
-// cannot be named (or stored in a struct field) from this package, only
-// captured by a closure defined in the same call -- exactly what this
-// function does.
+// Undo is a full VALUE snapshot of *p (Position has no pointers/slices --
+// just fixed arrays and scalars -- so *p is already a complete, cheap deep
+// copy) plus a CardOverlay.Clone() snapshot, restored wholesale, rather
+// than core.MakeMoveWithOverlay's own incremental undo token. This is
+// deliberate, not just simpler: ResolveLava/ResolveBombs/TickBlackHoles can
+// remove pieces ANYWHERE on the board as a side effect of a trap/bomb/
+// blackhole detonating -- not just at the square this move touched -- and
+// core's own per-move undo token only ever reverses the ONE move it was
+// created for. A real bug caught by TestDiagnosticUnabomberThroughRealNegamax
+// (kept as a permanent regression test, see selfplay_test.go): White bombs
+// its own pawn (2-turn fuse), moves it forward; while exploring ONE of
+// Black's candidate replies a few plies later, the fuse reaches zero and
+// detonates, deleting White's pawn from a completely different square than
+// the move being explored touched. Undoing that reply via only its own
+// move's incremental token left the pawn permanently missing for every
+// OTHER sibling branch the search still had to explore -- corruption that
+// surfaces later, arbitrarily far from its actual cause, exactly the kind
+// of bug incremental per-move undo cannot repair on its own. A full
+// Position snapshot/restore sidesteps the problem entirely: whatever
+// changed, wherever it changed, gets put back.
 func applyMoveWithTicks(p *core.Position, ov *core.CardOverlay, mover core.Color, m core.Move) func() {
+	posSnapshot := *p
 	ovSnapshot := ov.Clone()
-	u := core.MakeMoveWithOverlay(p, ov, m)
 
+	core.MakeMoveWithOverlay(p, ov, m)
 	core.ResolveLava(p, ov, m.To)
 	core.ThawAfterMove(p, ov, mover)
 	ov.ExpireShields(p.FullMoveNumber())
@@ -57,7 +65,7 @@ func applyMoveWithTicks(p *core.Position, ov *core.CardOverlay, mover core.Color
 	core.TickBlackHoles(p, ov, mover)
 
 	return func() {
-		p.UnmakeMove(u)
+		*p = posSnapshot
 		*ov = *ovSnapshot
 	}
 }

@@ -113,6 +113,77 @@ func MustParseFEN(fen string) *Position {
 	return p
 }
 
+// ToFEN renders p as a standard 6-field FEN string -- ParseFEN's inverse,
+// used by Phase 3's self-play export (a Position needs to survive a
+// round trip through a text file a Python trainer reads) and by anything
+// else that wants a compact, standard, human-readable position summary.
+func (p *Position) ToFEN() string {
+	rows := make([]string, 8)
+	for rank := 7; rank >= 0; rank-- {
+		var b strings.Builder
+		empty := 0
+		flush := func() {
+			if empty > 0 {
+				b.WriteString(strconv.Itoa(empty))
+				empty = 0
+			}
+		}
+		for file := 0; file < 8; file++ {
+			piece := p.PieceAt(NewSquare(file, rank))
+			if piece.IsNone() {
+				empty++
+				continue
+			}
+			flush()
+			b.WriteString(fenCharForPiece(piece))
+		}
+		flush()
+		rows[7-rank] = b.String()
+	}
+	board := strings.Join(rows, "/")
+
+	side := "w"
+	if p.sideToMove == Black {
+		side = "b"
+	}
+
+	castling := ""
+	if p.HasCastleRight(CastleWhiteKingside) {
+		castling += "K"
+	}
+	if p.HasCastleRight(CastleWhiteQueenside) {
+		castling += "Q"
+	}
+	if p.HasCastleRight(CastleBlackKingside) {
+		castling += "k"
+	}
+	if p.HasCastleRight(CastleBlackQueenside) {
+		castling += "q"
+	}
+	if castling == "" {
+		castling = "-"
+	}
+
+	enPassant := "-"
+	if p.enPassant != NoSquare {
+		enPassant = p.enPassant.String()
+	}
+
+	return fmt.Sprintf("%s %s %s %s %d %d", board, side, castling, enPassant, p.halfMoveClock, p.fullMoveNum)
+}
+
+var fenCharByType = map[PieceType]string{
+	Pawn: "p", Knight: "n", Bishop: "b", Rook: "r", Queen: "q", King: "k",
+}
+
+func fenCharForPiece(p Piece) string {
+	ch := fenCharByType[p.Type]
+	if p.Color == White {
+		return strings.ToUpper(ch)
+	}
+	return ch
+}
+
 func pieceFromFENChar(ch rune) (Piece, error) {
 	color := White
 	lower := ch
