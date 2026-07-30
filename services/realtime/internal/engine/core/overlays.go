@@ -308,6 +308,19 @@ func (ov *CardOverlay) AddLava(sq Square, movesLeft int) {
 	ov.lavaSquares = append(ov.lavaSquares, LavaSquare{Sq: sq, MovesLeft: movesLeft})
 }
 
+// HasLava reports whether sq already carries a lava trap -- match_cards.go's
+// lavaground case rejects casting onto a square that already has one
+// (:917-921), so a caller building a new lavaground target needs this to
+// replicate that check.
+func (ov *CardOverlay) HasLava(sq Square) bool {
+	for _, lava := range ov.lavaSquares {
+		if lava.Sq == sq {
+			return true
+		}
+	}
+	return false
+}
+
 // AddBomb registers a new bomb carrier and marks its per-square marker bit
 // -- match_cards.go's unabomber case (:1006-1023), which never checks
 // whether the target is already bombed (a piece can be double-bombed).

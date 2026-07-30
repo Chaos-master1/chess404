@@ -134,9 +134,23 @@ func (p *Position) SetPiece(sq Square, piece Piece) {
 	p.hash ^= pieceZobristKey(piece, sq)
 }
 
+// RemovePiece clears sq's occupant, if any (a no-op on an already-empty
+// square) -- the general "delete a piece outright" primitive several card
+// mechanics need (Phase 2's engine/actions: fusion consumes its first
+// piece; sniper/badsniper/parasite/sacrifice remove pieces directly), none
+// of which are a "move" in this package's sense. Unlike SetPiece (which
+// requires an empty destination), this is specifically for removal.
+func (p *Position) RemovePiece(sq Square) {
+	piece := p.PieceAt(sq)
+	if piece.IsNone() {
+		return
+	}
+	p.removePiece(sq, piece)
+}
+
 // removePiece clears whatever piece (if any) sits on sq from all bitboards.
-// Internal helper for make/unmake; SetPiece is the public board-setup
-// primitive for placing pieces on an empty board.
+// Internal helper for make/unmake and RemovePiece; SetPiece is the public
+// board-setup primitive for placing pieces on an empty board.
 func (p *Position) removePiece(sq Square, piece Piece) {
 	p.pieces[piece.Index()] = p.pieces[piece.Index()].Clear(sq)
 	p.occupied[piece.Color] = p.occupied[piece.Color].Clear(sq)
