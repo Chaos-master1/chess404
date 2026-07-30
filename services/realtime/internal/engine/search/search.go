@@ -38,16 +38,36 @@ func (h Hands) With(c core.Color, hand actions.Hand) Hands {
 	return h
 }
 
-// Searcher holds the transposition table and node counter for one search
-// (or one PIMC sample's search -- pimc.go creates a fresh Searcher per
-// sample so samples don't share/pollute each other's TT).
+// Evaluator scores (p, ov, hands) from mover's own perspective -- the
+// pluggable leaf-evaluation function a Searcher uses. defaultEvaluator
+// (below) wraps eval.go's simple material+overlay placeholder;
+// NNUEEvaluator (nnueeval.go) wraps a trained nnue.Network for Phase 3's
+// SPRT comparison against it.
+type Evaluator func(p *core.Position, ov *core.CardOverlay, hands Hands, mover core.Color) int
+
+func defaultEvaluator(p *core.Position, ov *core.CardOverlay, _ Hands, mover core.Color) int {
+	return evaluateForMover(p, ov, mover)
+}
+
+// Searcher holds the transposition table, node counter, and evaluator for
+// one search (or one PIMC sample's search -- pimc.go creates a fresh
+// Searcher per sample so samples don't share/pollute each other's TT).
 type Searcher struct {
 	tt    *TranspositionTable
 	nodes int64
+	eval  Evaluator
 }
 
 func NewSearcher() *Searcher {
-	return &Searcher{tt: NewTranspositionTable(defaultTTSlots)}
+	return &Searcher{tt: NewTranspositionTable(defaultTTSlots), eval: defaultEvaluator}
+}
+
+// NewSearcherWithEval builds a Searcher using a custom Evaluator (e.g.
+// NNUEEvaluator) instead of the default placeholder -- how Phase 3's
+// network gets compared against Phase 2's eval in the same search/gauntlet
+// machinery.
+func NewSearcherWithEval(eval Evaluator) *Searcher {
+	return &Searcher{tt: NewTranspositionTable(defaultTTSlots), eval: eval}
 }
 
 func (s *Searcher) Nodes() int64 { return s.nodes }
@@ -60,7 +80,7 @@ func (s *Searcher) Nodes() int64 { return s.nodes }
 func (s *Searcher) BestMove(p *core.Position, ov *core.CardOverlay, hands Hands, mover core.Color, depth int) (actions.Action, int) {
 	acts := actions.GenerateActions(p, ov, hands.For(mover), true)
 	if len(acts) == 0 {
-		return actions.Action{}, evaluateForMover(p, ov, mover)
+		return actions.Action{}, s.eval(p, ov, hands, mover)
 	}
 	orderActions(p, acts)
 
@@ -104,7 +124,7 @@ func (s *Searcher) negamax(p *core.Position, ov *core.CardOverlay, hands Hands, 
 	}
 
 	if depth <= 0 {
-		return evaluateForMover(p, ov, mover)
+		return s.eval(p, ov, hands, mover)
 	}
 
 	acts := actions.GenerateActions(p, ov, hands.For(mover), allowCard)
@@ -115,7 +135,7 @@ func (s *Searcher) negamax(p *core.Position, ov *core.CardOverlay, hands Hands, 
 		// mobile piece is frozen. Not a terminal status, but nothing
 		// submittable either; fall back to a static read rather than
 		// treating an empty action list as a crash.
-		return evaluateForMover(p, ov, mover)
+		return s.eval(p, ov, hands, mover)
 	}
 	orderActions(p, acts)
 
