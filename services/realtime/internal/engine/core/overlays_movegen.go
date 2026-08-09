@@ -210,6 +210,27 @@ func generatePieceMovesOverlay(p *Position, c Color, pt PieceType, block Bitboar
 // square is only ever checked for "attacked", and being inside a fortress
 // isn't itself "attacked" -- so a king CAN legally castle through (not onto)
 // a square that sits inside an enemy fortress.
+//
+// p.castling is an incrementally-maintained bitmask (cleared only by
+// castlingRightsClearedBy, called from ordinary chess moves) rather than
+// internal/match's derive-fresh-every-time approach (positionKey's
+// deriveCastlingString re-checks `squareHasType(board, row, col, "rook")`
+// against CURRENT board state on every call, never trusting a cached
+// bit). Fusion (engine/actions' applyFusion) can replace the piece
+// sitting on a rook's home square with a Queen (the bishop+rook-becomes-
+// queen special case) without ever touching p.castling -- it's a card
+// effect, not a chess move, so castlingRightsClearedBy never runs for
+// it. A real crash traced this exactly: Black fused a bishop with its OWN
+// h8 rook into a queen, keeping kingside rights nominally set; castling
+// later blindly moved "the rook" via castleRookSquares' hardcoded h8/f8
+// pair, XORing bits for a piece that was no longer there and leaving two
+// different piece-type bitboards claiming h8. Rather than hunting down
+// and instrumenting every current and future mechanic that could ever
+// leave a corner square holding something other than its original rook
+// (fusion today, whatever else models one of the other 30 unmodeled
+// mechanics tomorrow), this re-verifies piece identity at the point of
+// use -- the same defense-in-depth the reference's own derive-fresh
+// design gets for free.
 func generateCastlesOverlay(p *Position, ov *CardOverlay, c Color, block Bitboard, dst []Move) []Move {
 	rank := 0
 	kingside, queenside := CastleWhiteKingside, CastleWhiteQueenside
@@ -218,12 +239,17 @@ func generateCastlesOverlay(p *Position, ov *CardOverlay, c Color, block Bitboar
 		kingside, queenside = CastleBlackKingside, CastleBlackQueenside
 	}
 	kingFrom := NewSquare(4, rank)
+	if king := p.PieceAt(kingFrom); king.Type != King || king.Color != c {
+		return dst
+	}
 	occ := p.OccupiedAll()
 	enemy := c.Opposite()
 
 	if p.HasCastleRight(kingside) {
+		rookFrom := NewSquare(7, rank)
 		passSquares := [2]Square{NewSquare(5, rank), NewSquare(6, rank)}
-		if !occ.Has(passSquares[0]) && !occ.Has(passSquares[1]) && !block.Has(passSquares[1]) &&
+		if rook := p.PieceAt(rookFrom); rook.Type == Rook && rook.Color == c &&
+			!occ.Has(passSquares[0]) && !occ.Has(passSquares[1]) && !block.Has(passSquares[1]) &&
 			!IsAttackedWithFortress(p, ov, kingFrom, enemy) &&
 			!IsAttackedWithFortress(p, ov, passSquares[0], enemy) &&
 			!IsAttackedWithFortress(p, ov, passSquares[1], enemy) {
@@ -231,9 +257,11 @@ func generateCastlesOverlay(p *Position, ov *CardOverlay, c Color, block Bitboar
 		}
 	}
 	if p.HasCastleRight(queenside) {
+		rookFrom := NewSquare(0, rank)
 		passSquares := [2]Square{NewSquare(3, rank), NewSquare(2, rank)}
 		knightSquare := NewSquare(1, rank)
-		if !occ.Has(passSquares[0]) && !occ.Has(passSquares[1]) && !occ.Has(knightSquare) && !block.Has(passSquares[1]) &&
+		if rook := p.PieceAt(rookFrom); rook.Type == Rook && rook.Color == c &&
+			!occ.Has(passSquares[0]) && !occ.Has(passSquares[1]) && !occ.Has(knightSquare) && !block.Has(passSquares[1]) &&
 			!IsAttackedWithFortress(p, ov, kingFrom, enemy) &&
 			!IsAttackedWithFortress(p, ov, passSquares[0], enemy) &&
 			!IsAttackedWithFortress(p, ov, passSquares[1], enemy) {
