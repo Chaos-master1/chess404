@@ -60,6 +60,47 @@ def load_records(path):
     return records
 
 
+def mirror_fen_board(board_field):
+    """Vertical rank flip (rank r -> rank 7-r) with piece colors swapped,
+    files untouched -- the standard color-mirror transform: physically,
+    swap which side of the board White/Black's pieces start from, without
+    also mirroring kingside/queenside (that would require reversing files
+    too, which is NOT what a color swap means in chess)."""
+    ranks = board_field.split("/")
+    return "/".join(r.swapcase() for r in reversed(ranks))
+
+
+def mirror_record(r):
+    """The color-swapped counterpart of a self-play record: what White
+    experienced, Black now experiences instead, and vice versa. Chess (and
+    this card variant) has no inherent asymmetry between colors beyond
+    move order, so training on a record's mirror image too is a free,
+    exactly-valid doubling of the dataset -- and more importantly, it
+    FORCES the network to learn a symmetric relationship between "my
+    material/position" and the label, rather than absorbing whatever
+    color imbalance happens to exist in a finite self-play sample. Without
+    this, a network trained on real data came back with a strong
+    White-favoring bias strong enough to misjudge even a bare king+queen
+    endgame (confirmed directly: scored "Black up a whole queen" as GOOD
+    for White) and lost a 200-game gauntlet 0-0-200 against the untrained
+    placeholder eval as either color.
+    """
+    board_field = r["fen"].split()[0]
+    mirrored_fen = mirror_fen_board(board_field) + " w - - 0 1"  # trailing fields are dummy; active_features never reads them
+    return {
+        "fen": mirrored_fen,
+        "whiteHandSize": r["blackHandSize"],
+        "blackHandSize": r["whiteHandSize"],
+        "frozenWhite": r["frozenBlack"],
+        "frozenBlack": r["frozenWhite"],
+        "shieldedWhite": r["shieldedBlack"],
+        "shieldedBlack": r["shieldedWhite"],
+        "fortressWhite": r["fortressBlack"],
+        "fortressBlack": r["fortressWhite"],
+        "label": -r["label"],
+    }
+
+
 def encode_record(r):
     return active_features(
         r["fen"],
@@ -148,12 +189,17 @@ def main():
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--no-mirror", action="store_true", help="disable color-mirror data augmentation (on by default)")
     args = parser.parse_args()
 
     records = load_records(args.data)
     if not records:
         sys.exit(f"no records found in {args.data}")
     print(f"loaded {len(records)} positions from {args.data}", file=sys.stderr)
+
+    if not args.no_mirror:
+        records = records + [mirror_record(r) for r in records]
+        print(f"augmented with color-mirrored records: {len(records)} total", file=sys.stderr)
 
     model = train(records, args.epochs, args.batch_size, args.lr, args.seed)
     export(model, args.out)
