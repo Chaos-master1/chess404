@@ -1201,6 +1201,27 @@ func applySelectTarget(state *contracts.MatchState, intent contracts.PlayerInten
 	state.PendingCard = nil
 	state.DrawOfferedBy = ""
 	state.UpdatedAt = now.UTC()
+	// Every mechanic reaching this shared tail already called
+	// replaceLastHistorySnapshot mid-case, immediately after mutating the
+	// board but BEFORE PendingCard/the hand are updated above -- so the
+	// history slot for this turn was frozen with a STALE, still-"pending"
+	// snapshot: PendingCard still set, the card still in hand. History is
+	// what "reverse" restores two half-moves later (applyPlayCard's
+	// "reverse" case, restorePositionState) -- restoring that stale
+	// snapshot resurrects an already-fully-resolved card as if it were
+	// freshly pending again, and since applyPlayCard rejects ANY play_card
+	// while ANY PendingCard is set (regardless of whose), this silently
+	// disables card play entirely, for either side, for the rest of the
+	// match. Found by xgauntlet's E0 cross-engine gauntlet: a real game had
+	// exactly this happen -- an "invisible" card that had already resolved
+	// cleanly reappeared as pending five plies later, right after a
+	// "reverse" card, with a select_target for it then rejected with "only
+	// the card owner can select the target" because Turn had moved on to
+	// the other color. Re-capturing here, after the tail's own mutations,
+	// overwrites that stale snapshot with the fully-resolved one --
+	// replaceLastHistorySnapshot replaces the same history slot in place,
+	// so calling it again is safe and cheap, not a second push.
+	replaceLastHistorySnapshot(state)
 
 	payload := map[string]any{
 		"cardId":   pending.CardID,

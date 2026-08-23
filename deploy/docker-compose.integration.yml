@@ -25,7 +25,16 @@ services:
       timeout: 2s
       retries: 10
 
+  # Opt-in only (docker compose --profile tools run integration-runner):
+  # a bare `docker compose up -d --wait` -- what CI and the documented local
+  # dev flow both actually use -- must start ONLY postgres+redis. This
+  # container runs `go test` to completion and exits; if it were in the
+  # default profile, `--wait` could observe that exit during startup and
+  # report the whole command as failed even though postgres/redis came up
+  # fine and the real go-integration CI step (a separate step, running go
+  # test directly on the runner) never touches this container at all.
   integration-runner:
+    profiles: ["tools"]
     build:
       context: .
       dockerfile: Dockerfile.integration

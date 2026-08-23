@@ -364,14 +364,24 @@ func pieceTypes(piece *contracts.Piece) []string {
 	return types
 }
 
+// hasEffectiveType is used ONLY by insufficientMaterial's "is this piece weak
+// enough to be part of a drawn-by-material position" check (its 3 call
+// sites, both below). A fused piece is disqualified outright: fusion always
+// ADDS a genuine second movement capability on top of the base type (a rook
+// fused with a knight can do everything a plain rook can, plus knight
+// jumps), so it is never weaker than an unfused bishop or knight and must
+// never be treated as such -- regardless of which two types are combined.
+// Before this fix, a rook fused with a knight satisfied
+// piece.FusedWith == "knight" and was misclassified as a lone knight,
+// which insufficientMaterial's single-non-king-piece case treats as a draw
+// -- ending a decisive, still-winnable game (the fused piece retains full
+// rook power) as an incorrect stalemate/draw the moment it became the only
+// non-king piece left. Found by xgauntlet's E0 cross-engine gauntlet.
 func hasEffectiveType(piece *contracts.Piece, targetType string) bool {
-	if piece.Type == targetType {
-		return true
+	if piece.FusedWith != "" {
+		return false
 	}
-	if piece.FusedWith == targetType {
-		return true
-	}
-	return false
+	return piece.Type == targetType
 }
 
 func insufficientMaterial(board [][]*contracts.Piece) bool {

@@ -64,20 +64,29 @@ jobs:
 
   go-integration:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/realtime
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
           cache-dependency-path: services/realtime/go.sum
+      # No job-level working-directory default here (unlike the other Go
+      # jobs): docker-compose.integration.yml's `context: .` build context
+      # must resolve to the repo root, matching every other Dockerfile's
+      # build context in this workflow (see docker-build below). Running
+      # this under services/realtime (as this job did before) resolved the
+      # compose file path to services/realtime/deploy/..., which doesn't
+      # exist -- one of three independent reasons this job never actually
+      # ran (the others: internal/integration didn't exist as a package at
+      # all, and Dockerfile.integration didn't exist either).
       - name: Start test infrastructure
-        run: |
-          docker compose -f deploy/docker-compose.integration.yml up -d --wait
+        run: docker compose -f deploy/docker-compose.integration.yml up -d --wait
       - name: Run integration tests
+        working-directory: services/realtime
         run: go test ./internal/integration/... -v -count=1 -timeout 300s -tags=integration
+        env:
+          TEST_POSTGRES_URL: postgres://test:test@localhost:5432/chess404_test?sslmode=disable
+          TEST_REDIS_URL: redis://localhost:6379/0
       - name: Cleanup
         if: always()
         run: docker compose -f deploy/docker-compose.integration.yml down -v

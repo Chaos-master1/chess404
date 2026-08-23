@@ -1295,6 +1295,56 @@ func TestModerationAdminOverviewRequiresAdminAccess(t *testing.T) {
 	}
 }
 
+// TestModerationAdminAuthorizesByHandleAlone is a regression test for a
+// launch-blocker: isModerationAdminAccount checked ONLY
+// PLATFORM_ADMIN_ACCOUNT_IDS, even though moderationAdminConfigured (which
+// decides whether the client shows the admin UI at all, via the
+// capabilities endpoint) treats PLATFORM_ADMIN_HANDLES as an equally valid
+// way to configure admin access. An operator who set PLATFORM_ADMIN_HANDLES
+// only -- a real, documented, working-looking configuration -- would see
+// the admin panel rendered and then get 403 on every single action inside
+// it. Unlike TestModerationAdminCanResolveReportsThroughPlatformAPI (which
+// sets BOTH env vars and so never actually exercised the handles-only
+// path), this sets ONLY PLATFORM_ADMIN_HANDLES.
+func TestModerationAdminAuthorizesByHandleAlone(t *testing.T) {
+	t.Setenv("PLATFORM_ADMIN_HANDLES", "mod_admin")
+
+	tempDir := t.TempDir()
+	archive, err := platform.NewMatchArchiveStore(filepath.Join(tempDir, "archive.json"))
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = archive.Close() }()
+	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
+	if err != nil {
+		t.Fatalf("expected guest store to initialize, got %v", err)
+	}
+	defer func() { _ = guests.Close() }()
+	accounts, err := platform.NewAccountStore(filepath.Join(tempDir, "accounts.json"))
+	if err != nil {
+		t.Fatalf("expected account store to initialize, got %v", err)
+	}
+	defer func() { _ = accounts.Close() }()
+	claims := platform.NewMatchClaimStore()
+	mux := buildTestPlatformMuxWithAccounts(t, archive, guests, accounts, claims)
+
+	adminGuest, err := guests.EnsureGuest("guest_mod_admin", "")
+	if err != nil {
+		t.Fatalf("expected admin guest session, got %v", err)
+	}
+	adminAccount, err := accounts.ClaimGuest(adminGuest.Guest, "mod_admin")
+	if err != nil {
+		t.Fatalf("expected admin account claim, got %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/platform/moderation/admin/overview", strings.NewReader(`{"accountId":"`+adminAccount.Account.AccountID+`","sessionToken":"`+adminAccount.SessionToken+`"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected an account matching PLATFORM_ADMIN_HANDLES (with no PLATFORM_ADMIN_ACCOUNT_IDS set at all) to be authorized, got status %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestModerationAdminCanResolveReportsThroughPlatformAPI(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_HANDLES", "mod_admin")
 

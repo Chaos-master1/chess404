@@ -45,6 +45,30 @@ func ToPosition(state *contracts.MatchState) (*core.Position, error) {
 	if err != nil {
 		return nil, fmt.Errorf("conform: converting match state to FEN %q: %w", fen, err)
 	}
+	// core.Position.KingSquare is documented to return NoSquare (an
+	// out-of-range value, not an error) when a color has no king, on the
+	// theory that a missing king is a caller bug that should surface
+	// loudly downstream rather than fail silently -- and it does: NoSquare
+	// fed into PawnAttacks/KingAttacks's fixed-size lookup tables panics
+	// with "index out of range [-1]", with a stack trace that points at
+	// whatever core move-generation call happened to be first, giving no
+	// hint that the actual problem is upstream, in the state THIS function
+	// was handed. Found by xgauntlet's E0 cross-engine gauntlet: a real
+	// game crashed exactly this way, deep inside GenerateSubmittableMoves,
+	// with nothing in the trace pointing back to conform or to which color
+	// was missing its king. Whether state.Board is missing a king because
+	// of a genuine internal/match rules bug (a real, serious finding were
+	// it true -- kings must never be capturable) or matchStateToFEN itself
+	// mishandled some board configuration is exactly the question this
+	// check exists to make answerable: it turns an opaque panic several
+	// frames away into an error that names the missing color and the
+	// state's own FEN at the moment of conversion.
+	if white := p.KingSquare(core.White); white == core.NoSquare {
+		return nil, fmt.Errorf("conform: converted position has no white king (FEN %q, matchID %s)", fen, state.MatchID)
+	}
+	if black := p.KingSquare(core.Black); black == core.NoSquare {
+		return nil, fmt.Errorf("conform: converted position has no black king (FEN %q, matchID %s)", fen, state.MatchID)
+	}
 	return p, nil
 }
 

@@ -329,7 +329,11 @@ func fusionCandidates(p *core.Position, ov *core.CardOverlay, card CardInstance,
 					continue
 				}
 			}
-			out = append(out, Action{Kind: ActionCard, Card: card, Targets: CardTargets{NumTargets: 2, First: a, Second: b}})
+			candidate := Action{Kind: ActionCard, Card: card, Targets: CardTargets{NumTargets: 2, First: a, Second: b}}
+			if fusionLeavesAKingInCheck(p, ov, candidate) {
+				continue
+			}
+			out = append(out, candidate)
 		}
 	}
 	return out
@@ -359,6 +363,22 @@ func isFusionRedundant(typeA, typeB core.PieceType, sqA, sqB core.Square) bool {
 		}
 	}
 	return false
+}
+
+// fusionLeavesAKingInCheck mirrors match_cards.go's kingsRemainSafeWithFusion
+// (checked after applying halffuse/fullfusion at match_cards.go:1095,:1159):
+// BOTH kings, not just the mover's -- removing the "first" piece can expose
+// a discovered check on either side depending on what it was blocking.
+// Found missing here by xgauntlet's E0 cross-engine gauntlet: a real
+// ComputerOpponent-vs-NewEngineAdapter game had the search choose a
+// fullfusion pair that internal/match correctly rejected with "fullfusion
+// would leave a king in check" -- this package's candidate generator had no
+// equivalent filter at all before this fix, unlike freeze/shield/etc.'s
+// existing validation-mirroring discipline.
+func fusionLeavesAKingInCheck(p *core.Position, ov *core.CardOverlay, a Action) bool {
+	undo := ApplyCardAction(p, ov, a)
+	defer UndoCardAction(p, ov, undo)
+	return core.InCheckWithFusion(p, ov, core.White) || core.InCheckWithFusion(p, ov, core.Black)
 }
 
 // rankedByValueDescending returns every non-king piece of c, most valuable

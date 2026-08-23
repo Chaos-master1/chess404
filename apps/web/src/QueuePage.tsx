@@ -407,6 +407,20 @@ export default function QueuePage({
 
   const pollingBackoffRef = React.useRef(0);
 
+  // poll() below calls setWhiteTicket/setBlackTicket with a freshly deserialized
+  // object on every response. Depending on the ticket objects themselves meant
+  // each response changed this effect's deps, so React tore the effect down --
+  // discarding the pending 2500ms timer -- and immediately re-ran it, firing
+  // poll() again with no delay. The interval collapsed into a request-per-RTT
+  // loop that tripped the 30-req/30s queue rate limit within a second; the
+  // client then sat on 429s, never observed ticket.assignedRoom, and never
+  // navigated into the match it had already been paired into. Keep the live
+  // tickets in refs and key the effect on identity+status only.
+  const whiteTicketRef = React.useRef(whiteTicket);
+  whiteTicketRef.current = whiteTicket;
+  const blackTicketRef = React.useRef(blackTicket);
+  blackTicketRef.current = blackTicket;
+
   React.useEffect(() => {
     if (restoringTickets) {
       return;
@@ -422,23 +436,29 @@ export default function QueuePage({
     const poll = async () => {
       if (cancelled) return;
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-        // Pause polling while tab is hidden, resume when tab becomes visible again
+        // Pause polling while the tab is hidden. Reschedule rather than simply
+        // returning: bailing out dropped the only pending timer, so the loop
+        // depended entirely on a visibilitychange event still firing to ever
+        // resume.
+        timeoutId = window.setTimeout(poll, 5000);
         return;
       }
 
       const tasks: Promise<void>[] = [];
-      if (whiteTicket?.status === 'queued') {
+      const currentWhite = whiteTicketRef.current;
+      const currentBlack = blackTicketRef.current;
+      if (currentWhite?.status === 'queued') {
         tasks.push(
-          fetchTicket(whiteTicket.ticketId).then(({ ticket, snapshot }) => {
+          fetchTicket(currentWhite.ticketId).then(({ ticket, snapshot }) => {
             pollingBackoffRef.current = 0;
             setWhiteTicket(ticket);
             if (snapshot) applyQueueSnapshot(snapshot);
           })
         );
       }
-      if (blackTicket?.status === 'queued') {
+      if (currentBlack?.status === 'queued') {
         tasks.push(
-          fetchTicket(blackTicket.ticketId).then(({ ticket, snapshot }) => {
+          fetchTicket(currentBlack.ticketId).then(({ ticket, snapshot }) => {
             pollingBackoffRef.current = 0;
             setBlackTicket(ticket);
             if (snapshot) applyQueueSnapshot(snapshot);
@@ -480,7 +500,8 @@ export default function QueuePage({
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     };
-  }, [whiteTicket, blackTicket, applyQueueSnapshot, restoringTickets]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whiteTicket?.ticketId, whiteTicket?.status, blackTicket?.ticketId, blackTicket?.status, applyQueueSnapshot, restoringTickets]);
 
   const handleJoin = React.useCallback(async (side: 'white' | 'black') => {
     if (tutorialActive) {

@@ -48,11 +48,15 @@ Go backend (from `services/realtime`; Go is not always on PATH — call the bina
 & "C:\Program Files\Go\bin\go.exe" build ./...
 ```
 
-Integration tests (require Docker; matches CI in `.github/workflows/ci.yml`):
+Integration tests (require Docker; matches CI in `.github/workflows/ci.yml`). Run from the repo root, except the `go test` line itself, which needs `services/realtime` (package paths are relative to its `go.mod`):
 
 ```powershell
 docker compose -f deploy/docker-compose.integration.yml up -d --wait
+$env:TEST_POSTGRES_URL = "postgres://test:test@localhost:5432/chess404_test?sslmode=disable"
+$env:TEST_REDIS_URL = "redis://localhost:6379/0"
+Push-Location services/realtime
 & "C:\Program Files\Go\bin\go.exe" test ./internal/integration/... -v -count=1 -timeout 300s -tags=integration
+Pop-Location
 docker compose -f deploy/docker-compose.integration.yml down -v
 ```
 

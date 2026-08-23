@@ -373,11 +373,16 @@ export function connectToMatchStream(
     const wsUrl = `${nextSocketUrl}/api/matches/${matchId}/ws`;
 
     let authPromise: Promise<{ claimToken: string | null }>;
-    if (playerIdentity?.playerClaimToken?.trim()) {
-      authPromise = Promise.resolve({ claimToken: playerIdentity.playerClaimToken!.trim() });
-    } else if (playerIdentity?.playerId?.trim() && playerIdentity?.playerSecret?.trim()) {
+    // The seat secret is durable; a claim token is single-use and is already
+    // spent by the bootstrap/join that created this room. Preferring the token
+    // made every reconnect re-send a dead credential -> auth.error -> close ->
+    // retry forever, so the live stream never came up and every client silently
+    // degraded to 1s HTTP polling. Secret first, token only as a fallback.
+    if (playerIdentity?.playerId?.trim() && playerIdentity?.playerSecret?.trim()) {
       authPromise = fetchAuthToken(matchId, playerIdentity.playerId.trim(), playerIdentity.playerSecret.trim())
         .then(token => ({ claimToken: token }));
+    } else if (playerIdentity?.playerClaimToken?.trim()) {
+      authPromise = Promise.resolve({ claimToken: playerIdentity.playerClaimToken!.trim() });
     } else {
       console.log('Spectate mode: no player identity — using polling');
       handlers.onStatusChange?.('connected');

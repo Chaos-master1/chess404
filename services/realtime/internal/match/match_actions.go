@@ -59,7 +59,27 @@ func applyMove(state *contracts.MatchState, intent contracts.PlayerIntent, now t
 	if fortressEntryBlocked(state.FortressZones, piece.Color, *intent.To) {
 		return nil, errors.New("destination square is protected by an enemy fortress")
 	}
-	if isSlider(piece.Type) && pathCrossesFortress(state.Board, *intent.From, *intent.To, state.FortressZones, piece.Color) {
+	// pathCrossesFortress (and clearPath, its sibling) assume (From, To) is
+	// an actual straight line or diagonal: they step from From toward To one
+	// square at a time along sign(dRow)/sign(dCol) and stop when they reach
+	// To. isSlider(piece.Type) alone is not sufficient to guarantee that --
+	// it only names the piece's BASE type, but a fused piece keeps its own
+	// Type unchanged and gains the OTHER piece's movement as an addition
+	// (match_cards.go's applyFusion / FusedWith tag), so a "rook" fused with
+	// a knight can make a knight-shaped move that legalMovesWithFusion (line
+	// 55, above) correctly allows. Stepping toward a target that is not
+	// actually on a straight line/diagonal from the source never reaches it:
+	// the loop runs off the board with no bounds check in
+	// pathCrossesFortress (an infinite loop -- and, because ApplyIntent
+	// holds this match's mutex for its duration, a permanent denial-of-
+	// service hang on that match) and panics on a negative/out-of-range
+	// board index in clearPath's sibling call site. A knight-shaped hop
+	// also has no intermediate squares to check for fortress-crossing in
+	// the first place, so requiring straight-line geometry here is the
+	// correct fix, not just a crash guard.
+	dr, dc := intent.To.Row-intent.From.Row, intent.To.Col-intent.From.Col
+	isStraightLineOrDiagonal := dr == 0 || dc == 0 || abs(dr) == abs(dc)
+	if isSlider(piece.Type) && isStraightLineOrDiagonal && pathCrossesFortress(state.Board, *intent.From, *intent.To, state.FortressZones, piece.Color) {
 		return nil, errors.New("move path crosses an enemy fortress")
 	}
 

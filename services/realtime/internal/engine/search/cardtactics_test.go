@@ -62,8 +62,20 @@ func TestBestMoveCoordinatesFusionThenCapture(t *testing.T) {
 	p.SetPiece(core.NewSquare(7, 0), core.Piece{Type: core.King, Color: core.White})   // h1
 	p.SetPiece(core.NewSquare(3, 3), core.Piece{Type: core.Rook, Color: core.White})   // d4
 	p.SetPiece(core.NewSquare(2, 2), core.Piece{Type: core.Bishop, Color: core.White}) // c3, adjacent to d4
-	p.SetPiece(core.NewSquare(7, 7), core.Piece{Type: core.King, Color: core.Black})   // h8
-	p.SetPiece(core.NewSquare(0, 6), core.Piece{Type: core.Queen, Color: core.Black})  // a7, undefended
+	// Black king on h6, NOT h8: fusing bishop+rook (bishop consumed, rook
+	// becomes a plain queen -- applyFusion's isBishopRook special case)
+	// gives the d4 survivor the a1-h8 diagonal, which would put a king on h8
+	// in check as a side effect of the fusion itself. internal/match treats
+	// that as equally illegal as exposing the MOVER's own king
+	// (match_cards.go:1159-1160's kingsRemainSafeWithFusion checks BOTH
+	// kings, not just the mover's) -- confirmed by xgauntlet's E0
+	// cross-engine gauntlet hitting exactly this rejection live, which is
+	// also what caught this test fixture relying on an illegal fusion (see
+	// actions/candidates.go's fusionLeavesAKingInCheck, added as a result).
+	// h6 is off d4's file/rank/both diagonals, so the fusion itself is
+	// legal; the survivor still reaches a7 diagonally afterward.
+	p.SetPiece(core.NewSquare(7, 5), core.Piece{Type: core.King, Color: core.Black})  // h6
+	p.SetPiece(core.NewSquare(0, 6), core.Piece{Type: core.Queen, Color: core.Black}) // a7, undefended
 	ov := core.NewCardOverlay()
 	hands := Hands{White: actions.Hand{{ID: "c1", Mechanic: actions.MechanicFullFusion}}}
 
