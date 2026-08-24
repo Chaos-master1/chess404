@@ -58,7 +58,20 @@ function buildCsp(nonce: string): string {
   ].join('; ');
 }
 
+// The engine debug console only talks to a local engine over ws://localhost:8765,
+// which this CSP blocks anyway -- serving it publicly exposed internal tooling
+// and nothing else. Gate it here rather than in the route so the answer is a
+// real 404 status, not a 200 carrying not-found content.
+const DEV_ONLY_ROUTES = ['/dashboard'];
+
 export function middleware(request: NextRequest): NextResponse {
+  if (
+    process.env.NODE_ENV === 'production' &&
+    DEV_ONLY_ROUTES.some(route => request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(`${route}/`))
+  ) {
+    return new NextResponse(null, { status: 404 });
+  }
+
   const nonce = globalThis.crypto.randomUUID();
   const response = NextResponse.next();
 
