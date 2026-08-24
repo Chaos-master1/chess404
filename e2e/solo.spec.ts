@@ -38,9 +38,21 @@ async function move(page: Page, from: string, to: string, viewerColor: 'white' |
   await clickSquare(page, to, viewerColor);
 }
 
+// First-visit onboarding modal (z-index 10000) covers the whole app.
+async function dismissOnboarding(page: Page) {
+  const skip = page.getByRole('button', { name: /skip tutorial/i });
+  try {
+    await skip.click({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+  } catch {
+    // tutorial not shown (returning visitor) — nothing to do
+  }
+}
+
 test.describe('solo vs computer', () => {
   test('guest creates a computer match, moves, and resigns', async ({ page }) => {
     await page.goto('/play');
+    await dismissOnboarding(page);
 
     // Play hub must offer the solo path
     const playComputer = page.getByTestId('btn-play-computer');
