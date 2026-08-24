@@ -81,6 +81,7 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
         const alreadyUsedThisTurn = cardUsedBy[playerColor];
         return (
           <div key={card.id}
+            data-testid={`hand-card-${card.mechanic}`}
             style={{
               position:'absolute', bottom:`${yOff}px`,
               left:`calc(50% + ${xOff}px - ${CW/2}px)`,

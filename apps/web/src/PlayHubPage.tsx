@@ -125,6 +125,7 @@ export default function PlayHubPage({
         </div>
 
         <button
+          data-testid="btn-play-computer"
           onClick={handlePlayComputer}
           style={{
             padding:'16px 24px',
@@ -164,7 +165,10 @@ export default function PlayHubPage({
             border: '1px solid rgba(110,170,255,0.28)',
             boxShadow: '0 16px 42px rgba(0,0,0,0.24)',
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div
+              data-testid="active-match-card"
+              style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}
+            >
               <div style={{ minWidth: 0 }}>
                 <div style={{ color: '#d9e7ff', fontSize: '13px', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase' }}>
                   Active Match

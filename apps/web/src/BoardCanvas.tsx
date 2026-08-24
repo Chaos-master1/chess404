@@ -1875,6 +1875,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       )}
       <canvas
         ref={canvasRef}
+        data-testid="board-root"
         width={Math.round(W * dpr)}
         height={Math.round(H * dpr)}
         role="application"

@@ -1018,7 +1018,7 @@ export function MatchBoardView() {
                 ) : (
                   <button onClick={newGame} style={{ flex:1, padding:'9px', fontSize:'12px', background:'linear-gradient(180deg,#1a8a40,#0f5a28)', color:'#fff', border:'1px solid rgba(46,204,113,0.4)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold', boxShadow:'0 2px 12px rgba(30,140,70,0.4)' }}>♟ New Game</button>
                 )}
-          <button disabled={hostedActionLocked} onClick={() => {
+          <button data-testid="btn-resign" disabled={hostedActionLocked} onClick={() => {
             if (hostedActionLocked) {
               return;
             }

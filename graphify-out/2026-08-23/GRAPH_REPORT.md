@@ -1,16 +1,16 @@
-# Graph Report - chess404  (2026-08-24)
+# Graph Report - chess404  (2026-08-23)
 
 ## Corpus Check
-- 535 files · ~940,847 words
+- 534 files · ~940,525 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4897 nodes · 11383 edges · 356 communities (275 shown, 81 thin omitted)
+- 4896 nodes · 11383 edges · 364 communities (279 shown, 85 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 1005 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `0f3fb02a`
+- Built from commit: `60b4953c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -23,7 +23,7 @@
 - private-match-service.ts
 - ModerationStore
 - animations.ts
-- GuestStore
+- randomToken
 - accounts_postgres.go
 - proxyGateway
 - platform.AccountEmailDelivery
@@ -35,14 +35,14 @@
 - time.Time
 - MatchClaimStore
 - AccountStore
-- postgresArchiveStore
+- database/sql.DB
 - CSRFMiddleware
 - display.ts
 - main
 - Service
 - Chess404 Brutal Launch Readiness Audit & Technical Review
 - devDependencies
-- AccountPage.tsx
+- platform-service.ts
 - timeString
 - SQLiteGuestStore
 - Square
@@ -85,7 +85,7 @@
 - proxyPlatformStream
 - Deploy Chess404 To Railway
 - httpMatchCreator
-- platform-service.ts
+- ProfilesPage.tsx
 - context.Context
 - engine/chess.go
 - queue_test.go
@@ -94,14 +94,14 @@
 - Pre-Launch Audit Findings
 - PublicAccountProfile
 - MatchArchiveStore
-- SqliteAnticheatStore
+- sync.Mutex
 - CircuitBreaker
-- RedisBroadcaster
+- .Cancel
 - realtime/matches/[matchId]/route.ts
 - .evaluateCard
 - compilerOptions
 - match-state.ts
-- metrics.go
+- gauge
 - InMemoryRateLimiter
 - history_public_test.go
 - replay_test.go
@@ -109,8 +109,8 @@
 - WithLogging
 - main
 - MCTSSearch
-- applyMove
-- database/sql.DB
+- FriendsPage.tsx
+- PostgresGuestStore
 - postgresDirectChallengeStore
 - sqliteDirectChallengeStore
 - Ticket
@@ -119,7 +119,7 @@
 - PostgresAnticheatStore
 - Chess404 Architecture
 - Provider
-- StockfishEngine
+- AnalyzeIrwin
 - sqliteTicketStore
 - fileArchiveStore
 - AppShellLayout.tsx
@@ -141,13 +141,13 @@
 - httputil.go
 - NoopBroadcaster
 - MatchStateFromFEN
-- SQLiteAccountEmailOutboxStore
+- metrics.go
 - layout.tsx
 - CardsPage.tsx
 - match-labels.ts
 - contracts/package.json
 - dependencies
-- PostgresAccountEmailOutboxStore
+- analysis-worker/main.go
 - hashAccountPassword
 - PostgresAccountSecurityAuditStore
 - useSound.ts
@@ -155,14 +155,14 @@
 - AppDelegate
 - Chess404MobileTests
 - app.json
-- NewAccountStore
-- finalizingArchiveStore
+- StockfishEngine
+- postgresFriendshipStore
 - NNUE
-- history.go
+- Collect
 - app/page.tsx
 - Chess404Mobile/App.tsx
 - metro.config.js
-- match_lifecycle.go
+- redisClaimStore
 - finalizeArchivedRatedMatch
 - MatchLayout.tsx
 - package.json
@@ -172,24 +172,24 @@
 - eval.go
 - refreshStoredMatchClaim
 - LAUNCH_READINESS_AUDIT.md — 50 Items
-- MatchEngineProvider.tsx
+- anticheat.Engine
 - book.go
 - 3. Critical Bugs & Vulnerabilities
-- analysis-worker/main.go
-- RedisTokenStore
 - types.go
-- AccountDirectory
+- RedisTokenStore
 - anticheat/anticheat_test.go
+- AccountDirectory
+- logging.Logger
 - LeaderboardCache
 - loadtest-node.js
-- platform-suite-entrypoint.sh
-- AnalyzeStreaks
+- NewSQLiteGuestStore
+- anticheat.Result
 - generate_book
 - Chess404Mobile/tsconfig.json
 - NewZobristHasher
 - 3. Critical Bugs
 - devDependencies
-- MatchArchiveEntry
+- analysis-worker/main_test.go
 - Chess404 — Pre-Launch Comprehensive Audit
 - loadtest.js
 - contracts/tsconfig.json
@@ -197,7 +197,7 @@
 - account_security_audit_directory.go
 - account_email_delivery.go
 - AccountNotificationDirectory
-- rateLimitIntent
+- archivePersistence
 - challenge_directory.go
 - friend_directory.go
 - NewGuestStore
@@ -208,7 +208,7 @@
 - history_test.go
 - loadtest-smart.js
 - dashboard/page.tsx
-- MatchArchiveStats
+- AnalyzeStreaks
 - scripts
 - ♟ Chess404 — Brutal Expert Panel Audit v2
 - next.config.mjs
@@ -254,7 +254,7 @@
 - stockfish-18-lite-single.js
 - stockfish-18-single.js
 - MatchStateContext.tsx
-- TestMCTSFindsCapture
+- responseRecorder
 - CardTutorialModal.tsx
 - newSecurityTestMatch
 - newRedisBackedServiceForTest
@@ -266,11 +266,15 @@
 - backup-db.sh script
 - recovery.sh script
 - openDirectChallengeStore
+- ApplyEloMatchResult
 - match-service/main_test.go
+- Require
+- .Hijack
 - outputs
 - Chess404 Realtime Services
 - Chess404 Rollback Procedure
-- NewSQLiteGuestStore
+- rateLimitIntent
+- TestPlatformStatusIncludesGuestStoreBackend
 - bootstrap/route.ts
 - [ticketId]/route.ts
 - account-results/route.ts
@@ -280,8 +284,12 @@
 - MatchAnimContext.tsx
 - MatchCardContext.tsx
 - MatchEngineContext.tsx
+- counterVec
+- TestMCTSFindsCapture
+- histogramVec
 - useMatchBoardEffects.ts
 - BoardPreview.tsx
+- GuestStoreStats
 - card-pool.ts
 - intents/route.ts
 - gateway/status/route.ts
@@ -344,25 +352,25 @@
 10. `NewMatchClaimStore()` - 54 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `UseMatchTimerProps` --references--> `PieceColor`  [EXTRACTED]
-  apps/web/src/hooks/useMatchTimer.tsx → packages/contracts/src/index.ts
-- `UseMatchEngineProps` --references--> `PieceColor`  [EXTRACTED]
-  apps/web/src/hooks/useMatchEngineFacade.tsx → packages/contracts/src/index.ts
 - `PlayHubPageProps` --references--> `PieceColor`  [EXTRACTED]
   apps/web/src/PlayHubPage.tsx → packages/contracts/src/index.ts
 - `UseMatchEngineProps` --references--> `MatchModeId`  [EXTRACTED]
   apps/web/src/hooks/useMatchEngineFacade.tsx → packages/contracts/src/index.ts
-- `AccountLeaderboardResponse` --references--> `MatchModeId`  [EXTRACTED]
-  apps/web/src/lib/platform-service.ts → packages/contracts/src/index.ts
+- `useMatchEngineFacade()` --calls--> `makeBoard()`  [EXTRACTED]
+  apps/web/src/hooks/useMatchEngineFacade.tsx → packages/game-core/src/chess-engine.ts
+- `useMatchEngineFacade()` --calls--> `moveNotation()`  [EXTRACTED]
+  apps/web/src/hooks/useMatchEngineFacade.tsx → packages/game-core/src/chess-engine.ts
+- `UseMatchTimerProps` --references--> `PieceColor`  [EXTRACTED]
+  apps/web/src/hooks/useMatchTimer.tsx → packages/contracts/src/index.ts
 
 ## Import Cycles
 - None detected.
 
-## Communities (356 total, 81 thin omitted)
+## Communities (364 total, 85 thin omitted)
 
 ### Community 0 - "useMatchEngineFacade.tsx"
-Cohesion: 0.06
-Nodes (92): BoardCanvas, BoardCanvasProps, clientRng, drawRandomCard(), incrementCardSeq(), CardHand(), CardHandProps, MatchBoardView() (+84 more)
+Cohesion: 0.05
+Nodes (97): BoardCanvas, BoardCanvasProps, clientRng, drawRandomCard(), incrementCardSeq(), CardHand(), CardHandProps, MatchBoardView() (+89 more)
 
 ### Community 1 - "useMatchNav.tsx"
 Cohesion: 0.17
@@ -374,7 +382,7 @@ Nodes (24): NewAccountSecurityAuditStore(), NewDirectChallengeStore(), TestDirec
 
 ### Community 3 - "gateway/main.go"
 Cohesion: 0.10
-Nodes (87): GatewayAccountIdentity, GatewayBootstrapAccountSessions, GatewayBootstrapErrors, GatewayBootstrapGuestSessions, GatewayBootstrapMatchClaims, GatewayBootstrapPayload, GatewayBootstrapQueueTickets, GatewayBootstrapRecoveredMatch (+79 more)
+Nodes (88): GatewayAccountIdentity, GatewayBootstrapAccountSessions, GatewayBootstrapErrors, GatewayBootstrapGuestSessions, GatewayBootstrapMatchClaims, GatewayBootstrapPayload, GatewayBootstrapQueueTickets, GatewayBootstrapRecoveredMatch (+80 more)
 
 ### Community 4 - "createTestMatch"
 Cohesion: 0.06
@@ -392,9 +400,9 @@ Nodes (27): AccountBlock, AccountRestriction, fileModerationStore, ModerationAct
 Cohesion: 0.09
 Nodes (28): BoardArrow, clamp(), easeIn(), easeInOut(), easeOut(), FuseAnim, JumpAnim, lerp() (+20 more)
 
-### Community 8 - "GuestStore"
-Cohesion: 0.15
-Nodes (12): GuestPrivateState, GuestProfile, GuestSession, GuestStore, guestStoreFile, GuestStoreStats, IssuedGuestSession, PublicGuestSession (+4 more)
+### Community 8 - "randomToken"
+Cohesion: 0.19
+Nodes (11): GuestPrivateState, GuestProfile, GuestSession, GuestStore, guestStoreFile, IssuedGuestSession, PublicGuestSession, buildGuestSession() (+3 more)
 
 ### Community 9 - "accounts_postgres.go"
 Cohesion: 0.09
@@ -405,8 +413,8 @@ Cohesion: 0.16
 Nodes (9): POST(), POST(), GET(), POST(), proxyGateway(), POST(), POST(), GET() (+1 more)
 
 ### Community 11 - "platform.AccountEmailDelivery"
-Cohesion: 0.14
-Nodes (20): platform.AccountEmailDelivery, AccountEmailDeliveryOverview, AccountEmailDeliveryRequest, AccountEmailDeliveryResultRequest, AccountEmailDeliveryStoreStats, AccountEmailOutboxStore, accountEmailDeliveryReadyForAttempt(), normalizeAccountEmailDeliveryKind() (+12 more)
+Cohesion: 0.06
+Nodes (41): database/sql.NullString, database/sql.NullTime, platform.AccountEmailDelivery, AccountEmailDeliveryOverview, AccountEmailDeliveryRequest, AccountEmailDeliveryResultRequest, AccountEmailDeliveryStoreStats, AccountEmailOutboxStore (+33 more)
 
 ### Community 12 - "account_public.go"
 Cohesion: 0.13
@@ -429,36 +437,36 @@ Cohesion: 0.11
 Nodes (34): FriendshipDirectory, accountEmailOutboxPostgresURL(), accountEmailOutboxSQLitePath(), accountEmailOutboxStorePath(), accountSecurityAuditPostgresURL(), accountSecurityAuditSQLitePath(), accountSecurityAuditStorePath(), accountStorePath() (+26 more)
 
 ### Community 17 - "time.Time"
-Cohesion: 0.12
-Nodes (29): time.Time, applyClockView(), buildReplayFrames(), buildSnapshot(), buildSnapshotWithPresence(), cloneState(), cloneStateAt(), filterEventsForColor() (+21 more)
+Cohesion: 0.14
+Nodes (35): time.Time, matchPresenceState, CreateMatchRequest, JoinMatchSeatRequest, JoinMatchSeatResponse, PlayerIntent, ResolvedEvent, applyAbort() (+27 more)
 
 ### Community 18 - "MatchClaimStore"
-Cohesion: 0.09
-Nodes (19): MatchSeatClaim, claimPersistence, IssuedMatchSeatClaim, MatchClaimStats, MatchSeatClaim, redisClaimStore, MatchClaimStore, matchClaimKey() (+11 more)
+Cohesion: 0.13
+Nodes (15): claimPersistence, IssuedMatchSeatClaim, MatchClaimStats, MatchSeatClaim, MatchClaimStore, matchClaimKey(), newClaimToken(), NewMatchClaimStoreWithTTL() (+7 more)
 
 ### Community 19 - "AccountStore"
 Cohesion: 0.11
 Nodes (20): AccountRatingHistoryEntry, normalizeAccountEmail(), touchAccountPresence(), AccountProfile, AccountRatingHistoryEntry, AccountSession, AccountStore, accountStoreFile (+12 more)
 
-### Community 20 - "postgresArchiveStore"
+### Community 20 - "database/sql.DB"
 Cohesion: 0.15
-Nodes (10): postgresArchiveStore, NewPostgresMatchArchiveStore(), NewPostgresMatchArchiveStoreWithDB(), TestPostgresArchiveStoreLoadRestoresPrivateState(), TestPostgresArchiveStoreUpsertPersistsEntry(), MatchArchiveEntry, newPostgresArchiveStore(), NewPostgresArchiveStoreWithDB() (+2 more)
+Nodes (11): database/sql.DB, postgresArchiveStore, NewPostgresMatchArchiveStore(), NewPostgresMatchArchiveStoreWithDB(), TestPostgresArchiveStoreLoadRestoresPrivateState(), TestPostgresArchiveStoreUpsertPersistsEntry(), MatchArchiveEntry, newPostgresArchiveStore() (+3 more)
 
 ### Community 21 - "CSRFMiddleware"
-Cohesion: 0.32
-Nodes (19): CSRFMiddleware(), newCSRFOkHandler(), TestCSRFAllowedOriginsListStillTakesPrecedence(), TestCSRFAllowsExactSelfOrigin(), TestCSRFAllowsPlainGET(), TestCSRFAllowsViaXForwardedProtoBehindProxy(), TestCSRFFirstForwardedValue(), TestCSRFHonorsFirstForwardedProto() (+11 more)
+Cohesion: 0.29
+Nodes (20): CSRFMiddleware(), equalFoldOrigin(), newCSRFOkHandler(), TestCSRFAllowedOriginsListStillTakesPrecedence(), TestCSRFAllowsExactSelfOrigin(), TestCSRFAllowsPlainGET(), TestCSRFAllowsViaXForwardedProtoBehindProxy(), TestCSRFFirstForwardedValue() (+12 more)
 
 ### Community 22 - "display.ts"
 Cohesion: 0.25
 Nodes (12): formatDateTime(), formatFinishReasonLabel(), formatLastSeenLabel(), formatMatchFormat(), formatMatchPlayers(), formatMatchResult(), formatMatchSummary(), formatModeLabel() (+4 more)
 
 ### Community 23 - "main"
-Cohesion: 0.15
-Nodes (26): checkAccountRestriction(), main(), matchmakingInternalServiceToken(), matchmakingMatchServiceURL(), matchmakingPlatformServiceURL(), matchmakingTicketStoreRedisKey(), matchmakingTicketStoreRedisURL(), matchmakingTicketStoreSQLitePath() (+18 more)
+Cohesion: 0.13
+Nodes (28): WithRecovery(), checkAccountRestriction(), main(), matchmakingInternalServiceToken(), matchmakingMatchServiceURL(), matchmakingPlatformServiceURL(), matchmakingTicketStoreRedisKey(), matchmakingTicketStoreRedisURL() (+20 more)
 
 ### Community 24 - "Service"
-Cohesion: 0.09
-Nodes (26): Broadcaster, sync.RWMutex, sync.WaitGroup, authTokenEntry, computerMoveTask, MatchArchiveBootstrapper, MatchArchiveLoader, MatchArchiver (+18 more)
+Cohesion: 0.07
+Nodes (41): Broadcaster, sync.RWMutex, sync.WaitGroup, authTokenEntry, computerMoveTask, applyClockView(), buildReplayFrames(), buildSnapshot() (+33 more)
 
 ### Community 25 - "Chess404 Brutal Launch Readiness Audit & Technical Review"
 Cohesion: 0.06
@@ -468,25 +476,25 @@ Nodes (31): 10. Top 50 Improvements, 11. Launch Checklist, 12. Overall Score, 13
 Cohesion: 0.06
 Nodes (34): dependencies, react, react-native, react-native-webview, devDependencies, @babel/core, babel-jest, @babel/preset-env (+26 more)
 
-### Community 27 - "AccountPage.tsx"
-Cohesion: 0.08
-Nodes (52): AccountPageProps, AccountSeatPanel(), AccountSeatPanelProps, AccountSessionCard(), describeAccountEmailDeliveryKind(), describeAccountEmailDeliveryStatus(), describeAccountSecurityEvent(), describeOpponent() (+44 more)
+### Community 27 - "platform-service.ts"
+Cohesion: 0.05
+Nodes (86): AccountSeatPanel(), AccountSessionCard(), describeAccountEmailDeliveryKind(), describeAccountEmailDeliveryStatus(), describeAccountSecurityEvent(), describeOpponent(), describeOutcome(), describePerspective() (+78 more)
 
 ### Community 28 - "timeString"
 Cohesion: 0.09
 Nodes (45): database/sql.Row, nullTimeString(), sqliteAccountExecable, sqliteAccountQueryable, sqliteAccountScanner, SQLiteAccountStore, normalizeAccountHandle(), lookupPostgresAccountCredentialsByIdentifier() (+37 more)
 
 ### Community 29 - "SQLiteGuestStore"
-Cohesion: 0.14
-Nodes (19): database/sql.Rows, sync.Mutex, ApplyEloMatchResult(), ApplyEloMatchResultWithK(), fileSqliteAnticheatStore, guestScanner, SQLiteGuestStore, countGuestsTx() (+11 more)
+Cohesion: 0.18
+Nodes (16): database/sql.Rows, guestScanner, SQLiteGuestStore, firstNonEmpty(), countGuestsTx(), GuestProfile, GuestSession, guestSessionTokenMatches() (+8 more)
 
 ### Community 30 - "Square"
-Cohesion: 0.12
-Nodes (62): FortressZone, LastMove, Piece, Square, removalLeavesAKingInCheck(), cloneBoard(), parseSquareOptions(), selectedSquaresValue() (+54 more)
+Cohesion: 0.10
+Nodes (78): FortressZone, LastMove, Piece, ReplayFrame, Square, removalLeavesAKingInCheck(), cloneBoard(), parseSquareOptions() (+70 more)
 
 ### Community 31 - "xgauntlet.go"
 Cohesion: 0.08
-Nodes (58): Action, CardInstance, github.com/chess404/realtime/internal/engine/actions.Action, github.com/chess404/realtime/internal/engine/actions.Hand, github.com/chess404/realtime/internal/engine/core.CardOverlay, github.com/chess404/realtime/internal/engine/core.Color, github.com/chess404/realtime/internal/engine/core.Move, github.com/chess404/realtime/internal/engine/core.PieceType (+50 more)
+Nodes (59): Action, CardInstance, github.com/chess404/realtime/internal/engine/actions.Action, github.com/chess404/realtime/internal/engine/actions.Hand, github.com/chess404/realtime/internal/engine/core.CardOverlay, github.com/chess404/realtime/internal/engine/core.Color, github.com/chess404/realtime/internal/engine/core.Move, github.com/chess404/realtime/internal/engine/core.PieceType (+51 more)
 
 ### Community 32 - "usePlatform"
 Cohesion: 0.14
@@ -494,7 +502,7 @@ Nodes (13): AdminRoute(), CardsRoute(), CommunityRoute(), AppPage, PlatformConte
 
 ### Community 33 - "MatchState"
 Cohesion: 0.12
-Nodes (35): ApplyIntentRequest, BlackHoleZone, BombPiece, ChatMessage, CheaterState, DoubleMoveState, Envelope, FogZone (+27 more)
+Nodes (39): ApplyIntentRequest, BlackHoleZone, BombPiece, ChatMessage, CheaterState, DoubleMoveState, Envelope, FogZone (+31 more)
 
 ### Community 34 - "PlayerBar.tsx"
 Cohesion: 0.67
@@ -517,8 +525,8 @@ Cohesion: 0.13
 Nodes (13): ChallengeOpponentAccountID(), ChallengeViewerSeat(), NewDirectChallengeStoreFromDB(), DirectChallenge, DirectChallengeOverview, directChallengePersistence, DirectChallengeStore, directChallengeStoreFile (+5 more)
 
 ### Community 39 - "testing.T"
-Cohesion: 0.09
-Nodes (44): buildGatewayMux(), testing.T, Handler, TestGatewayAcceptsDirectChallenge(), TestGatewayBootstrapIncludesCapabilitiesAndQueue(), TestGatewayBootstrapRecoversQueueTicketsAndActiveMatch(), TestGatewayCreatesDirectChallenge(), TestGatewayCreatesPrivateMatch() (+36 more)
+Cohesion: 0.07
+Nodes (54): buildGatewayMux(), testing.T, Handler, TestGatewayAcceptsDirectChallenge(), TestGatewayBootstrapIncludesCapabilitiesAndQueue(), TestGatewayBootstrapRecoversQueueTicketsAndActiveMatch(), TestGatewayCreatesDirectChallenge(), TestGatewayCreatesPrivateMatch() (+46 more)
 
 ### Community 40 - "AccountPrivateState"
 Cohesion: 0.17
@@ -530,15 +538,15 @@ Nodes (11): AndroidLibraryAccessors, BundleAccessors, KotlinLibraryAccessors, Mi
 
 ### Community 42 - "QueuePage.tsx"
 Cohesion: 0.07
-Nodes (50): readStoredRoomMeta(), writeStoredRoomMeta(), cancelTicket(), enqueueGuest(), EnqueueGuestAccountIdentity, fetchQueueSnapshots(), fetchQueueTickets(), fetchTicket() (+42 more)
+Nodes (50): persistChallengeRoom(), ensureMatch(), writeStoredRoomMeta(), cancelTicket(), enqueueGuest(), EnqueueGuestAccountIdentity, fetchQueueSnapshots(), fetchQueueTickets() (+42 more)
 
 ### Community 43 - "RedisMatchStore"
 Cohesion: 0.12
-Nodes (5): MatchStore, RedisMatchStore, extractMatchID(), NewRedisMatchStore(), Client
+Nodes (4): MatchStore, RedisMatchStore, extractMatchID(), Client
 
 ### Community 44 - "match-service.ts"
 Cohesion: 0.10
-Nodes (34): App(), AppPage, IntentWithoutMatch, nextClientMoveId(), useAuthoritativeMatch(), buildStoredRoomMeta(), anySignal(), applyIntent() (+26 more)
+Nodes (33): App(), AppPage, IntentWithoutMatch, nextClientMoveId(), useAuthoritativeMatch(), buildStoredRoomMeta(), anySignal(), applyIntent() (+25 more)
 
 ### Community 45 - "AbstractExternalDependencyFactory"
 Cohesion: 0.10
@@ -549,16 +557,16 @@ Cohesion: 0.06
 Nodes (30): 10. Top 50 Improvements, 11. Launch Checklist, 12. Overall Score, 13. Final Verdict, 1. Executive Summary, 2. Biggest Risks, 3. Critical Bugs, 4. Architecture Review (+22 more)
 
 ### Community 47 - "FriendshipStore"
-Cohesion: 0.07
-Nodes (25): fileFriendshipStore, FriendRequest, Friendship, FriendshipOverview, friendshipPersistence, FriendAccountForViewer(), NewFriendshipStoreFromDB(), normalizeFriendshipPair() (+17 more)
+Cohesion: 0.10
+Nodes (19): fileFriendshipStore, FriendRequest, Friendship, FriendshipOverview, friendshipPersistence, FriendAccountForViewer(), NewFriendshipStoreFromDB(), normalizeFriendshipPair() (+11 more)
 
 ### Community 48 - "proxyPlatform"
 Cohesion: 0.16
 Nodes (10): POST(), POST(), POST(), POST(), POST(), POST(), proxyPlatform(), POST() (+2 more)
 
 ### Community 49 - "HistoryPage.tsx"
-Cohesion: 0.14
-Nodes (22): collectActiveEffects(), finishReasonLabel(), formatClock(), formatLabel(), hiddenArchiveCountLabel(), HistoryPage(), HistoryPageProps, parseModeFilterValue() (+14 more)
+Cohesion: 0.10
+Nodes (31): CommunityPage(), CommunityPageProps, statLabel(), collectActiveEffects(), finishReasonLabel(), formatClock(), formatLabel(), hiddenArchiveCountLabel() (+23 more)
 
 ### Community 50 - "search.go"
 Cohesion: 0.13
@@ -569,8 +577,8 @@ Cohesion: 0.09
 Nodes (33): AccountNotificationEvent, Flusher, FriendshipOverview, jsonContentTypeWriter, accountAuthPreviewEnabled(), accountAuthPublicBaseURL(), accountOwnsGuest(), buildPlatformMux() (+25 more)
 
 ### Community 52 - "system-service.ts"
-Cohesion: 0.10
-Nodes (21): MatchSeatClaim, degradedGatewayStatus(), degradedMatchmakingStatus(), degradedMatchStatus(), degradedPlatformStatus(), fetchGatewayBootstrap(), fetchJSON(), fetchSystemStatus() (+13 more)
+Cohesion: 0.09
+Nodes (28): AccountPageProps, AccountSeatPanelProps, AuthPageProps, AccountSession, GuestProfile, GuestSession, MatchSeatClaim, degradedGatewayStatus() (+20 more)
 
 ### Community 53 - "broadcast_redis_test.go"
 Cohesion: 0.60
@@ -580,13 +588,9 @@ Nodes (4): TestBroadcastRelayDoesNotBlock(), TestRedisSubscriptionRefCount(), Te
 Cohesion: 0.15
 Nodes (9): AndroidLibraryAccessors, BundleAccessors, KotlinGradleLibraryAccessors, KotlinLibraryAccessors, MinimalExternalModuleDependency, PluginAccessors, VersionAccessors, Deprecated (+1 more)
 
-### Community 55 - "MemoryMatchStore"
-Cohesion: 0.09
-Nodes (3): MemoryMatchStore, NewMemoryMatchStore(), RWMutex
-
 ### Community 56 - "Service"
-Cohesion: 0.22
-Nodes (6): MatchCreator, Service, ticketStore, NewPersistentService(), NewService(), newFileTicketStore()
+Cohesion: 0.25
+Nodes (3): MatchCreator, Service, NewService()
 
 ### Community 57 - "engine_test.go"
 Cohesion: 0.23
@@ -597,8 +601,8 @@ Cohesion: 0.31
 Nodes (17): accountAuthTokenMatches(), buildAccountAuthOverview(), consumeAccountEmailVerification(), consumeAccountPasswordReset(), issueAccountEmailVerification(), issueAccountPasswordReset(), latestPendingAccountEmailVerification(), normalizeAccountEmailVerificationRecords() (+9 more)
 
 ### Community 59 - "time.Duration"
-Cohesion: 0.33
-Nodes (10): net/http.Request, time.Duration, authRateBucket, platformAuthThrottle, newPlatformAuthThrottle(), requestClientIP(), throttleClientKey(), throttleIdentityKey() (+2 more)
+Cohesion: 0.35
+Nodes (9): net/http.Request, time.Duration, authRateBucket, platformAuthThrottle, newPlatformAuthThrottle(), requestClientIP(), throttleClientKey(), throttleIdentityKey() (+1 more)
 
 ### Community 60 - "Chess404 Project Status"
 Cohesion: 0.10
@@ -630,15 +634,15 @@ Nodes (6): Completed, graphify, Key Context, Next Move, Objective, Work State
 
 ### Community 68 - "Deploy Chess404 To Railway"
 Cohesion: 0.08
-Nodes (22): Beta data reset before launch, ⚠️ Boot-fatal requirements per binary, Deploy Chess404 To Railway, Dockerfile path for each service, First staging checklist, `gateway`, Health checks, Important note (+14 more)
+Nodes (23): Beta data reset before launch, Create the Railway project, Deploy Chess404 To Railway, Dockerfile path for each service, First staging checklist, `gateway`, Health checks, Important note (+15 more)
 
 ### Community 69 - "httpMatchCreator"
 Cohesion: 0.50
 Nodes (3): httpMatchCreator, Client, MatchAssignment
 
-### Community 70 - "platform-service.ts"
-Cohesion: 0.04
-Nodes (97): AdminModerationPage(), AdminModerationPageProps, STATUS_OPTIONS, CommunityPage(), CommunityPageProps, statLabel(), GamePanel(), GamePanelProps (+89 more)
+### Community 70 - "ProfilesPage.tsx"
+Cohesion: 0.10
+Nodes (30): GamePanel(), GamePanelProps, AccountBlockView, AccountLeaderboardSpotlight, AccountSeasonSummary, blockAccount(), fetchAccountArchivedMatches(), fetchAccountByHandle() (+22 more)
 
 ### Community 71 - "context.Context"
 Cohesion: 0.19
@@ -657,8 +661,8 @@ Cohesion: 0.25
 Nodes (29): CardAnimOverlay(), clamp(), drawParticle(), easeIn(), easeInOut(), easeOut(), getDuration(), lerp() (+21 more)
 
 ### Community 75 - "sqliteArchiveStore"
-Cohesion: 0.20
-Nodes (3): sqliteArchiveStore, MatchArchiveEntry, newSQLiteArchiveStore()
+Cohesion: 0.15
+Nodes (5): matchArchiveFile, MatchArchivePrivateEntry, sqliteArchiveStore, MatchArchiveEntry, newSQLiteArchiveStore()
 
 ### Community 76 - "Pre-Launch Audit Findings"
 Cohesion: 0.22
@@ -669,20 +673,20 @@ Cohesion: 0.11
 Nodes (25): accountBlockView, accountNotificationView, accountRestrictionView, directChallengeView, friendRequestView, friendshipView, moderationActionAuditView, moderationAdminReportView (+17 more)
 
 ### Community 78 - "MatchArchiveStore"
-Cohesion: 0.18
-Nodes (3): archivePersistence, MatchArchiveStore, newFileArchiveStore()
+Cohesion: 0.15
+Nodes (12): MatchArchiveEntry, cloneArchiveEntry(), cloneBoard(), cloneEvents(), cloneMatchState(), clonePayload(), clonePositionHistory(), cloneReplayFrames() (+4 more)
 
-### Community 79 - "SqliteAnticheatStore"
-Cohesion: 0.19
-Nodes (9): sqliteAnticheatScanner, SqliteAnticheatStore, sqliteAnticheatStoreFile, AnticheatAnalysisRecord, AnticheatPlayerSummary, AnticheatStats, NewSqliteAnticheatStore(), scanSqliteAnticheatAnalysis() (+1 more)
+### Community 79 - "sync.Mutex"
+Cohesion: 0.16
+Nodes (11): sync.Mutex, fileSqliteAnticheatStore, sqliteAnticheatScanner, SqliteAnticheatStore, sqliteAnticheatStoreFile, AnticheatAnalysisRecord, AnticheatPlayerSummary, AnticheatStats (+3 more)
 
 ### Community 80 - "CircuitBreaker"
 Cohesion: 0.19
 Nodes (9): BreakerPool, CircuitBreaker, HTTPClient(), NewBreakerPool(), NewHTTPClient(), Client, Duration, Mutex (+1 more)
 
-### Community 81 - "RedisBroadcaster"
-Cohesion: 0.16
-Nodes (10): NewRedisBroadcaster(), Broadcaster, RedisBroadcaster, redisSubscription, openMatchStore(), PubSub, Broadcaster, MatchStore (+2 more)
+### Community 81 - ".Cancel"
+Cohesion: 0.18
+Nodes (8): NewRedisBroadcaster(), Broadcaster, RedisBroadcaster, redisSubscription, NewRedisMatchStore(), PubSub, Client, Mutex
 
 ### Community 82 - "realtime/matches/[matchId]/route.ts"
 Cohesion: 0.17
@@ -697,12 +701,12 @@ Cohesion: 0.11
 Nodes (17): DOM, DOM.Iterable, ES2022, compilerOptions, allowSyntheticDefaultImports, esModuleInterop, forceConsistentCasingInFileNames, isolatedModules (+9 more)
 
 ### Community 85 - "match-state.ts"
-Cohesion: 0.22
-Nodes (16): MatchState, ResolvedEvent, RULES_VERSION, applyChatIntent(), ApplyIntentResult, applyMoveIntent(), applyOfferDrawIntent(), applyPlayerIntent() (+8 more)
+Cohesion: 0.19
+Nodes (18): MatchState, ResolvedEvent, makeBoard(), moveNotation(), RULES_VERSION, applyChatIntent(), ApplyIntentResult, applyMoveIntent() (+10 more)
 
-### Community 86 - "metrics.go"
-Cohesion: 0.06
-Nodes (33): counter, main(), histogram, RetryWithBackoff(), Level, logging.Logger, New(), parseLevel() (+25 more)
+### Community 86 - "gauge"
+Cohesion: 0.15
+Nodes (5): counter, gauge, histogram, newGauge(), Mutex
 
 ### Community 87 - "InMemoryRateLimiter"
 Cohesion: 0.23
@@ -721,24 +725,24 @@ Cohesion: 0.19
 Nodes (17): dynamic, ensureJSONHeaders(), filterHeaders(), filterResponseHeaders(), forwardMatchmaking(), GET(), isLocalRequest(), jsonError() (+9 more)
 
 ### Community 91 - "WithLogging"
-Cohesion: 0.17
-Nodes (11): contextKey, generateRequestID(), RequestIDFromContext(), WithLogging(), WithRequestID(), responseRecorder, Conn, Context (+3 more)
+Cohesion: 0.39
+Nodes (7): contextKey, generateRequestID(), RequestIDFromContext(), WithLogging(), WithRequestID(), Context, Handler
 
 ### Community 92 - "main"
-Cohesion: 0.12
-Nodes (25): Require(), WithRecovery(), archivePath(), archivePostgresURL(), archiveSQLitePath(), handleMatchSocket(), internalServiceToken(), main() (+17 more)
+Cohesion: 0.08
+Nodes (33): finalizingArchiveStore, intentResult, archivePath(), archivePostgresURL(), archiveSQLitePath(), handleMatchSocket(), internalServiceToken(), main() (+25 more)
 
 ### Community 93 - "MCTSSearch"
 Cohesion: 0.24
 Nodes (14): evaluateMCTSValue(), MCTSSearch(), moveKey(), NewMCTSEngine(), NewMCTSNode(), simpleHash(), MCTSConfig, MCTSEngine (+6 more)
 
-### Community 94 - "applyMove"
-Cohesion: 0.22
-Nodes (28): PlayerIntent, ResolvedEvent, drawRoundCards(), containsSquare(), keyForCoords(), keyForSquare(), nextHalfMoveClock(), sliceToSet() (+20 more)
+### Community 94 - "FriendsPage.tsx"
+Cohesion: 0.17
+Nodes (17): describePresence(), DirectChallengeCard(), FriendRequestCard(), FriendsPage(), FriendsPageProps, PresencePill(), cancelDirectChallenge(), declineDirectChallenge() (+9 more)
 
-### Community 95 - "database/sql.DB"
+### Community 95 - "PostgresGuestStore"
 Cohesion: 0.14
-Nodes (21): database/sql.DB, postgresGuestScanner, PostgresGuestStore, firstNonEmpty(), countPostgresGuestsTx(), GuestProfile, GuestSession, insertPostgresGuestTx() (+13 more)
+Nodes (19): postgresGuestScanner, PostgresGuestStore, generateGuestName(), countPostgresGuestsTx(), GuestProfile, GuestSession, insertPostgresGuestTx(), lookupPostgresGuestDB() (+11 more)
 
 ### Community 96 - "postgresDirectChallengeStore"
 Cohesion: 0.27
@@ -749,7 +753,7 @@ Cohesion: 0.25
 Nodes (5): sqliteDirectChallengeStore, DirectChallenge, DirectChallengeStore, newSQLiteDirectChallengePersistence(), NewSQLiteDirectChallengeStore()
 
 ### Community 98 - "Ticket"
-Cohesion: 0.26
+Cohesion: 0.30
 Nodes (11): ActiveTicketError, MatchAssignment, QueueName, QueueSnapshot, ServiceStats, Ticket, TicketStatus, MatchModeID (+3 more)
 
 ### Community 99 - "Getting Started"
@@ -772,17 +776,17 @@ Nodes (14): Card System, Chess404 Architecture, Data Flow, Game Engine, Infrastr
 Cohesion: 0.47
 Nodes (3): Provider, String, VersionAccessors
 
-### Community 104 - "StockfishEngine"
-Cohesion: 0.06
-Nodes (46): TestPostAnalysisSendsBodyAndServiceToken(), TestPostAnalysisSkipsWhenPlatformURLMissing(), TestRunIrwinNoEngineSkips(), TestRunIrwinProducesLogAndPostsResult(), anticheat.Engine, NewMockEngine(), parseIntSafe(), parseUCIInfoLine() (+38 more)
+### Community 104 - "AnalyzeIrwin"
+Cohesion: 0.18
+Nodes (22): NewMockEngine(), AnalyzeIrwin(), findUCIPlay(), TestAnalyzeIrwin_CardMovesExcluded(), TestAnalyzeIrwin_EmptySamples(), TestAnalyzeIrwin_EngineErrorsExcludedFromPercent(), TestAnalyzeIrwin_HumanLikePlay(), TestAnalyzeIrwin_NilEngineErrors() (+14 more)
 
 ### Community 105 - "sqliteTicketStore"
 Cohesion: 0.32
 Nodes (3): sqliteTicketStore, NewSQLitePersistentService(), newSQLiteTicketStore()
 
 ### Community 106 - "fileArchiveStore"
-Cohesion: 0.15
-Nodes (4): fileArchiveStore, matchArchiveFile, MatchArchivePrivateEntry, MatchArchiveEntry
+Cohesion: 0.14
+Nodes (3): fileArchiveStore, MatchArchiveStats, MatchArchiveEntry
 
 ### Community 107 - "AppShellLayout.tsx"
 Cohesion: 0.12
@@ -791,6 +795,10 @@ Nodes (18): OnboardingTutorial(), Props, STEPS, TOAST_COLORS, ToastContainer(), 
 ### Community 108 - "http.js"
 Cohesion: 0.22
 Nodes (3): errorRate, httpDuration, options
+
+### Community 109 - "fileTicketStore"
+Cohesion: 0.22
+Nodes (4): fileTicketStore, ticketStore, NewPersistentService(), newFileTicketStore()
 
 ### Community 110 - "redisTicketStore"
 Cohesion: 0.25
@@ -809,8 +817,8 @@ Cohesion: 0.13
 Nodes (14): @chess404/contracts, dependencies, @chess404/contracts, main, name, private, scripts, build (+6 more)
 
 ### Community 114 - "ComputerOpponent"
-Cohesion: 0.15
-Nodes (16): CardEvaluator, math/rand.Rand, colorFlipLeavesAKingInCheck(), filterCurrentlyIllegalReverse(), filterHandForComputer(), ComputerOpponent, Difficulty, NewComputerOpponent() (+8 more)
+Cohesion: 0.20
+Nodes (10): CardEvaluator, colorFlipLeavesAKingInCheck(), filterCurrentlyIllegalReverse(), filterHandForComputer(), ComputerOpponent, Difficulty, ParseDifficulty(), reverseIsCurrentlyLegal() (+2 more)
 
 ### Community 115 - "train_nnue.py"
 Cohesion: 0.15
@@ -845,16 +853,16 @@ Cohesion: 0.27
 Nodes (13): buildProxyFailureResponse(), buildUpstreamHeaders(), filterHeaders(), filterResponseHeaders(), InternalServiceProxyConfig, internalServiceToken(), NULL_BODY_STATUSES, proxyInternalService() (+5 more)
 
 ### Community 123 - "httputil.go"
-Cohesion: 0.21
-Nodes (10): net/http.ResponseWriter, configuredAccountEmailDeliveryProvider(), EnvOrDefault(), itoa(), LimitBody(), ListenAddr(), NowUTC(), ParseAllowedOrigins() (+2 more)
+Cohesion: 0.19
+Nodes (11): net/http.ResponseWriter, configuredAccountEmailDeliveryProvider(), writeAuthRateLimitError(), EnvOrDefault(), itoa(), LimitBody(), ListenAddr(), NowUTC() (+3 more)
 
 ### Community 125 - "MatchStateFromFEN"
-Cohesion: 0.12
-Nodes (33): B, BenchmarkEvalClassical(), BenchmarkSearchDepth3(), BenchmarkSearchDepth4(), startingBoard(), TestNNUELoaded(), TestNNUERelativeConsistency(), TestNNUESearchPlaysMove() (+25 more)
+Cohesion: 0.10
+Nodes (38): B, BenchmarkEvalClassical(), BenchmarkSearchDepth3(), BenchmarkSearchDepth4(), startingBoard(), TestNNUELoaded(), TestNNUERelativeConsistency(), TestNNUESearchPlaysMove() (+30 more)
 
-### Community 126 - "SQLiteAccountEmailOutboxStore"
-Cohesion: 0.16
-Nodes (11): database/sql.NullString, normalizeAccountEmailDeliveryLimit(), sqliteAccountEmailOutboxScanner, SQLiteAccountEmailOutboxStore, AccountEmailDeliveryRequest, AccountEmailDeliveryResultRequest, AccountEmailDeliveryStoreStats, NewSQLiteAccountEmailOutboxStore() (+3 more)
+### Community 126 - "metrics.go"
+Cohesion: 0.23
+Nodes (10): DecInFlight(), DecMatch(), DecWS(), IncCreated(), IncInFlight(), IncMatch(), IncWS(), newCounter() (+2 more)
 
 ### Community 127 - "layout.tsx"
 Cohesion: 0.19
@@ -876,9 +884,9 @@ Nodes (10): main, name, private, scripts, build, lint, test, type (+2 more)
 Cohesion: 0.11
 Nodes (18): dependencies, caniuse-lite, client-only, csstype, detect-libc, nanoid, next, picocolors (+10 more)
 
-### Community 132 - "PostgresAccountEmailOutboxStore"
-Cohesion: 0.17
-Nodes (10): database/sql.NullTime, postgresAccountEmailOutboxScanner, PostgresAccountEmailOutboxStore, AccountEmailDeliveryRequest, AccountEmailDeliveryResultRequest, AccountEmailDeliveryStoreStats, NewPostgresAccountEmailOutboxStore(), NewPostgresAccountEmailOutboxStoreWithDB() (+2 more)
+### Community 132 - "analysis-worker/main.go"
+Cohesion: 0.27
+Nodes (11): Job, parseAlgebraicDest(), ParseAlgebraicMove(), parseAlgebraicSource(), ParsedMove, buildMoveRecords(), envInt(), main() (+3 more)
 
 ### Community 133 - "hashAccountPassword"
 Cohesion: 0.24
@@ -904,25 +912,25 @@ Nodes (4): AppDelegate, -applicationdidFinishLaunchingWithOptions, -bundleURL, -
 Cohesion: 0.40
 Nodes (4): Chess404MobileTests, -findSubviewInViewmatching, -testRendersWelcomeScreen, XCTestCase
 
-### Community 140 - "NewAccountStore"
-Cohesion: 0.30
-Nodes (11): NewAccountStore(), TestAccountStoreClaimGuestPersistsAndReloads(), TestAccountStoreFinalizeMatchUpdatesDirectStats(), TestAccountStoreGetAccountByGuest(), TestAccountStoreListAccountsSortsByLastSeen(), TestAccountStoreManagesMultipleSessionsPerAccount(), TestAccountStorePasswordLoginAndLogout(), TestAccountStoreRejectsDuplicateEmail() (+3 more)
+### Community 140 - "StockfishEngine"
+Cohesion: 0.19
+Nodes (11): NewStockfishEngine(), StockfishConfig, StockfishEngine, Bool, Cmd, Reader, Context, Duration (+3 more)
 
-### Community 141 - "finalizingArchiveStore"
-Cohesion: 0.15
-Nodes (8): finalizingArchiveStore, intentResult, Client, MatchSnapshotResponse, MatchState, Mutex, ResolvedEvent, WaitGroup
+### Community 141 - "postgresFriendshipStore"
+Cohesion: 0.26
+Nodes (6): postgresFriendshipStore, FriendRequest, Friendship, FriendshipStore, NewPostgresFriendshipStore(), NewPostgresFriendshipStoreWithDB()
 
 ### Community 142 - "NNUE"
 Cohesion: 0.21
 Nodes (10): BlackHoleZone, NNUE, init(), pieceNNUEIndex(), FogZone, BombPiece, FortressZone, GameCard (+2 more)
 
-### Community 143 - "history.go"
-Cohesion: 0.40
-Nodes (8): cloneBoard(), cloneEvents(), cloneMatchState(), clonePayload(), clonePositionHistory(), cloneReplayFrames(), cloneSnapshot(), deepCloneAny()
+### Community 143 - "Collect"
+Cohesion: 0.20
+Nodes (7): RetryWithBackoff(), Collect(), formatFloat(), Handler(), init(), Duration, Handler
 
-### Community 147 - "match_lifecycle.go"
-Cohesion: 0.17
-Nodes (12): CreateMatchRequest, cloneCardsWithOwner(), makeBoard(), capturePositionState(), chooseSeed(), computerDisplayName(), generateComputerSeatSecret(), newRecoveredMatchPresenceState() (+4 more)
+### Community 147 - "redisClaimStore"
+Cohesion: 0.24
+Nodes (4): MatchSeatClaim, redisClaimStore, redis.Client, newRedisClaimStore()
 
 ### Community 148 - "finalizeArchivedRatedMatch"
 Cohesion: 0.27
@@ -956,9 +964,9 @@ Nodes (10): archivePath(), archivePostgresURL(), archiveSQLitePath(), buildMatch
 Cohesion: 0.17
 Nodes (11): 2026-07-20 launch-readiness smoke pass, Audit Resolution Status, AUDIT_v2.md — 10 Critical Bugs, Core Architecture (1-10), Database & Scalability (11-20), DevOps (45-50), Frontend/UX (39-44), Gameplay (21-30) (+3 more)
 
-### Community 157 - "MatchEngineProvider.tsx"
-Cohesion: 0.29
-Nodes (6): MatchEnginePropsContext, MatchEngineProvider(), MatchEngineProviderProps, MatchEngineRawContext, useMatchEngineContext(), UseMatchEngineProps
+### Community 157 - "anticheat.Engine"
+Cohesion: 0.31
+Nodes (7): anticheat.Engine, parseIntSafe(), parseUCIInfoLine(), EngineMove, MockEngine, Context, Mutex
 
 ### Community 158 - "book.go"
 Cohesion: 0.27
@@ -968,25 +976,25 @@ Nodes (9): hashStringToUint64(), init(), NewOpeningBook(), uciToMove(), BookEntr
 Cohesion: 0.18
 Nodes (11): 3. Critical Bugs & Vulnerabilities, C10. Unbounded Chat Message Growth, C1. Fortress Zones Ignored During Legal-Move Checking, C2. Fortress Path-Blocking Logic Inverted, C3. Race Condition: Use-After-Free in Match Container Map, C4. WebSocket Has Zero Auto-Reconnect, C5. Database Connection Pool Explosion, C6. Match Archive Loads Entire Dataset Into Memory on Startup (+3 more)
 
-### Community 160 - "analysis-worker/main.go"
-Cohesion: 0.27
-Nodes (11): Job, parseAlgebraicDest(), ParseAlgebraicMove(), parseAlgebraicSource(), ParsedMove, buildMoveRecords(), envInt(), main() (+3 more)
+### Community 160 - "types.go"
+Cohesion: 0.20
+Nodes (15): Result, anticheat.AnalysisResult, CheatFlag, GameRecord, anticheat.MoveRecord, TimeProfile, AnalyzeTimeProfile(), CalculateSuspicion() (+7 more)
 
 ### Community 161 - "RedisTokenStore"
 Cohesion: 0.25
 Nodes (6): RedisTokenStore, NewRedisTokenStore(), TokenStore, authTokenEntry, Client, Duration
 
-### Community 162 - "types.go"
-Cohesion: 0.24
-Nodes (12): Result, anticheat.AnalysisResult, CheatFlag, GameRecord, anticheat.MoveRecord, TimeProfile, AnalyzeTimeProfile(), mean() (+4 more)
+### Community 162 - "anticheat/anticheat_test.go"
+Cohesion: 0.33
+Nodes (8): TestAnalyzeStreaks(), TestAnalyzeTimeProfile(), TestCalculateAccuracy(), TestCalculateSuspicion(), TestDetectFlags(), CalculateAccuracy(), max(), T
 
 ### Community 163 - "AccountDirectory"
 Cohesion: 0.22
 Nodes (22): BuildPublicAccountProfile(), buildAccountNotificationView(), buildAccountRestrictionView(), buildDirectChallengeView(), buildModerationActionAuditView(), buildModerationAdminReportView(), buildPlayerReportView(), normalizeModerationStatusFilter() (+14 more)
 
-### Community 165 - "anticheat/anticheat_test.go"
-Cohesion: 0.23
-Nodes (11): TestAnalyzeStreaks(), TestAnalyzeTimeProfile(), TestCalculateAccuracy(), TestCalculateSuspicion(), TestDetectFlags(), CalculateAccuracy(), CalculateSuspicion(), DetectFlags() (+3 more)
+### Community 165 - "logging.Logger"
+Cohesion: 0.28
+Nodes (5): main(), Level, logging.Logger, New(), parseLevel()
 
 ### Community 166 - "LeaderboardCache"
 Cohesion: 0.27
@@ -996,9 +1004,9 @@ Nodes (6): NewLeaderboardCache(), LeaderboardCache, leaderboardCacheEntry, Durat
 Cohesion: 0.32
 Nodes (7): endpoints, fetch(), http, https, main(), results, worker()
 
-### Community 169 - "AnalyzeStreaks"
-Cohesion: 0.39
-Nodes (7): GameResult, PlayerHistory, StreakAnalysis, AnalyzeStreaks(), calculateRatingGain(), GameResult, Time
+### Community 168 - "NewSQLiteGuestStore"
+Cohesion: 0.43
+Nodes (5): NewSQLiteGuestStore(), TestSQLiteGuestStoreEnsureGuestPersistsAndReloads(), TestSQLiteGuestStoreFinalizeMatchIsIdempotent(), TestSQLiteGuestStoreResumeGuestByToken(), TestSQLiteGuestStoreStatsReflectProfilesAndRatedResults()
 
 ### Community 170 - "generate_book"
 Cohesion: 0.38
@@ -1016,9 +1024,9 @@ Nodes (9): 3. Critical Bugs, BUG-01 — File-Based AccountStore Used in Producti
 Cohesion: 0.29
 Nodes (6): devDependencies, playwright, turbo, typescript, vitest, $schema
 
-### Community 177 - "MatchArchiveEntry"
-Cohesion: 0.52
-Nodes (3): MatchArchiveEntry, cloneArchiveEntry(), sortEntriesByUpdatedAt()
+### Community 177 - "analysis-worker/main_test.go"
+Cohesion: 0.53
+Nodes (5): TestPostAnalysisSendsBodyAndServiceToken(), TestPostAnalysisSkipsWhenPlatformURLMissing(), TestRunIrwinNoEngineSkips(), TestRunIrwinProducesLogAndPostsResult(), T
 
 ### Community 178 - "Chess404 — Pre-Launch Comprehensive Audit"
 Cohesion: 0.22
@@ -1036,13 +1044,9 @@ Nodes (8): compilerOptions, noEmit, outDir, rootDir, extends, include, src, ../.
 Cohesion: 0.14
 Nodes (20): net/mail.Address, net/smtp.Auth, platform.AccountEmailOutboxDirectory, accountEmailDispatcher, accountEmailSender, smtpAccountEmailSender, accountEmailDeliveryBaseRetry(), accountEmailDeliveryBatchSize() (+12 more)
 
-### Community 186 - "rateLimitIntent"
-Cohesion: 0.60
-Nodes (4): rateLimitIntent(), trackIntentTime(), matchPresenceState, Time
-
 ### Community 189 - "NewGuestStore"
-Cohesion: 0.16
-Nodes (53): net/http.Handler, platform.GuestDirectory, authorizeInternalPlatformRequest(), buildTestPlatformMux(), buildTestPlatformMuxWithAccounts(), TestAccountAuthLoginRateLimitReturnsTooManyRequests(), TestAccountAuthLoginRestoresGuestSession(), TestAccountAuthLogoutInvalidatesSession() (+45 more)
+Cohesion: 0.18
+Nodes (54): net/http.Handler, platform.GuestDirectory, authorizeInternalPlatformRequest(), buildTestPlatformMux(), buildTestPlatformMuxWithAccounts(), TestAccountAuthLoginRateLimitReturnsTooManyRequests(), TestAccountAuthLoginRestoresGuestSession(), TestAccountAuthLogoutInvalidatesSession() (+46 more)
 
 ### Community 191 - "Weaknesses"
 Cohesion: 0.22
@@ -1067,6 +1071,10 @@ Nodes (4): fetch(), http, https, main()
 ### Community 196 - "dashboard/page.tsx"
 Cohesion: 0.17
 Nodes (12): Props, EvalChart(), Props, DashboardPage(), Props, SearchTree(), Props, StatusBar() (+4 more)
+
+### Community 197 - "AnalyzeStreaks"
+Cohesion: 0.39
+Nodes (7): GameResult, PlayerHistory, StreakAnalysis, AnalyzeStreaks(), calculateRatingGain(), GameResult, Time
 
 ### Community 198 - "scripts"
 Cohesion: 0.40
@@ -1129,8 +1137,8 @@ Cohesion: 0.43
 Nodes (7): PublicMatchArchiveEntry, BuildPublicMatchArchiveEntry(), MatchArchiveEntry, IsPublicLiveSpectateMatch(), IsPublicReplayableMatch(), sanitizePublicEvents(), sanitizePublicMatchState()
 
 ### Community 234 - "rate_limit.go"
-Cohesion: 0.15
-Nodes (29): main(), headerStrippingResponseWriter, ClientIP(), ContentTypeMiddleware(), csrfCookieName(), ensureCSRFCookie(), equalFoldOrigin(), firstForwardedValue() (+21 more)
+Cohesion: 0.19
+Nodes (25): headerStrippingResponseWriter, ClientIP(), ContentTypeMiddleware(), csrfCookieName(), ensureCSRFCookie(), firstForwardedValue(), generateCSRFToken(), GlobalIPRateLimitMiddleware() (+17 more)
 
 ### Community 236 - "stockfish.js"
 Cohesion: 0.67
@@ -1224,9 +1232,9 @@ Nodes (5): c(), f(), i(), l(), t()
 Cohesion: 0.38
 Nodes (5): MatchStateContext, MatchStateContextShape, useMatchState(), PlayerCardInfo(), PlayerCardInfoProps
 
-### Community 270 - "TestMCTSFindsCapture"
-Cohesion: 0.67
-Nodes (3): TestMCTSFindsCapture(), TestMCTSFindsStartingMove(), T
+### Community 270 - "responseRecorder"
+Cohesion: 0.29
+Nodes (4): responseRecorder, Conn, ReadWriter, ResponseWriter
 
 ### Community 271 - "CardTutorialModal.tsx"
 Cohesion: 0.40
@@ -1280,9 +1288,13 @@ Nodes (5): Chess404 Realtime Services, Current implemented surface, Local archiv
 Cohesion: 0.40
 Nodes (4): Chess404 Rollback Procedure, Step-by-step, The one thing to unlearn first, What's not yet verified
 
-### Community 291 - "NewSQLiteGuestStore"
-Cohesion: 0.23
-Nodes (9): TestPlatformStatusIncludesGuestStoreBackend(), NewSQLiteGuestStore(), TestSQLiteGuestStoreEnsureGuestPersistsAndReloads(), TestSQLiteGuestStoreFinalizeMatchIsIdempotent(), TestSQLiteGuestStoreResumeGuestByToken(), TestSQLiteGuestStoreStatsReflectProfilesAndRatedResults(), NewSQLiteMatchArchiveStore(), TestSQLiteMatchArchiveStoreLoadMatchRestoresPrivateState() (+1 more)
+### Community 290 - "rateLimitIntent"
+Cohesion: 0.60
+Nodes (4): rateLimitIntent(), trackIntentTime(), matchPresenceState, Time
+
+### Community 291 - "TestPlatformStatusIncludesGuestStoreBackend"
+Cohesion: 0.50
+Nodes (4): TestPlatformStatusIncludesGuestStoreBackend(), NewSQLiteMatchArchiveStore(), TestSQLiteMatchArchiveStoreLoadMatchRestoresPrivateState(), TestSQLiteMatchArchiveStoreUpsertAndReload()
 
 ### Community 294 - "account-results/route.ts"
 Cohesion: 0.67
@@ -1296,25 +1308,37 @@ Nodes (3): dynamic, isLocalRequest(), POST()
 Cohesion: 0.67
 Nodes (3): dynamic, isLocalRequest(), POST()
 
+### Community 301 - "counterVec"
+Cohesion: 0.67
+Nodes (3): counter, counterVec, newCounterVec()
+
+### Community 302 - "TestMCTSFindsCapture"
+Cohesion: 0.67
+Nodes (3): TestMCTSFindsCapture(), TestMCTSFindsStartingMove(), T
+
+### Community 303 - "histogramVec"
+Cohesion: 0.67
+Nodes (3): histogram, histogramVec, newHistogramVec()
+
 ## Knowledge Gaps
-- **816 isolated node(s):** `Recommended Railway service names`, `Dockerfile path for each service`, `Public domains`, `Health checks`, `⚠️ Boot-fatal requirements per binary` (+811 more)
+- **817 isolated node(s):** `$schema`, `.opencode/plugins/graphify.js`, `What this is`, `Commands`, `Architecture notes worth knowing before editing` (+812 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **81 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **85 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `buildPlatformMux()` connect `buildPlatformMux` to `NewAccountEmailOutboxStore`, `AccountDirectory`, `account_public.go`, `resumeAllowedAccountSessionOrWrite`, `platform-service/main.go`, `BuildAccountEmailVerificationDelivery`, `openNotificationStore`, `finalizeArchivedRatedMatch`, `inMemoryAnticheatStore`, `main`, `Service`, `openDirectChallengeStore`, `refreshStoredMatchClaim`, `NewGuestStore`?**
-  _High betweenness centrality (0.049) - this node is a cross-community bridge._
-- **Why does `MatchState` connect `MatchState` to `Ticket`, `history_public.go`, `history.go`, `time.Time`, `ComputerOpponent`, `match_lifecycle.go`, `Service`, `applyMove`, `Square`, `xgauntlet.go`?**
-  _High betweenness centrality (0.027) - this node is a cross-community bridge._
-- **Why does `Service` connect `Service` to `Ticket`, `sqliteTicketStore`, `redisTicketStore`, `time.Time`, `time.Duration`, `SQLiteGuestStore`?**
-  _High betweenness centrality (0.027) - this node is a cross-community bridge._
+- **Why does `buildPlatformMux()` connect `buildPlatformMux` to `NewAccountEmailOutboxStore`, `AccountDirectory`, `account_public.go`, `resumeAllowedAccountSessionOrWrite`, `platform-service/main.go`, `.Cancel`, `BuildAccountEmailVerificationDelivery`, `openNotificationStore`, `finalizeArchivedRatedMatch`, `inMemoryAnticheatStore`, `main`, `openDirectChallengeStore`, `refreshStoredMatchClaim`, `NewGuestStore`?**
+  _High betweenness centrality (0.040) - this node is a cross-community bridge._
+- **Why does `main()` connect `main` to `ConfigurePostgresPool`, `rate_limit.go`, `refreshStoredMatchClaim`, `resumeAllowedAccountSessionOrWrite`, `platform-service/main.go`, `.Cancel`, `buildPlatformMux`, `openNotificationStore`, `CSRFMiddleware`, `InMemoryRateLimiter`, `main`, `openDirectChallengeStore`, `WithLogging`, `Require`?**
+  _High betweenness centrality (0.026) - this node is a cross-community bridge._
+- **Why does `MatchState` connect `MatchState` to `Ticket`, `history_public.go`, `MatchArchiveStore`, `time.Time`, `ComputerOpponent`, `Service`, `Square`, `xgauntlet.go`?**
+  _High betweenness centrality (0.026) - this node is a cross-community bridge._
 - **Are the 43 inferred relationships involving `createTestMatch()` (e.g. with `FuzzApplyCard()` and `TestCardBadsniper()`) actually correct?**
   _`createTestMatch()` has 43 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 39 inferred relationships involving `applyTestIntent()` (e.g. with `TestCardBadsniper()` and `TestCardBigsacrifice()`) actually correct?**
   _`applyTestIntent()` has 39 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 40 inferred relationships involving `cardIDByMechanic()` (e.g. with `FuzzApplyCard()` and `TestCardBadsniper()`) actually correct?**
   _`cardIDByMechanic()` has 40 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `Recommended Railway service names`, `Dockerfile path for each service`, `Public domains` to the rest of the system?**
-  _816 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **What connects `$schema`, `.opencode/plugins/graphify.js`, `What this is` to the rest of the system?**
+  _817 weakly-connected nodes found - possible documentation gaps or missing edges._

@@ -691,6 +691,7 @@ export default function QueuePage({
         {!ticket || ticket.status === 'cancelled' ? (
           <button
             className="btn-primary"
+            data-testid={`btn-join-${side}`}
             onClick={() => void handleJoin(side)}
             disabled={loading || restoringTickets || !profile || ratedBlocked}
             style={{
@@ -705,6 +706,7 @@ export default function QueuePage({
           </button>
         ) : ticket.status === 'queued' ? (
           <button
+            data-testid={`btn-cancel-${side}`}
             onClick={() => void handleCancel(side)}
             disabled={loading || restoringTickets}
             style={{
