@@ -2,6 +2,18 @@
 
 This repo is now prepared for a first real Railway staging deployment.
 
+> **Deployed reality as of 2026-08-24** (free-plan topology):
+> - `platform-service` is a **suite container**: it runs both `platform-service`
+>   (on `$PORT`) and `matchmaking-service` (on internal port `8084`) via
+>   `deploy/railway/platform-suite.Dockerfile`. Peers reach matchmaking through
+>   `http://${{platform-service.RAILWAY_PRIVATE_DOMAIN}}:8084`.
+> - **Redis is NOT a Railway service.** It is an external Upstash database
+>   (`rediss://...@civil-fawn-99150.upstash.io:6379`). The free plan caps
+>   provisioned resources, so Redis lives outside Railway.
+> - Several env vars are **hard requirements enforced by `envutil.Require`** at
+>   boot (`FATAL: missing required environment variables` otherwise). They were
+>   missing from earlier versions of this doc; they are marked ⚠️ below.
+
 ## Recommended Railway service names
 
 Use these exact service names so the reference variables below work as written:
@@ -9,22 +21,10 @@ Use these exact service names so the reference variables below work as written:
 - `web`
 - `gateway`
 - `match-service`
-- `platform-service`
-- `matchmaking-service`
+- `platform-service` (runs matchmaking too)
 - `postgres`
-- `redis`
 
-## Create the Railway project
-
-1. Create a new Railway project from the GitHub repo.
-2. Add these five services from the same repository:
-   - `web`
-   - `gateway`
-   - `match-service`
-   - `platform-service`
-   - `matchmaking-service`
-3. Add one Railway PostgreSQL service named `postgres`.
-4. Add one Railway Redis service named `redis`.
+External: one Upstash Redis instance shared by all services.
 
 ## Dockerfile path for each service
 
@@ -33,8 +33,7 @@ Keep the repository root as the source directory for every service and set the D
 - `web` -> `deploy/railway/web.Dockerfile`
 - `gateway` -> `deploy/railway/gateway.Dockerfile`
 - `match-service` -> `deploy/railway/match-service.Dockerfile`
-- `platform-service` -> `deploy/railway/platform-service.Dockerfile`
-- `matchmaking-service` -> `deploy/railway/matchmaking-service.Dockerfile`
+- `platform-service` -> `deploy/railway/platform-suite.Dockerfile`
 
 You can set that in Railway service settings or via the config variable:
 
@@ -63,14 +62,38 @@ Reason:
 
 Set the Railway health check path for:
 
-- `gateway` -> `/healthz`
-- `match-service` -> `/healthz`
-- `platform-service` -> `/healthz`
-- `matchmaking-service` -> `/healthz`
+- `gateway` -> `/readyz`
+- `match-service` -> `/readyz`
+- `platform-service` -> `/readyz` (covers the suite; matchmaking has no
+  Railway-level check but is supervised by the suite entrypoint — if it dies,
+  the container exits and Railway restarts everything)
 
 `web` can use `/`.
 
 ## Required variables
+
+Generate one strong shared secret for service-to-service auth and set it on
+every service (each binary accepts several aliases; `INTERNAL_SERVICE_TOKEN`
+works everywhere):
+
+```env
+INTERNAL_SERVICE_TOKEN=<openssl rand -hex 32>
+```
+
+`ALLOWED_ORIGINS` is a comma-separated CORS origin list — at minimum the public
+`web` domain:
+
+```env
+ALLOWED_ORIGINS=https://<web-domain>
+```
+
+### ⚠️ Boot-fatal requirements per binary
+
+- `match-service` requires: `PLATFORM_SERVICE_INTERNAL_URL`, `ALLOWED_ORIGINS`,
+  `INTERNAL_SERVICE_TOKEN`, and either `MATCH_REDIS_URL` or
+  `MATCH_STATE_BACKEND=memory`
+- `gateway` requires: the three `*_INTERNAL_URL`s + `ALLOWED_ORIGINS`
+- `platform-service` requires: `ALLOWED_ORIGINS`
 
 ## `web`
 
@@ -84,15 +107,25 @@ NEXT_PUBLIC_MATCH_SERVICE_WS_URL=wss://${{match-service.RAILWAY_PUBLIC_DOMAIN}}
 GATEWAY_INTERNAL_URL=http://${{gateway.RAILWAY_PRIVATE_DOMAIN}}:${{gateway.PORT}}
 MATCH_SERVICE_INTERNAL_URL=http://${{match-service.RAILWAY_PRIVATE_DOMAIN}}:${{match-service.PORT}}
 PLATFORM_SERVICE_INTERNAL_URL=http://${{platform-service.RAILWAY_PRIVATE_DOMAIN}}:${{platform-service.PORT}}
-MATCHMAKING_SERVICE_INTERNAL_URL=http://${{matchmaking-service.RAILWAY_PRIVATE_DOMAIN}}:${{matchmaking-service.PORT}}
+MATCHMAKING_SERVICE_INTERNAL_URL=http://${{platform-service.RAILWAY_PRIVATE_DOMAIN}}:8084
+INTERNAL_SERVICE_TOKEN=<shared-secret>
+GATEWAY_INTERNAL_SERVICE_TOKEN=<shared-secret>
+PLATFORM_INTERNAL_SERVICE_TOKEN=<shared-secret>
 ```
+
+Note: the `NEXT_PUBLIC_*` values are **Next.js build-time** variables. Set them
+(and generate the match-service public domain) BEFORE web's first build, or the
+client will bake in empty strings.
 
 ## `gateway`
 
 ```env
 MATCH_SERVICE_INTERNAL_URL=http://${{match-service.RAILWAY_PRIVATE_DOMAIN}}:${{match-service.PORT}}
 PLATFORM_SERVICE_INTERNAL_URL=http://${{platform-service.RAILWAY_PRIVATE_DOMAIN}}:${{platform-service.PORT}}
-MATCHMAKING_SERVICE_INTERNAL_URL=http://${{matchmaking-service.RAILWAY_PRIVATE_DOMAIN}}:${{matchmaking-service.PORT}}
+MATCHMAKING_SERVICE_INTERNAL_URL=http://${{platform-service.RAILWAY_PRIVATE_DOMAIN}}:8084
+ALLOWED_ORIGINS=https://<web-domain>
+GATEWAY_INTERNAL_SERVICE_TOKEN=<shared-secret>
+INTERNAL_SERVICE_TOKEN=<shared-secret>
 ```
 
 ## `match-service`
@@ -100,28 +133,39 @@ MATCHMAKING_SERVICE_INTERNAL_URL=http://${{matchmaking-service.RAILWAY_PRIVATE_D
 ```env
 MATCH_ARCHIVE_BACKEND=postgres
 MATCH_ARCHIVE_POSTGRES_URL=${{postgres.DATABASE_URL}}
+MATCH_STATE_BACKEND=redis
+MATCH_REDIS_URL=rediss://default:<upstash-password>@<upstash-host>:6379
+PLATFORM_SERVICE_INTERNAL_URL=http://${{platform-service.RAILWAY_PRIVATE_DOMAIN}}:${{platform-service.PORT}}
+ALLOWED_ORIGINS=https://<web-domain>
+INTERNAL_SERVICE_TOKEN=<shared-secret>
 ```
 
-## `platform-service`
+## `platform-service` (suite: platform + matchmaking)
 
 ```env
+# suite wiring
+MATCHMAKING_ADDR=0.0.0.0:8084
+
+# platform stores -> Postgres
 MATCH_ARCHIVE_BACKEND=postgres
 MATCH_ARCHIVE_POSTGRES_URL=${{postgres.DATABASE_URL}}
 GUEST_STORE_BACKEND=postgres
-GUEST_STORE_POSTGRES_URL=${{postgres.DATABASE_URL}}
 ACCOUNT_STORE_BACKEND=postgres
-ACCOUNT_STORE_POSTGRES_URL=${{postgres.DATABASE_URL}}
+FRIEND_STORE_BACKEND=postgres
+DIRECT_CHALLENGE_STORE_BACKEND=postgres
+PLATFORM_POSTGRES_URL=${{postgres.DATABASE_URL}}
+
+# platform match claims -> Upstash Redis
 MATCH_CLAIM_STORE_BACKEND=redis
-MATCH_CLAIM_STORE_REDIS_URL=${{redis.REDIS_URL}}
+MATCH_CLAIM_STORE_REDIS_URL=rediss://default:<upstash-password>@<upstash-host>:6379
 MATCH_CLAIM_STORE_TTL_SECONDS=43200
-```
 
-## `matchmaking-service`
-
-```env
+# matchmaking ticket store -> Upstash Redis
 MATCHMAKING_TICKET_STORE_BACKEND=redis
-MATCHMAKING_TICKET_STORE_REDIS_URL=${{redis.REDIS_URL}}
-MATCH_SERVICE_INTERNAL_URL=http://${{match-service.RAILWAY_PRIVATE_DOMAIN}}:${{match-service.PORT}}
+MATCHMAKING_TICKET_STORE_REDIS_URL=rediss://default:<upstash-password>@<upstash-host>:6379
+
+ALLOWED_ORIGINS=https://<web-domain>
+INTERNAL_SERVICE_TOKEN=<shared-secret>
 ```
 
 ## First staging checklist
@@ -159,16 +203,16 @@ Use this checklist before calling the hosted `/play` flow launch-ready.
 
 1. Verify Railway service health:
    - `web` loads its public domain
-   - `gateway` returns `200` from `/healthz`
-   - `match-service` returns `200` from `/healthz`
-   - `platform-service` returns `200` from `/healthz`
-   - `matchmaking-service` returns `200` from `/healthz`
+   - `gateway` returns `200` from `/readyz`
+   - `match-service` returns `200` from `/readyz`
+   - `platform-service` returns `200` from `/readyz`
+   - matchmaking is healthy if gateway `/status` reports it (no direct Railway check)
 2. Verify backend wiring from the web app:
    - open `/status`
    - confirm gateway, platform, match, and matchmaking all report healthy
    - confirm `/api/gateway/bootstrap` returns healthy downstream state instead of localhost connection errors
 3. Verify data backends:
-   - Railway Redis is attached to `matchmaking-service` and `platform-service`
+   - Upstash Redis credentials are wired into `platform-service` (suite) and `match-service`
    - Railway Postgres is attached to `platform-service` and `match-service`
 4. Run the hosted `/play` smoke test:
    - signed-out player can join casual
