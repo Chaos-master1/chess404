@@ -91,6 +91,14 @@ test.describe('multiplayer casual queue', () => {
       a = pa;
       b = pb;
 
+      // Regression guard (ghost-pairing credential bug): once paired, neither
+      // side may surface the missing-credentials failure. Give the WS attach
+      // a few seconds, then assert it never appeared.
+      await pb.waitForTimeout(6_000);
+      for (const page of [pa, pb]) {
+        await expect(page.getByText(/missing player credentials/i)).toHaveCount(0);
+      }
+
       // Refresh resilience on B: reload restores the live match
       await b.reload();
       await expect(

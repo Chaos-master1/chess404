@@ -367,6 +367,14 @@ export default function QueuePage({
     const opponentGuestId = ticket.matchedWith || undefined;
     const opponentName = ticket.opponentName || existingRoomMeta?.[viewerSeat === 'white' ? 'blackName' : 'whiteName'];
 
+    // The hosted lane always queues under the 'white' storage side, but the
+    // server assigns the real seat with a coin flip. Mirror this player's
+    // session secret onto whichever seat they were actually assigned so the
+    // match page can authenticate its WebSocket intents. Without this, a
+    // black-seat assignment finds no secret keyed under 'black' and the board
+    // opens with "Cannot connect: missing player credentials".
+    const ownSessionSecret = readStoredGuestSessionSecret('white');
+
     return {
       ...existingRoomMeta,
       queue: ticket.queue,
@@ -378,6 +386,12 @@ export default function QueuePage({
       blackAccountId: viewerSeat === 'black' ? currentAccountId : existingRoomMeta?.blackAccountId,
       whiteName: viewerSeat === 'white' ? profile.displayName : opponentName ?? existingRoomMeta?.whiteName,
       blackName: viewerSeat === 'black' ? profile.displayName : opponentName ?? existingRoomMeta?.blackName,
+      whitePlayerSecret: viewerSeat === 'white'
+        ? resolveSeatSecret(existingRoomMeta?.whitePlayerSecret, ownSessionSecret)
+        : existingRoomMeta?.whitePlayerSecret,
+      blackPlayerSecret: viewerSeat === 'black'
+        ? resolveSeatSecret(existingRoomMeta?.blackPlayerSecret, ownSessionSecret)
+        : existingRoomMeta?.blackPlayerSecret,
     };
   }, []);
 

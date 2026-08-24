@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,7 +23,7 @@ const (
 )
 
 const (
-	defaultQueuedTTL          = 1 * time.Hour
+	defaultQueuedTTL          = 10 * time.Minute
 	defaultMatchedRecoveryTTL = 3 * time.Minute
 	defaultCancelledTicketTTL = 30 * time.Second
 	defaultMaxRatingDiff      = 400
@@ -147,13 +148,25 @@ func newService(store ticketStore) *Service {
 		store:              store,
 		tickets:            make(map[string]Ticket),
 		now:                time.Now,
-		queuedTTL:          defaultQueuedTTL,
+		queuedTTL:          queuedTTLFromEnv(),
 		matchedRecoveryTTL: defaultMatchedRecoveryTTL,
 		cancelledTicketTTL: defaultCancelledTicketTTL,
 		cleanupStopCh:      make(chan struct{}),
 	}
 	s.startCleanupLoop()
 	return s
+}
+
+// queuedTTLFromEnv lets operators tune how long a queued ticket stays
+// matchable. Shorter TTLs reduce the window for ghost pairings against
+// abandoned tickets (the opponent is gone either way); the cleanup loop only
+// prunes every 5 minutes, so expiry granularity is bounded by that too.
+func queuedTTLFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MATCHMAKING_QUEUED_TTL_SECONDS"))
+	if secs, err := strconv.Atoi(raw); err == nil && secs >= 30 {
+		return time.Duration(secs) * time.Second
+	}
+	return defaultQueuedTTL
 }
 
 func (s *Service) startCleanupLoop() {

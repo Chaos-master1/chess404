@@ -407,3 +407,20 @@ func TestQueueDoesNotCrossMatchOfficialModes(t *testing.T) {
 		t.Fatalf("expected hidden-cards queue snapshot to remain isolated")
 	}
 }
+
+func TestQueuedTTLFromEnv(t *testing.T) {
+	t.Setenv("MATCHMAKING_QUEUED_TTL_SECONDS", "45")
+	if got := queuedTTLFromEnv(); got != 45*time.Second {
+		t.Fatalf("queuedTTLFromEnv() = %v, want 45s", got)
+	}
+
+	t.Setenv("MATCHMAKING_QUEUED_TTL_SECONDS", "not-a-number")
+	if got := queuedTTLFromEnv(); got != defaultQueuedTTL {
+		t.Fatalf("invalid value should fall back to default, got %v", got)
+	}
+
+	t.Setenv("MATCHMAKING_QUEUED_TTL_SECONDS", "5")
+	if got := queuedTTLFromEnv(); got != defaultQueuedTTL {
+		t.Fatalf("values below the 30s floor should fall back to default, got %v", got)
+	}
+}
