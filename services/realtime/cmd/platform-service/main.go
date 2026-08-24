@@ -358,6 +358,13 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 			"accountStoreBackend": accounts.Backend(),
 			"claimStoreBackend":   claims.Backend(),
 			"claimLeaseSeconds":   claims.TTLSeconds(),
+			// The status page reads archive/accounts/claims/guests as required
+			// objects. Omitting them threw a null dereference in the client and
+			// took the whole /status route down with it.
+			"archive":  archive.Stats(),
+			"accounts": accounts.Stats(),
+			"claims":   claims.Stats(),
+			"guests":   guests.Stats(),
 		})
 	})
 
@@ -541,6 +548,15 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 	mux.HandleFunc("/api/platform/matches", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
+			// Only the gateway writes archive rows. This used to be gated by
+			// "the snapshot must carry a seat secret", which stopped being a
+			// check at all once match-service began redacting secrets from every
+			// snapshot it hands out: the gateway then forwarded a redacted
+			// snapshot and every single archive write failed with 400, so
+			// nothing was ever archived -- no history, no replays, no results.
+			if !requireInternalServiceRequest(w, r) {
+				return
+			}
 			var snapshot contracts.MatchSnapshotResponse
 			if r.Body != nil {
 				defer r.Body.Close()
@@ -552,10 +568,6 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 			}
 			if strings.TrimSpace(snapshot.Match.MatchID) == "" {
 				http.Error(w, `{"error":"matchId is required"}`, http.StatusBadRequest)
-				return
-			}
-			if strings.TrimSpace(snapshot.Match.WhitePlayerSecret) == "" && strings.TrimSpace(snapshot.Match.BlackPlayerSecret) == "" {
-				http.Error(w, `{"error":"snapshot must include at least one player secret"}`, http.StatusBadRequest)
 				return
 			}
 			if err := archive.Upsert(snapshot); err != nil {
@@ -577,6 +589,10 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 			modeID := parseOptionalModeID(r.URL.Query().Get("modeId"))
 			statusFilter := parseOptionalMatchStatus(r.URL.Query().Get("status"))
 			var matches []platform.MatchArchiveEntry
+			// A query scoped to one player is that player's own history, not the
+			// public spectacle feed: it must include their vs-computer and
+			// private-invite games, which the public predicate strips out.
+			scoped := accountID != "" || guestID != ""
 			if accountID != "" {
 				account, ok := accounts.GetAccount(accountID)
 				if ok {
@@ -598,7 +614,11 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 			if modeID != "" {
 				matches = filterArchivedMatchesByMode(matches, modeID)
 			}
-			matches = filterPublicArchivedMatchesByStatus(matches, statusFilter)
+			if scoped {
+				matches = filterScopedArchivedMatchesByStatus(matches, statusFilter)
+			} else {
+				matches = filterPublicArchivedMatchesByStatus(matches, statusFilter)
+			}
 			publicMatches := make([]platform.PublicMatchArchiveEntry, 0, len(matches))
 			for _, match := range matches {
 				publicMatches = append(publicMatches, platform.BuildPublicMatchArchiveEntry(match))
@@ -2770,6 +2790,27 @@ func resolvedPublicStatusFilter(status string) string {
 	}
 }
 
+// filterScopedArchivedMatchesByStatus is the player's-own-history variant: it
+// filters by status only, and still drops aborted games (usually zero moves).
+func filterScopedArchivedMatchesByStatus(matches []platform.MatchArchiveEntry, status string) []platform.MatchArchiveEntry {
+	wanted := "finished"
+	if resolvedPublicStatusFilter(status) == "active" {
+		wanted = "active"
+	}
+	filtered := filterArchivedMatchesByStatus(matches, wanted)
+	kept := make([]platform.MatchArchiveEntry, 0, len(filtered))
+	for _, entry := range filtered {
+		if strings.EqualFold(strings.TrimSpace(entry.FinishReason), "abort") {
+			continue
+		}
+		if strings.TrimSpace(entry.MatchID) == "" {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
+}
+
 func filterPublicArchivedMatchesByStatus(matches []platform.MatchArchiveEntry, status string) []platform.MatchArchiveEntry {
 	if resolvedPublicStatusFilter(status) == "active" {
 		filtered := filterArchivedMatchesByStatus(matches, "active")
@@ -3789,6 +3830,15 @@ func requireAccountInteractionAllowed(moderation platform.ModerationDirectory, a
 func isModerationAdminAccount(account platform.AccountProfile) bool {
 	if account.AccountID != "" {
 		if _, ok := configuredModerationAdminAccountIDs()[account.AccountID]; ok {
+			return true
+		}
+	}
+	// PLATFORM_ADMIN_HANDLES is an equally valid way to configure admin access
+	// -- moderationAdminConfigured() (which gates whether the client renders
+	// the admin panel at all) accepts it. Without this branch, a handles-only
+	// deployment showed the panel and then 403'd every action inside it.
+	if account.Handle != "" {
+		if _, ok := configuredModerationAdminHandles()[strings.ToLower(account.Handle)]; ok {
 			return true
 		}
 	}

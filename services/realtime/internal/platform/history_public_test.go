@@ -49,8 +49,23 @@ func TestIsPublicLiveSpectateMatchExcludesComputerMatches(t *testing.T) {
 }
 
 func TestIsPublicLiveSpectateMatchIncludesRealActiveGames(t *testing.T) {
-	entry := MatchArchiveEntry{MatchID: "m6", Status: "active", Queue: "casual", ModeID: "open_cards"}
+	entry := MatchArchiveEntry{MatchID: "m6", Status: "active", Queue: "casual", ModeID: "open_cards", WhiteGuestID: "guest_w", BlackGuestID: "guest_b"}
 	if !IsPublicLiveSpectateMatch(entry) {
 		t.Fatal("expected a real live human-vs-human game to remain visible in the public watch feed")
+	}
+}
+
+// Match creation is a cheap public call, so unclaimed rooms accumulate. They
+// have no game to watch and used to crowd real games out of the feed: a live
+// production check found 33 of 34 "watchable" matches were empty rooms.
+func TestIsPublicLiveSpectateMatchExcludesUnclaimedSeats(t *testing.T) {
+	for name, entry := range map[string]MatchArchiveEntry{
+		"no seats":  {MatchID: "m7", Status: "active", Queue: "casual", ModeID: "open_cards"},
+		"white only": {MatchID: "m8", Status: "active", Queue: "casual", ModeID: "open_cards", WhiteGuestID: "guest_w"},
+		"black only": {MatchID: "m9", Status: "active", Queue: "casual", ModeID: "open_cards", BlackGuestID: "guest_b"},
+	} {
+		if IsPublicLiveSpectateMatch(entry) {
+			t.Fatalf("expected a match with %s to stay out of the public watch feed", name)
+		}
 	}
 }

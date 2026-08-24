@@ -13,9 +13,87 @@ import {
   readStoredActiveMatchId,
   writeStoredGuestIdentity,
 } from '../lib/session-storage';
+import { joinPrivateMatch } from '../lib/private-match-service';
 import { cloneBoard, positionKey, toFEN, gameStatus, insuffMat } from '../chessEngine';
 import { OPP } from '../constants';
 import type { GuestProfile, MatchSeatClaim } from '../lib/platform-service';
+
+// Distinguishes "the server says this match no longer exists" from "the request
+// never landed". Anything else -- offline, timeout, 5xx -- must leave the
+// client's active-match state alone.
+function isMatchGoneError(error: unknown): boolean {
+  const status = (error as { status?: number } | null)?.status;
+  if (status === 404 || status === 410) return true;
+  if (typeof status === 'number') return false;
+  return error instanceof Error && /not found/i.test(error.message);
+}
+
+// An invitee opening a shared /match/<id> link arrives with no local claim, and
+// the gateway join endpoint is the only way to take the open seat. Without this
+// the second player rendered a board they could never move on: the seat stayed
+// unclaimed, so the stream effect reported "missing player credentials".
+async function claimOpenSeatForVisitor(
+  matchId: string,
+  snapshot: MatchSnapshotMessage,
+  roomMeta: StoredRoomMeta | null,
+): Promise<MatchSnapshotMessage> {
+  const held = roomMeta?.viewerSeat === 'white'
+    ? roomMeta?.whitePlayerSecret ?? roomMeta?.whiteClaimToken
+    : roomMeta?.viewerSeat === 'black'
+      ? roomMeta?.blackPlayerSecret ?? roomMeta?.blackClaimToken
+      : null;
+  if (held) return snapshot;
+
+  const guest = readStoredGuestIdentity('white');
+  if (!guest.guestId) return snapshot;
+
+  const match = snapshot.match;
+  const alreadySeated = match.whiteGuestId === guest.guestId || match.blackGuestId === guest.guestId;
+  const seatOpen = !match.whiteGuestId || !match.blackGuestId;
+  // Both seats owned by other players: this visitor is a spectator, not a seat.
+  if (!alreadySeated && !seatOpen) return snapshot;
+
+  const account = readStoredAccountIdentity('white');
+  try {
+    const result = await joinPrivateMatch({
+      matchId,
+      identity: {
+        guestId: guest.guestId,
+        sessionSecret: guest.sessionSecret,
+        sessionToken: guest.sessionToken,
+        accountId: account.accountId,
+        accountSessionToken: account.sessionToken,
+      },
+    });
+    const seatFields = result.seatColor === 'white'
+      ? {
+        whitePlayerSecret: result.claim?.playerSecret,
+        whiteClaimToken: result.claim?.claimToken,
+        whiteClaimExpiresAt: result.claim?.expiresAt,
+      }
+      : {
+        blackPlayerSecret: result.claim?.playerSecret,
+        blackClaimToken: result.claim?.claimToken,
+        blackClaimExpiresAt: result.claim?.expiresAt,
+      };
+    writeStoredRoomMeta(matchId, {
+      ...roomMeta,
+      modeId: result.snapshot.match.modeId ?? roomMeta?.modeId ?? DEFAULT_MATCH_MODE_ID,
+      viewerSeat: result.seatColor,
+      whiteGuestId: result.snapshot.match.whiteGuestId,
+      blackGuestId: result.snapshot.match.blackGuestId,
+      whiteName: result.snapshot.match.whiteName,
+      blackName: result.snapshot.match.blackName,
+      ...seatFields,
+    });
+    writeStoredActiveMatchId(matchId);
+    return result.snapshot;
+  } catch {
+    // Seat was taken between the fetch and the join, or the join was refused:
+    // fall through and render as a spectator rather than breaking the page.
+    return snapshot;
+  }
+}
 
 type GameSetters = Record<string, (...args: any[]) => void> & {
   setBoard: React.Dispatch<React.SetStateAction<Board>>;
@@ -189,7 +267,11 @@ export function useGameState(
       derivedViewerSeat = matchWhiteOk ? 'white' : matchBlackOk ? 'black' : (storedMeta ?? null);
     }
     if (!derivedViewerSeat && storedMeta) derivedViewerSeat = storedMeta;
-    if (!derivedViewerSeat && match.matchId) {
+    // Local play has exactly one human, who is always white. In hosted play a
+    // viewer with no claim is a spectator -- fabricating a white seat for them
+    // produced a phantom player with no credentials, which the stream effect
+    // then reported as "Cannot connect: missing player credentials".
+    if (!derivedViewerSeat && match.matchId && !hostedRuntime) {
       derivedViewerSeat = 'white';
     }
     authSetters.setViewerSeat(derivedViewerSeat);
@@ -342,15 +424,23 @@ export function useGameState(
       const roomMeta = restoredMatchId ? readStoredRoomMeta(restoredMatchId) : null;
       if (roomMeta?.viewerSeat) authSetters.setViewerSeat(roomMeta.viewerSeat);
       let snapshot: MatchSnapshotMessage | undefined;
+      let lastFetchError: unknown = null;
       if (restoredMatchId) {
-        try { snapshot = await fetchMatch(restoredMatchId); } catch { snapshot = undefined; }
+        try { snapshot = await fetchMatch(restoredMatchId); } catch (err) { snapshot = undefined; lastFetchError = err; }
         if (!snapshot && roomMeta?.whiteGuestId && roomMeta?.whitePlayerSecret) {
           writeStoredGuestIdentity('white', roomMeta.whiteGuestId, roomMeta.whitePlayerSecret);
           if (roomMeta.blackGuestId && roomMeta.blackPlayerSecret) {
             writeStoredGuestIdentity('black', roomMeta.blackGuestId, roomMeta.blackPlayerSecret);
           }
-          try { snapshot = await fetchMatch(restoredMatchId); } catch { snapshot = undefined; }
+          try { snapshot = await fetchMatch(restoredMatchId); } catch (err) { snapshot = undefined; lastFetchError = err; }
         }
+      }
+      // A transient failure (offline, timeout, 5xx) is not evidence the match
+      // is gone. Clearing the active-match state on one of those dropped the
+      // player out of a live game the moment their connection blipped, with no
+      // way back to the board. Only a definitive server verdict clears it.
+      if (!snapshot && restoredMatchId && lastFetchError && !isMatchGoneError(lastFetchError)) {
+        return;
       }
       if (!snapshot) {
         authoritativeSetters.setAuthoritativeMatchId(null);
@@ -363,6 +453,9 @@ export function useGameState(
         authoritativeSetters.setAuthoritativeDisconnectGraceDeadline(null);
         writeStoredActiveMatchId(null);
         return;
+      }
+      if (hostedRuntime && restoredMatchId) {
+        snapshot = await claimOpenSeatForVisitor(restoredMatchId, snapshot, roomMeta);
       }
       applyAuthoritativeSnapshot(snapshot);
     } catch (err) {

@@ -485,6 +485,18 @@ export function connectToMatchStream(
   };
 }
 
+// Callers need to tell "the server says this match is gone" apart from "the
+// request never landed". Without the status, a transient offline blip looked
+// identical to a 404 and wiped the client's active-match state.
+export interface HttpError extends Error {
+  status?: number;
+}
+
+function withStatus(error: Error, status: number): HttpError {
+  (error as HttpError).status = status;
+  return error;
+}
+
 async function unwrapResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = `Request failed with ${response.status}`;
@@ -498,9 +510,9 @@ async function unwrapResponse<T>(response: Response): Promise<T> {
     }
     if (response.status === 429) {
       const header = response.headers.get('Retry-After');
-      throw new Error(`${message} (rate limited, retry after ${header ?? 'unknown'}s)`);
+      throw withStatus(new Error(`${message} (rate limited, retry after ${header ?? 'unknown'}s)`), response.status);
     }
-    throw new Error(message);
+    throw withStatus(new Error(message), response.status);
   }
 
   return response.json() as Promise<T>;

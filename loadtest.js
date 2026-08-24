@@ -1,9 +1,13 @@
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 
-const GATEWAY = 'https://gateway-production-1340.up.railway.app';
-const MATCH_SVC = 'https://match-service-production-9f8b.up.railway.app';
-const WEB = 'https://web-production-ddc27.up.railway.app';
+// Hosts of the live Railway project. The previous values pointed at a deleted
+// project, so every run measured DNS failures rather than the platform.
+// Only web and match-service are publicly routable; gateway is internal-only,
+// so gateway health is probed through the web proxy.
+const WEB = __ENV.LOADTEST_WEB ?? 'https://web-production-1caefb.up.railway.app';
+const MATCH_SVC = __ENV.LOADTEST_MATCH ?? 'https://match-service-production.up.railway.app';
+const GATEWAY = __ENV.LOADTEST_GATEWAY ?? `${WEB}/api/gateway`;
 
 export const options = {
   stages: [
@@ -24,7 +28,8 @@ export const options = {
 
 function gatewayHealth() {
   group('gateway health', () => {
-    for (const path of ['/', '/healthz', '/readyz', '/livez', '/api/system/status']) {
+    // Paths the public web proxy actually exposes for the gateway.
+    for (const path of ['/healthz', '/readyz', '/status']) {
       const r = http.get(`${GATEWAY}${path}`, { tags: { gatetype: 'gateway' } });
       check(r, {
         [`gateway ${path} status 2xx`]: (res) => res.status >= 200 && res.status < 300,

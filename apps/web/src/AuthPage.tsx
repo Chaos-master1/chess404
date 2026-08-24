@@ -24,6 +24,7 @@ import {
   WHITE_ACCOUNT_ID_STORAGE_KEY,
   WHITE_ACCOUNT_TOKEN_STORAGE_KEY,
   WHITE_ACCOUNT_EXPIRY_STORAGE_KEY,
+  readStoredGuestIdentity as readStoredWhiteGuestIdentity,
 } from './lib/session-storage';
 
 type StoredGuestIdentity = {
@@ -39,16 +40,10 @@ type StoredAccountIdentity = {
   expiresAt?: string;
 };
 
+// Delegates to the shared reader so an expired guest session is dropped rather
+// than sent upstream, where it only comes back as "unauthorized guest session".
 function readStoredGuestIdentity(): StoredGuestIdentity {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-  return {
-    guestId: window.localStorage.getItem(WHITE_GUEST_ID_STORAGE_KEY) ?? undefined,
-    sessionSecret: window.localStorage.getItem(WHITE_GUEST_SECRET_STORAGE_KEY) ?? undefined,
-    sessionToken: window.localStorage.getItem(WHITE_GUEST_TOKEN_STORAGE_KEY) ?? undefined,
-    sessionExpiresAt: window.localStorage.getItem(WHITE_GUEST_TOKEN_EXPIRY_STORAGE_KEY) ?? undefined,
-  };
+  return readStoredWhiteGuestIdentity('white');
 }
 
 function writeStoredGuestSession(session: GuestSession): void {

@@ -195,8 +195,14 @@ export function buildUpstreamHeaders(request: Request): Headers {
   return headers;
 }
 
-function internalServiceToken(): string {
+// One resolver for every proxy in this app. The realtime proxy used to keep its
+// own copy that only looked at MATCH_INTERNAL_SERVICE_TOKEN /
+// CHESS404_INTERNAL_SERVICE_TOKEN / INTERNAL_SERVICE_TOKEN -- none of which are
+// set in production -- so match-service traffic went out unauthenticated and
+// every player's requests shared one internal IP's 60/min global rate limit.
+export function internalServiceToken(): string {
   return (
+    process.env.MATCH_INTERNAL_SERVICE_TOKEN ??
     process.env.GATEWAY_INTERNAL_SERVICE_TOKEN ??
     process.env.PLATFORM_INTERNAL_SERVICE_TOKEN ??
     process.env.CHESS404_INTERNAL_SERVICE_TOKEN ??

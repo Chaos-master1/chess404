@@ -1,3 +1,5 @@
+import { internalServiceToken } from '../../_lib/internal-service';
+
 const backendBaseUrl = resolveBackendBaseUrl(
   process.env.MATCH_SERVICE_INTERNAL_URL,
   'http://match-service.railway.internal:8080',
@@ -63,15 +65,6 @@ function buildUpstreamHeaders(headers: Headers): Headers {
     next.set('x-chess404-service-token', token);
   }
   return next;
-}
-
-function internalServiceToken(): string {
-  return (
-    process.env.MATCH_INTERNAL_SERVICE_TOKEN ??
-    process.env.CHESS404_INTERNAL_SERVICE_TOKEN ??
-    process.env.INTERNAL_SERVICE_TOKEN ??
-    ''
-  ).trim();
 }
 
 function filterResponseHeaders(headers: Headers): Headers {

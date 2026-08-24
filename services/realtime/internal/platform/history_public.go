@@ -64,6 +64,12 @@ func IsPublicLiveSpectateMatch(entry MatchArchiveEntry) bool {
 	if strings.TrimSpace(entry.Winner) != "" || strings.TrimSpace(entry.FinishReason) != "" {
 		return false
 	}
+	// Both seats must be taken. A match with an empty seat has no game to
+	// watch, and match creation is cheap enough that unclaimed rooms otherwise
+	// crowd real games out of the public feed entirely.
+	if strings.TrimSpace(entry.WhiteGuestID) == "" || strings.TrimSpace(entry.BlackGuestID) == "" {
+		return false
+	}
 	return strings.TrimSpace(entry.MatchID) != ""
 }
 

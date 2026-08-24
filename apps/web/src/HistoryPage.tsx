@@ -18,6 +18,7 @@ import {
   buildReplayPageUrlWithGuest,
   buildGuestHistoryUrl,
   copyTextToClipboard,
+  readStoredGuestIdentity,
 } from './lib/session-storage';
 
 function parseModeFilterValue(value: string): MatchModeId | '' {
@@ -150,9 +151,17 @@ export default function HistoryPage({
     setLoadingList(true);
     setError('');
     try {
-      const nextMatches = focusGuestId
-        ? await fetchGuestArchivedMatches(focusGuestId, 40, selectedModeId || undefined, 'finished')
-        : await fetchArchivedMatches(40, selectedModeId || undefined, 'finished');
+      // Default to this device's own archive. The unscoped list is the *public*
+      // archive, which excludes vs-computer and private games -- so a solo
+      // player's own finished games never appeared on their own history page.
+      // Fall back to the public list when this player has nothing archived yet.
+      const viewerGuestId = focusGuestId ?? readStoredGuestIdentity('white').guestId ?? '';
+      let nextMatches = viewerGuestId
+        ? await fetchGuestArchivedMatches(viewerGuestId, 40, selectedModeId || undefined, 'finished')
+        : [];
+      if (nextMatches.length === 0 && !focusGuestId) {
+        nextMatches = await fetchArchivedMatches(40, selectedModeId || undefined, 'finished');
+      }
       setMatches(nextMatches);
       setSelectedMatchId(currentSelected => {
         if (preserveSelection && currentSelected && nextMatches.some(match => match.matchId === currentSelected)) {

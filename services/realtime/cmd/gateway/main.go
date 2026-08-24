@@ -302,8 +302,8 @@ func buildGatewayMux(config GatewayConfig, client *http.Client) http.Handler {
 		}
 
 		var payload GatewayBootstrapPayload
+		var request GatewayBootstrapRequest
 		if r.Method == http.MethodPost {
-			var request GatewayBootstrapRequest
 			if r.Body != nil {
 				defer r.Body.Close()
 				r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
@@ -353,11 +353,17 @@ func buildGatewayMux(config GatewayConfig, client *http.Client) http.Handler {
 						Secure:   true,
 						SameSite: http.SameSiteStrictMode,
 					})
-					// Strip secrets from JSON response — client already has them
-					// from the initial session creation and reads them via HttpOnly
-					// cookies for server-side auth.
-					session.SessionSecret = ""
-					session.SessionToken = ""
+					// Strip the secret only when the caller already proved it holds
+					// this identity. For a first-time visitor THIS request is the
+					// initial session creation, and the cookie is HttpOnly, so
+					// stripping here left the browser with a guest id it could not
+					// authenticate with: registration failed on "unauthorized guest
+					// session", and every reload minted a fresh pair of guests
+					// because the resume attempt could never succeed.
+					if bootstrapResumedSuppliedGuest(request, side, session.Guest.GuestID) {
+						session.SessionSecret = ""
+						session.SessionToken = ""
+					}
 				}
 			}
 		}
@@ -676,6 +682,25 @@ func buildGatewayBootstrapPayload(config GatewayConfig, client *http.Client, req
 		BootstrapCheckedAt:   time.Now().UTC(),
 		Message:              bootstrapMessage(systemStatus),
 	}
+}
+
+// bootstrapResumedSuppliedGuest reports whether this seat's session is the very
+// one the caller already holds credentials for. Only then can the response omit
+// the secret. A caller whose identity failed to resume gets a brand-new guest
+// back, and must be handed that new guest's secret or it can never authenticate.
+func bootstrapResumedSuppliedGuest(request GatewayBootstrapRequest, side, resolvedGuestID string) bool {
+	identity := request.White
+	if side == "black" {
+		identity = request.Black
+	}
+	if identity == nil {
+		return false
+	}
+	supplied := strings.TrimSpace(identity.GuestID)
+	if supplied == "" {
+		return false
+	}
+	return supplied == strings.TrimSpace(resolvedGuestID)
 }
 
 func bootstrapGuestSessions(config GatewayConfig, client *http.Client, request GatewayBootstrapRequest, r *http.Request) (*GatewayBootstrapGuestSessions, *GatewayBootstrapErrors) {

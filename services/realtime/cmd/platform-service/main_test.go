@@ -3346,7 +3346,9 @@ func TestPlatformMatchesSyncStoresSnapshotAndClaimReturnsSecret(t *testing.T) {
 		t.Fatalf("expected snapshot to marshal, got %v", err)
 	}
 
+	t.Setenv("PLATFORM_INTERNAL_SERVICE_TOKEN", "test_internal_token")
 	syncReq := httptest.NewRequest(http.MethodPost, "/api/platform/matches", bytes.NewReader(payload))
+	syncReq.Header.Set("X-Chess404-Service-Token", "test_internal_token")
 	syncRec := httptest.NewRecorder()
 	buildTestPlatformMux(t, archive, guests, claims).ServeHTTP(syncRec, syncReq)
 	if syncRec.Code != http.StatusOK {
@@ -3379,7 +3381,7 @@ func TestPlatformMatchesSyncStoresSnapshotAndClaimReturnsSecret(t *testing.T) {
 	}
 }
 
-func TestPlatformMatchesSyncRejectsSnapshotWithoutPlayerSecrets(t *testing.T) {
+func TestPlatformMatchesSyncAcceptsRedactedSnapshotFromInternalCaller(t *testing.T) {
 	tempDir := t.TempDir()
 	archive, err := platform.NewMatchArchiveStore(filepath.Join(tempDir, "archive.json"))
 	if err != nil {
@@ -3394,10 +3396,15 @@ func TestPlatformMatchesSyncRejectsSnapshotWithoutPlayerSecrets(t *testing.T) {
 	claims := platform.NewMatchClaimStore()
 
 	now := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
+	// match-service redacts both seat secrets out of every snapshot it hands
+	// out, so this is the exact shape the gateway forwards. Requiring a secret
+	// here rejected all of them and the archive stayed permanently empty.
 	snapshot := contracts.MatchSnapshotResponse{
 		Match: contracts.MatchState{
-			MatchID:   "naked_snapshot",
-			Status:    "waiting",
+			MatchID:   "redacted_snapshot",
+			Queue:     "casual",
+			ModeID:    "open_cards",
+			Status:    "finished",
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
@@ -3407,10 +3414,25 @@ func TestPlatformMatchesSyncRejectsSnapshotWithoutPlayerSecrets(t *testing.T) {
 		t.Fatalf("expected snapshot to marshal, got %v", err)
 	}
 
+	t.Setenv("PLATFORM_INTERNAL_SERVICE_TOKEN", "test_internal_token")
+
+	// Without the internal service token the write must be refused: this
+	// endpoint is the archive's only writer and is not a public surface.
+	anonReq := httptest.NewRequest(http.MethodPost, "/api/platform/matches", bytes.NewReader(payload))
+	anonRec := httptest.NewRecorder()
+	buildTestPlatformMux(t, archive, guests, claims).ServeHTTP(anonRec, anonReq)
+	if anonRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for an unauthenticated archive write, got %d body=%s", anonRec.Code, anonRec.Body.String())
+	}
+
 	req := httptest.NewRequest(http.MethodPost, "/api/platform/matches", bytes.NewReader(payload))
+	req.Header.Set("X-Chess404-Service-Token", "test_internal_token")
 	rec := httptest.NewRecorder()
 	buildTestPlatformMux(t, archive, guests, claims).ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for snapshot without player secrets, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected a redacted snapshot to archive, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, ok := archive.Get("redacted_snapshot"); !ok {
+		t.Fatalf("expected the snapshot to be readable back out of the archive")
 	}
 }

@@ -185,6 +185,7 @@ export default function LobbiesPage({ identity, displayName, hostedRuntime, embe
           )}
 
           <button
+            data-testid="btn-create-invite"
             className="btn-primary"
             onClick={() => { void handleCreate(); }}
             disabled={creating || !identity?.guestId}
@@ -233,7 +234,7 @@ export default function LobbiesPage({ identity, displayName, hostedRuntime, embe
                     Private
                   </span>
                 </div>
-                <div style={{ marginTop: '8px', color: '#eef4ff', fontSize: '12px', lineHeight: 1.5, wordBreak: 'break-all' }}>{created.inviteUrl}</div>
+                <div data-testid="invite-url" style={{ marginTop: '8px', color: '#eef4ff', fontSize: '12px', lineHeight: 1.5, wordBreak: 'break-all' }}>{created.inviteUrl}</div>
               </div>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                 <button className="btn-secondary" onClick={() => { void copyInviteLink(); }} style={{ padding: '11px 14px' }}>Copy Invite Link</button>
