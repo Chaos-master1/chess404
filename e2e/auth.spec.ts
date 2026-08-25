@@ -27,6 +27,12 @@ test.describe('account auth', () => {
     await page.getByPlaceholder('Choose a strong password').fill(password);
     await page.getByRole('button', { name: /create account/i }).last().click();
 
+    // Registering navigates straight to the play hub, so come back to the
+    // account surface to inspect the session it just created.
+    await page.waitForTimeout(6_000);
+    await page.goto('/account');
+    await dismissOnboarding(page);
+
     // Signed-in state is identified by the device sign-out control.
     const signOut = page.getByRole('button', { name: /sign out on this device/i });
     await expect(signOut, 'registration did not produce a signed-in session').toBeVisible({ timeout: 60_000 });

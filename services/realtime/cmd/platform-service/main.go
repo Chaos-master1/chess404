@@ -2668,7 +2668,15 @@ func buildPlatformMux(archive *platform.MatchArchiveStore, guests platform.Guest
 			return
 		}
 		entry = enrichArchiveEntry(accounts, entry)
-		if !platform.IsPublicReplayableMatch(entry) {
+		// A participant may open their own finished game, including the
+		// vs-computer and private ones the public replay rule excludes --
+		// otherwise their own history lists matches they cannot open. Same
+		// trust level as the guest-scoped list query above.
+		viewerGuestID := strings.TrimSpace(r.URL.Query().Get("guestId"))
+		ownGame := viewerGuestID != "" &&
+			(viewerGuestID == strings.TrimSpace(entry.WhiteGuestID) || viewerGuestID == strings.TrimSpace(entry.BlackGuestID)) &&
+			strings.EqualFold(strings.TrimSpace(entry.Status), "finished")
+		if !ownGame && !platform.IsPublicReplayableMatch(entry) {
 			respondError(w, http.StatusNotFound, "public replay is only available for finished matches")
 			return
 		}

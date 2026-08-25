@@ -204,7 +204,7 @@ export default function HistoryPage({
     setLoadingDetail(true);
     setError('');
 
-    void fetchArchivedMatch(selectedMatchId)
+    void fetchArchivedMatch(selectedMatchId, focusGuestId ?? readStoredGuestIdentity('white').guestId)
       .then(match => {
         if (!cancelled) {
           setSelectedMatch(match);

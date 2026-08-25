@@ -589,8 +589,11 @@ export async function fetchAccountArchivedMatches(
   return payload.matches ?? [];
 }
 
-export async function fetchArchivedMatch(matchId: string): Promise<MatchArchiveEntry> {
-  const response = await fetch(`${httpBaseUrl}/matches/${matchId}`, {
+// viewerGuestId lets a player open the replay of their own vs-computer or
+// private game, which the public replay rule excludes on purpose.
+export async function fetchArchivedMatch(matchId: string, viewerGuestId?: string): Promise<MatchArchiveEntry> {
+  const query = viewerGuestId ? `?guestId=${encodeURIComponent(viewerGuestId)}` : '';
+  const response = await fetch(`${httpBaseUrl}/matches/${matchId}${query}`, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
