@@ -7,5 +7,8 @@ export async function GET(
   context: { params: Promise<{ matchId: string }> }
 ): Promise<Response> {
   const { matchId } = await context.params;
-  return proxyPlatform(request, `/api/platform/matches/${matchId}`);
+  // Forward the query string: the replay endpoint reads guestId from it to let
+  // a participant open their own vs-computer or private game.
+  const { search } = new URL(request.url);
+  return proxyPlatform(request, `/api/platform/matches/${matchId}${search}`);
 }
