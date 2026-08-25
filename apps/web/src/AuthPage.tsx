@@ -480,6 +480,7 @@ export default function AuthPage({
                 ].map((tab) => (
                   <button
                     key={tab.key}
+                    data-testid={`auth-tab-${tab.key}`}
                     onClick={() => setActiveTab(tab.key)}
                     style={{
                       padding:'11px 10px',
