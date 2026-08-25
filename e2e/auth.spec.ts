@@ -40,9 +40,22 @@ test.describe('account auth', () => {
       await registerTab.click().catch(() => {});
     }
 
-    await page.getByPlaceholder('wizard404error').fill(handle);
-    await page.getByPlaceholder('you@example.com').fill(email);
-    await page.getByPlaceholder('Choose a strong password').fill(password);
+    // The guest session is minted asynchronously and its arrival re-renders the
+    // form, clearing anything typed before it lands. Fill, verify the values
+    // survived, and refill if the render wiped them.
+    const handleField = page.getByPlaceholder('wizard404error');
+    const emailField = page.getByPlaceholder('you@example.com');
+    const passwordField = page.getByPlaceholder('Choose a strong password');
+
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await handleField.fill(handle);
+      await emailField.fill(email);
+      await passwordField.fill(password);
+      await page.waitForTimeout(1_500);
+      if ((await handleField.inputValue()) === handle && (await emailField.inputValue()) === email) break;
+    }
+    expect(await handleField.inputValue(), 'the register form kept clearing itself').toBe(handle);
+
     await page.getByRole('button', { name: /create account/i }).last().click();
 
     // Registering navigates straight to the play hub, so come back to the
