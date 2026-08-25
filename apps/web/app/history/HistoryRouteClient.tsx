@@ -24,6 +24,7 @@ export default function HistoryRouteClient({
     <HistoryPage
       focusMatchId={p.historyFocusMatchId}
       focusGuestId={p.historyFocusGuestId}
+      viewerGuestId={p.whiteProfile?.guestId ?? null}
       onSelectMatchId={p.setHistoryFocusMatchId}
       onOpenGuest={(id) => {
         p.setCommunityFocusGuestId(id);

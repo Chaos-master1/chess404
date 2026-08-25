@@ -33,12 +33,18 @@ test.describe('account auth', () => {
     await page.goto('/account');
     await dismissOnboarding(page);
 
-    // Signed-in state is identified by the device sign-out control.
-    const signOut = page.getByRole('button', { name: /sign out on this device/i });
-    await expect(signOut, 'registration did not produce a signed-in session').toBeVisible({ timeout: 60_000 });
+    // Signed out, /account renders the auth form; signed in, it renders the
+    // account surface. The handle appearing there is the session proof.
+    await expect(
+      page.getByText(new RegExp(`@${handle}`)),
+      'registration did not produce a signed-in session',
+    ).toBeVisible({ timeout: 60_000 });
 
-    await signOut.click();
-    await page.waitForTimeout(3_000);
+    // "Sign out" ends this device's session; "Sign Out Other Devices" does not.
+    await page.getByRole('button', { name: /^sign out$/i }).first().click();
+    await page.waitForTimeout(4_000);
+    await page.goto('/account');
+    await dismissOnboarding(page);
 
     const loginTab = page.getByRole('button', { name: /^sign in$/i }).first();
     if (await loginTab.isVisible({ timeout: 15_000 }).catch(() => false)) {
@@ -51,7 +57,7 @@ test.describe('account auth', () => {
     await page.getByRole('button', { name: /^sign in$/i }).last().click();
     await page.waitForTimeout(5_000);
     await expect(
-      page.getByRole('button', { name: /sign out on this device/i }),
+      page.getByText(new RegExp(`@${handle}`)),
       'a wrong password produced a signed-in session',
     ).toHaveCount(0);
 
@@ -59,7 +65,7 @@ test.describe('account auth', () => {
     await page.getByPlaceholder('Your account password').fill(password);
     await page.getByRole('button', { name: /^sign in$/i }).last().click();
     await expect(
-      page.getByRole('button', { name: /sign out on this device/i }),
+      page.getByText(new RegExp(`@${handle}`)),
       'valid credentials did not sign in',
     ).toBeVisible({ timeout: 60_000 });
 

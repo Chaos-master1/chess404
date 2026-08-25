@@ -123,6 +123,10 @@ function replayButtonStyle(disabled: boolean): React.CSSProperties {
 interface HistoryPageProps {
   focusMatchId?: string | null;
   focusGuestId?: string | null;
+  /** This device's own guest id, so the page can show the viewer their own
+   *  games. It arrives asynchronously, which is why it is a prop and not a
+   *  one-shot read of local storage at mount. */
+  viewerGuestId?: string | null;
   onSelectMatchId?: (matchId: string | null) => void;
   onOpenGuest?: (guestId: string) => void;
   onClearGuestFocus?: () => void;
@@ -132,6 +136,7 @@ interface HistoryPageProps {
 export default function HistoryPage({
   focusMatchId = null,
   focusGuestId = null,
+  viewerGuestId = null,
   onSelectMatchId,
   onOpenGuest,
   onClearGuestFocus,
@@ -155,9 +160,9 @@ export default function HistoryPage({
       // archive, which excludes vs-computer and private games -- so a solo
       // player's own finished games never appeared on their own history page.
       // Fall back to the public list when this player has nothing archived yet.
-      const viewerGuestId = focusGuestId ?? readStoredGuestIdentity('white').guestId ?? '';
-      let nextMatches = viewerGuestId
-        ? await fetchGuestArchivedMatches(viewerGuestId, 40, selectedModeId || undefined, 'finished')
+      const scopeGuestId = focusGuestId ?? viewerGuestId ?? readStoredGuestIdentity('white').guestId ?? '';
+      let nextMatches = scopeGuestId
+        ? await fetchGuestArchivedMatches(scopeGuestId, 40, selectedModeId || undefined, 'finished')
         : [];
       if (nextMatches.length === 0 && !focusGuestId) {
         nextMatches = await fetchArchivedMatches(40, selectedModeId || undefined, 'finished');
@@ -174,7 +179,7 @@ export default function HistoryPage({
     } finally {
       setLoadingList(false);
     }
-  }, [focusGuestId, selectedModeId]);
+  }, [focusGuestId, viewerGuestId, selectedModeId]);
 
   React.useEffect(() => {
     void loadMatches(false);
@@ -192,7 +197,7 @@ export default function HistoryPage({
 
   React.useEffect(() => {
     setNotice('');
-  }, [focusGuestId, selectedMatchId]);
+  }, [focusGuestId, viewerGuestId, selectedMatchId]);
 
   React.useEffect(() => {
     if (!selectedMatchId) {
@@ -204,7 +209,7 @@ export default function HistoryPage({
     setLoadingDetail(true);
     setError('');
 
-    void fetchArchivedMatch(selectedMatchId, focusGuestId ?? readStoredGuestIdentity('white').guestId)
+    void fetchArchivedMatch(selectedMatchId, focusGuestId ?? viewerGuestId ?? readStoredGuestIdentity('white').guestId)
       .then(match => {
         if (!cancelled) {
           setSelectedMatch(match);
