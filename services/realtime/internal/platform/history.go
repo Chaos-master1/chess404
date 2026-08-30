@@ -208,6 +208,18 @@ func (s *MatchArchiveStore) Close() error {
 func (s *MatchArchiveStore) Upsert(snapshot contracts.MatchSnapshotResponse) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if s.entries == nil {
+		s.entries = make(map[string]MatchArchiveEntry)
+	}
+	if s.private == nil {
+		s.private = make(map[string]MatchArchivePrivateEntry)
+	}
+	if s.dirty == nil {
+		s.dirty = make(map[string]struct{})
+	}
 
 	match := snapshot.Match
 	entry := MatchArchiveEntry{
@@ -248,30 +260,53 @@ func (s *MatchArchiveStore) Upsert(snapshot contracts.MatchSnapshotResponse) err
 
 func (s *MatchArchiveStore) Get(matchID string) (MatchArchiveEntry, bool) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return MatchArchiveEntry{}, false
+	}
+	if s.entries == nil {
+		s.entries = make(map[string]MatchArchiveEntry)
+	}
+	if s.private == nil {
+		s.private = make(map[string]MatchArchivePrivateEntry)
+	}
 	entry, ok := s.entries[matchID]
 	if ok {
-		s.mu.Unlock()
 		return cloneArchiveEntry(entry), true
 	}
 	if s.useQueries && s.store != nil {
 		queried, found, err := s.store.queryGet(matchID)
 		if err == nil && found {
 			s.entries[matchID] = queried
-			s.mu.Unlock()
 			return cloneArchiveEntry(queried), true
 		}
 	}
-	s.mu.Unlock()
 	return MatchArchiveEntry{}, false
 }
 
 func (s *MatchArchiveStore) LoadMatch(matchID string) (contracts.MatchState, []contracts.ResolvedEvent, bool) {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return contracts.MatchState{}, nil, false
+	}
+	if s.entries == nil {
+		s.entries = make(map[string]MatchArchiveEntry)
+	}
+	if s.private == nil {
+		s.private = make(map[string]MatchArchivePrivateEntry)
+	}
 	entry, ok := s.entries[matchID]
 	if !ok && s.useQueries && s.store != nil {
 		queried, found, err := s.store.queryGet(matchID)
 		if err == nil && found {
 			privateQ, _, _ := s.store.queryPrivate(matchID)
+			if s.entries == nil {
+				s.entries = make(map[string]MatchArchiveEntry)
+			}
+			if s.private == nil {
+				s.private = make(map[string]MatchArchivePrivateEntry)
+			}
 			s.entries[matchID] = queried
 			s.private[matchID] = privateQ
 			entry = queried
@@ -287,6 +322,9 @@ func (s *MatchArchiveStore) LoadMatch(matchID string) (contracts.MatchState, []c
 	privateEntry, privateExists := s.private[matchID]
 	if !privateExists && s.useQueries && s.store != nil {
 		queriedPrivate, _, _ := s.store.queryPrivate(matchID)
+		if s.private == nil {
+			s.private = make(map[string]MatchArchivePrivateEntry)
+		}
 		s.private[matchID] = queriedPrivate
 		privateEntry = queriedPrivate
 	}
