@@ -15,6 +15,7 @@ package-lock.json
 # Legacy / superseded dirs
 client/build/
 redis-unstable/
+services/realtime/data/
 
 # Stockfish wasm (fetched at build time)
 apps/web/public/stockfish-18-single.wasm
