@@ -23,7 +23,7 @@ chess404/
 │   └── internal/
 │       ├── contracts/             # Go domain types
 │       ├── match/                 # Game engine, state machine (71.9% cover)
-│       ├── engine/                # Custom chess engine (eval, search, AI; search 90.2% cover)
+│       ├── engine/                # Chess engines: engine/v1 (legacy array-board, live computer opponent), engine/{core,search,nnue,actions} (bitboard rebuild; search 90.2% cover)
 │       ├── platform/              # Postgres stores (37.8% cover)
 │       ├── matchmaking/           # Queue logic (79.2% cover, now served via platform-service)
 │       ├── anticheat/             # Irwin + replay analysis (68.3% cover)
@@ -58,7 +58,7 @@ Browser ──► web (Next.js, public) ──► gateway (internal, via web /ap
 
 ## Game Engine
 
-The match service contains a full chess engine (`internal/engine/`) with:
+The match service contains the production chess engine (`internal/engine/v1/`, legacy array-board engine used by the live computer opponent) with:
 
 - **Evaluation**: Piece-square tables, material, positional bonuses, king safety
 - **Search**: Alpha-beta with iterative deepening, transposition table, move ordering
@@ -87,7 +87,7 @@ Card lifecycle: pool → hand (1 per round) → play → resolve. Server validat
 - **Cross-instance**: Redis Pub/Sub for WebSocket broadcast (if `MATCH_REDIS_URL` set). No NATS in production.
 - **Sharding**: Consistent hash ring code exists but is not wired as a separate service; match-service handles all matches on one instance (verified single replica per service).
 - **Observability**: `slog` JSON logs (verified on all 5 services), Prometheus `/metrics` (wired but no Grafana deployed), Sentry (`apps/web/sentry.*.config.ts` + `instrumentation.ts`), OpenTelemetry stub (not collected). Moderate coverage on logging/metrics (6–50%).
-- **Deployment**: Docker multi-stage builds, Railway hosting (5 services, 1 Postgres replica), no GitHub Actions CI/CD file found (deploy is manual via `railway up` or git push). `turbo` for local builds.
+- **Deployment**: Docker multi-stage builds, Railway hosting (5 services, 1 Postgres replica). CI runs in GitHub Actions (`.github/workflows/ci.yml`: go vet/test/build, integration, docker build, web lint/build). Railway auto-deploy has been unreliable (see CLAUDE.md 2026-08-24 note) — deploys have needed manual triggering via the dashboard/API. `turbo` for local builds.
 - **Feature flags**: `contracts` platform caps (`/api/platform/capabilities`) with per-cap boolean toggles; `platform-service` serves them from Postgres.
 
 ## Security

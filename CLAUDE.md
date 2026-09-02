@@ -12,15 +12,14 @@ Chess404 is a realtime chess-variant platform (chess + a 37-card power system) w
 - `packages/game-core` — shared deterministic rules, card pool, RNG (source of truth for `cards.json`)
 - `Chess404Mobile` — separate React Native app (own toolchain, not part of the pnpm workspace)
 - `deploy/` — Railway Dockerfiles, Grafana/Loki/Prometheus config, docker-compose for integration tests
-- Root `client/` is a legacy, gitignored build artifact directory — not part of the active source tree; ignore it.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full service/data-flow diagram and card mechanic list. `PROJECT_STATUS.md` and `services/realtime/README.md` are running narrative changelogs kept by prior sessions — they accumulate fast and go stale quickly; prefer reading the actual code over trusting their specifics.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full service/data-flow diagram and card mechanic list. `docs/history/PROJECT_STATUS.md` and `services/realtime/README.md` are running narrative changelogs kept by prior sessions — they accumulate fast and go stale quickly; prefer reading the actual code over trusting their specifics.
 
 ## Commands
 
 Root (Turborepo, runs across `apps/*` and `packages/*`):
 
-```powershell
+```bash
 pnpm install
 pnpm dev              # turbo run dev --parallel
 pnpm build            # turbo run build
@@ -39,38 +38,36 @@ pnpm --filter @chess404/contracts run lint
 
 There is no ESLint config for the web app — its "lint" is a TypeScript typecheck (`apps/web/scripts/lint-types.mjs`). `game-core`/`contracts` "lint" and "test" scripts are also just `tsc --noEmit` — there is no unit test suite in the TS packages despite `vitest` being a listed devDependency.
 
-Go backend (from `services/realtime`; Go is not always on PATH — call the binary directly if `go` is unrecognized):
+Go backend (from `services/realtime`; Go is not always on PATH — on this Linux machine it lives at `~/sdk/go1.25.6/bin`, on Windows call `& "C:\Program Files\Go\bin\go.exe"` directly):
 
-```powershell
-& "C:\Program Files\Go\bin\go.exe" test ./...
-& "C:\Program Files\Go\bin\go.exe" test ./internal/match/... -run TestName -v
-& "C:\Program Files\Go\bin\go.exe" vet ./...
-& "C:\Program Files\Go\bin\go.exe" build ./...
+```bash
+go test ./...
+go test ./internal/match/... -run TestName -v
+go vet ./...
+go build ./...
 ```
 
 Integration tests (require Docker; matches CI in `.github/workflows/ci.yml`). Run from the repo root, except the `go test` line itself, which needs `services/realtime` (package paths are relative to its `go.mod`):
 
-```powershell
+```bash
 docker compose -f deploy/docker-compose.integration.yml up -d --wait
-$env:TEST_POSTGRES_URL = "postgres://test:test@localhost:5432/chess404_test?sslmode=disable"
-$env:TEST_REDIS_URL = "redis://localhost:6379/0"
-Push-Location services/realtime
-& "C:\Program Files\Go\bin\go.exe" test ./internal/integration/... -v -count=1 -timeout 300s -tags=integration
-Pop-Location
+export TEST_POSTGRES_URL="postgres://test:test@localhost:5432/chess404_test?sslmode=disable"
+export TEST_REDIS_URL="redis://localhost:6379/0"
+( cd services/realtime && go test ./internal/integration/... -v -count=1 -timeout 300s -tags=integration )
 docker compose -f deploy/docker-compose.integration.yml down -v
 ```
 
-Run the whole local stack (4 Go services + web, each in its own PowerShell window):
+Run the whole local stack on Windows (4 Go services + web, each in its own PowerShell window; scripts live in `scripts/windows/`):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\start-local.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start-local.ps1
 ```
 
 Same, but with Postgres-backed persistence instead of file-backed:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\setup-postgres.ps1      # one-time DB + .pg-creds.env
-powershell -ExecutionPolicy Bypass -File .\start-local-postgres.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\setup-postgres.ps1      # one-time DB + .pg-creds.env
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start-local-postgres.ps1
 ```
 
 Local URLs: web `http://localhost:3000`, gateway `:8090/healthz`, match-service `:8082/healthz`, platform-service `:8083/healthz`, matchmaking-service `:8084/healthz`.
@@ -83,15 +80,15 @@ Local URLs: web `http://localhost:3000`, gateway `:8090/healthz`, match-service 
 
 **`cards.json` has two copies, one source of truth.** `packages/game-core/src/cards.json` is authoritative; `services/realtime/internal/match/cards.json` is a generated copy. After editing card data, run:
 
-```powershell
+```bash
 node packages/game-core/scripts/sync-cards-json.mjs
 ```
 
-**Go service layout** (`services/realtime/internal/`): `match/` (state machine, card resolution, snapshots, Redis/memory stores), `engine/` (the LIVE custom chess engine actually used in production today — eval, alpha-beta search, NNUE, opening book, 5 computer difficulty levels), `engine/core` (a NEW, separate bitboard rules kernel — Phase 1 of an in-progress engine rebuild, NOT yet wired into any running service; see "Engine rebuild" below), `engine/conform` (differential-fuzzing conformance harness comparing `engine/core` against `internal/match`), `platform/` (accounts, guests, friendships, moderation, notifications — each with `file`/`sqlite`/`postgres` backend variants selected by env var, e.g. `GUEST_STORE_BACKEND`), `matchmaking/` (queue/ticketing), `anticheat/` (replay-based cheat detection, Stockfish cross-check), `httputil`/`rate_limit`/`logging`/`metrics` (cross-cutting). Most `internal/platform/*_postgres.go` / `*_sqlite.go` files have a matching `_test.go` — check both when changing a store interface.
+**Go service layout** (`services/realtime/internal/`): `match/` (state machine, card resolution, snapshots, Redis/memory stores), `engine/v1/` (the LIVE custom chess engine actually used in production today — eval, alpha-beta search, NNUE, opening book, 5 computer difficulty levels; moved out of `internal/engine/` on 2026-09-02), `engine/core` (a NEW, separate bitboard rules kernel — Phase 1 of an in-progress engine rebuild, NOT yet wired into any running service; see "Engine rebuild" below), `engine/conform` (differential-fuzzing conformance harness comparing `engine/core` against `internal/match`), `platform/` (accounts, guests, friendships, moderation, notifications — each with `file`/`sqlite`/`postgres` backend variants selected by env var, e.g. `GUEST_STORE_BACKEND`), `matchmaking/` (queue/ticketing), `anticheat/` (replay-based cheat detection, Stockfish cross-check), `httputil`/`rate_limit`/`logging`/`metrics` (cross-cutting). Most `internal/platform/*_postgres.go` / `*_sqlite.go` files have a matching `_test.go` — check both when changing a store interface.
 
 **Env-driven backend selection.** Persistence backends (`file` | `sqlite` | `postgres`/`redis`) are chosen per-store via env vars (see `services/realtime/.env.example` and `apps/web/.env.example`), not compile-time flags. When debugging "data didn't persist" issues, check which backend a given service was started with before assuming a code bug. **Production is Redis-backed** (Upstash, free tier — `db_request_limit` is a real monthly cap that has been hit before; avoid adding unconditional per-request/per-poll Redis traffic).
 
-**Windows-first dev environment.** Scripts (`start-local*.ps1`, `setup-postgres.ps1`, `restart-local.ps1`) are PowerShell, and Go is invoked via an absolute path in most docs/scripts because it isn't reliably on PATH in this environment — match that pattern rather than assuming a Unix shell.
+**Dual dev environments.** The repo was developed Windows-first; the primary working machine is now Linux (Fedora, Go at `~/sdk/go1.25.6/bin`). Ops scripts are PowerShell under `scripts/windows/`; the Linux equivalent of the local stack is manual startup (see README / RUNBOOK.md). Match whichever environment you are actually on rather than assuming one.
 
 ## Current status (2026-08-24)
 
@@ -128,11 +125,11 @@ Verified after deploy, against production: `/dashboard` 404s; `/status` renders;
 
 Load test (k6, live, 150 VUs ≈ 231 req/s through the public origin, measured **before** the rate-limit fix): pages all 200 with p95 1.85 s; `web` peaked at 1.55 vCPU / 322 MB and was the bottleneck — every route is `force-dynamic` with `no-store`, so nothing is cached and each visitor gets a full SSR render. Go services stayed near-idle (match-service peaked 0.15 GB / 4% CPU) and logged no panics. Direct public requests to `match-service` are throttled to ~60/min per IP as designed; unauthenticated match creation there is possible but IP-limited and abandoned matches are reaped after 30 min.
 
-**Engine rebuild — Phases 1 and 2 complete, not yet live:** a ground-up rewrite of the computer opponent's engine is in progress at `services/realtime/internal/engine/{core,conform,actions,search}` — a NEW, separate codebase, not a modification of the live `internal/engine` used in production today. **Nothing outside these packages imports this code yet** — it has zero effect on production, and the live computer opponent is still the old `internal/engine`.
+**Engine rebuild — Phases 1 and 2 complete, not yet live:** a ground-up rewrite of the computer opponent's engine is in progress at `services/realtime/internal/engine/{core,conform,actions,search,nnue}` — a NEW, separate codebase, not a modification of the live `internal/engine/v1` used in production today. **Nothing outside these packages imports this code yet** — it has zero effect on production, and the live computer opponent is still `internal/engine/v1`.
 
 Phase 1 (kernel): bitboards, magic sliders, make/unmake, full Zobrist hashing, card overlay planes for Frozen/Shielded/FusedWith/Fortress/Lava/Bomb/BlackHole. Perft-verified to depth 6 against standard reference values; `engine/conform`'s differential fuzzing shows zero mismatches against `internal/match` across the full ~1,392-candidate brute force at the standard opening, hand-built Frozen/Fortress/FusedWith scenarios, and multiple 40-ply random-walk games. Fog is deliberately unmodeled (confirmed zero rules effect in `internal/match`).
 
-Phase 2 (combined search): `engine/actions` (unified Action type covering both chess moves and card plays — a representative subset of 7 mechanics: Freeze/Shield/Fortress/Lavaground/Unabomber/BlackHole/HalfFuse+FullFusion, not all 37; the other 30 are unmodeled by design, same posture as Fog) and `engine/search` (negamax/alpha-beta with cards as first-class tree nodes, a transposition table with correct exact/lower/upper bound handling, and PIMC fair-play search that samples a plausible opponent hand from the real rarity-weighted 37-card pool rather than ever reading the actual hidden hand). The card-tactics suite (`engine/search/cardtactics_test.go` + `search_test.go`) proves the headline capability directly: the search finds Freeze-then-capture, Shield-saves-a-hanging-piece, and Fusion-enables-an-otherwise-impossible-capture, and a direct empirical test confirms the CURRENT PRODUCTION engine (`internal/engine/opponent.go`) cannot find the same Freeze+capture coordination even though it can mechanically play the card, because it scores cards and moves on independent scales and never re-examines the board after deciding to play a card. Two real bugs were caught and fixed while building this: card actions were silently double-negated in the search (freezing pieces backwards), and a card effect (Fusion) can rarely open a fresh attacking line onto the enemy king mid-turn, which the engine now handles as a decisive result instead of crashing.
+Phase 2 (combined search): `engine/actions` (unified Action type covering both chess moves and card plays — a representative subset of 7 mechanics: Freeze/Shield/Fortress/Lavaground/Unabomber/BlackHole/HalfFuse+FullFusion, not all 37; the other 30 are unmodeled by design, same posture as Fog) and `engine/search` (negamax/alpha-beta with cards as first-class tree nodes, a transposition table with correct exact/lower/upper bound handling, and PIMC fair-play search that samples a plausible opponent hand from the real rarity-weighted 37-card pool rather than ever reading the actual hidden hand). The card-tactics suite (`engine/search/cardtactics_test.go` + `search_test.go`) proves the headline capability directly: the search finds Freeze-then-capture, Shield-saves-a-hanging-piece, and Fusion-enables-an-otherwise-impossible-capture, and a direct empirical test confirms the CURRENT PRODUCTION engine (`internal/engine/v1/opponent.go`) cannot find the same Freeze+capture coordination even though it can mechanically play the card, because it scores cards and moves on independent scales and never re-examines the board after deciding to play a card. Two real bugs were caught and fixed while building this: card actions were silently double-negated in the search (freezing pieces backwards), and a card effect (Fusion) can rarely open a fresh attacking line onto the enemy king mid-turn, which the engine now handles as a decisive result instead of crashing.
 
 Remaining phases (per the plan file used to drive this work): Phase 3 (real quantized NNUE trained with actual card play, replacing Phase 2's placeholder material+overlay eval), Phase 4 (extract as its own scaled service, wire into match-service, live deploy). Pending-card/double-move turn-sequencing state remains unmodeled (the turn model is deliberately simplified to at-most-one-card-plus-one-move, tighter than internal/match's actual unbounded `card* move` structure).
 
@@ -147,7 +144,9 @@ Remaining phases (per the plan file used to drive this work): Phase 3 (real quan
 - **No database backups exist.** Railway's Postgres **Backups tab → Enable PITR** is the right fix; it is a dashboard action with a small billing cost, so it needs a human decision. `deploy/postgres-backup.sh` works standalone but nothing schedules it and without `AWS_S3_BUCKET` it writes to an ephemeral container disk.
 - Repo-root `railway.json` was deleted (2026-07-29): it used a `services`/`cron`/`volumes` shape Railway's config-as-code schema does not support. The healthcheck/restart-policy/replica settings it described **are** live, applied via the dashboard/API. See `deploy/railway/reference-config.json`.
 
-E2E lives in `e2e/` and runs against production by default (`E2E_BASE_URL` overrides; `pnpm test:e2e`). Shared helpers are in `e2e/_helpers.ts`. Go work on this machine runs in Docker (`golang:1.25`) because Go is not installed and SELinux blocks bind-mounting the repo directly — copy the module to a scratch dir and mount it with `:z`.
+E2E lives in `e2e/` and runs against production by default (`E2E_BASE_URL` overrides; `pnpm test:e2e`). Shared helpers are in `e2e/_helpers.ts`. Go 1.25 is installed on the Linux machine at `~/sdk/go1.25.6/bin` (add it to PATH); on machines without Go, the Docker route (`golang:1.25`) still works but SELinux blocks bind-mounting the repo directly — copy the module to a scratch dir and mount it with `:z`.
+
+The full 2026-08-30 launch audit report lives at [docs/audits/2026-08-30-launch-audit.md](docs/audits/2026-08-30-launch-audit.md); superseded audit history is under `docs/audit-archive/`, and the old running status journal is `docs/history/PROJECT_STATUS.md` (stale — historical only).
 
 ## Important Note
 After major changes, please update this file (@CLAUDE.md). Keep this file up-to-date with the project's status.
