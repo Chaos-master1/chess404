@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"math/rand"
@@ -278,9 +278,9 @@ func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.Pla
 		play := co.cardEval.BestCardToPlay(&cardState, co.Color == "white")
 		if play != nil && co.Difficulty.ShouldPlayCard(play.Card, play.Score) {
 			return &contracts.PlayerIntent{
-				Type:     "play_card",
-				MatchID:  state.MatchID,
-				CardID:   play.Card.ID,
+				Type:    "play_card",
+				MatchID: state.MatchID,
+				CardID:  play.Card.ID,
 			}
 		}
 	}
@@ -408,10 +408,10 @@ func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.Pla
 	}
 
 	intent := &contracts.PlayerIntent{
-		Type:     "make_move",
-		MatchID:  state.MatchID,
-		From:     &result.BestMove.From,
-		To:       &result.BestMove.To,
+		Type:    "make_move",
+		MatchID: state.MatchID,
+		From:    &result.BestMove.From,
+		To:      &result.BestMove.To,
 	}
 
 	return intent

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
-	"github.com/chess404/realtime/internal/engine"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 )
 
 // redactToken replaces common token and secret patterns with [REDACTED].
@@ -95,8 +95,8 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 	c := newMatchContainer(state, []contracts.ResolvedEvent{startEvent}, newMatchPresenceState(state, now))
 
 	if string(req.ModeID) == "computer" {
-		diff := engine.ParseDifficulty(req.Difficulty)
-		c.computer = engine.NewComputerOpponent(diff, "black")
+		diff := v1.ParseDifficulty(req.Difficulty)
+		c.computer = v1.NewComputerOpponent(diff, "black")
 		state.BlackGuestID = "computer"
 		state.BlackName = computerDisplayName(req.Difficulty)
 		// requireIntentColor demands a matching secret before it will

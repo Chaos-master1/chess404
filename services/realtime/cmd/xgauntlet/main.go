@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/chess404/realtime/internal/engine"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 	"github.com/chess404/realtime/internal/engine/xgauntlet"
 	"github.com/chess404/realtime/internal/match"
 )
@@ -32,7 +32,7 @@ func main() {
 	svc := match.NewService()
 	defer svc.Close()
 
-	diff := engine.ParseDifficulty(*difficulty)
+	diff := v1.ParseDifficulty(*difficulty)
 	oldFactory := xgauntlet.OldEngineFactory(diff)
 
 	var a, b xgauntlet.EngineFactory
@@ -55,7 +55,7 @@ func main() {
 		Game:         xgauntlet.DefaultGameConfig(),
 		Seed:         *seed,
 		Elo0:         0, Elo1: 10, Alpha: 0.05, Beta: 0.05,
-		OnGame: func(played int, r engine.GauntletResult) {
+		OnGame: func(played int, r v1.GauntletResult) {
 			fmt.Printf("\r%d games  W%d L%d D%d  score %.3f", played, r.AWins, r.BWins, r.Draws, r.Score())
 		},
 	}

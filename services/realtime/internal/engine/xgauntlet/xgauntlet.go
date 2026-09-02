@@ -34,16 +34,16 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
-	"github.com/chess404/realtime/internal/engine"
 	"github.com/chess404/realtime/internal/engine/actions"
 	"github.com/chess404/realtime/internal/engine/conform"
 	"github.com/chess404/realtime/internal/engine/core"
 	"github.com/chess404/realtime/internal/engine/search"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 	"github.com/chess404/realtime/internal/match"
 )
 
 // Engine is the contract both the old and new engines are adapted to. It
-// matches internal/engine.ComputerOpponent's existing shape exactly --
+// matches internal/v1.ComputerOpponent's existing shape exactly --
 // MakeMove/HandleSelectTarget -- which is also the exact shape
 // internal/match's autoPlayComputerDepthLimited drives production against
 // (match_lifecycle.go:443,508). Reusing it here, rather than inventing a new
@@ -54,13 +54,13 @@ type Engine interface {
 	HandleSelectTarget(state *contracts.MatchState) *contracts.PlayerIntent
 }
 
-// *engine.ComputerOpponent already satisfies Engine with no wrapper --
+// *v1.ComputerOpponent already satisfies Engine with no wrapper --
 // verified at compile time.
-var _ Engine = (*engine.ComputerOpponent)(nil)
+var _ Engine = (*v1.ComputerOpponent)(nil)
 
 // EngineFactory builds a fresh Engine instance seated as color ("white" or
 // "black") for one game. A factory, not a shared instance, because
-// *engine.ComputerOpponent carries a mutex and per-game move-ordering state
+// *v1.ComputerOpponent carries a mutex and per-game move-ordering state
 // (tt, cardEval's rng) that must not leak between games -- exactly how
 // internal/match itself constructs one ComputerOpponent per match
 // (match_lifecycle.go:99), never reused across matches.
@@ -91,7 +91,7 @@ func DefaultGameConfig() GameConfig {
 
 // PlayOneGame plays one complete game between white and black through a real
 // match.Service and returns the outcome from White's point of view, reusing
-// engine.Outcome so results are directly comparable with the old gauntlet's.
+// v1.Outcome so results are directly comparable with the old gauntlet's.
 //
 // seed drives BOTH the match's own deterministic card draws (RNGSeed,
 // contracts.CreateMatchRequest.Seed) and this function's opening-ply choices,
@@ -100,7 +100,7 @@ func DefaultGameConfig() GameConfig {
 // variance-reduction principle internal/engine/gauntlet.go's colour-swapped
 // pairing uses, extended to cover the extra source of variance real games
 // have that the old gauntlet's reimplementation does not: cards.
-func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig, seed int64, openingPlies int) (engine.Outcome, error) {
+func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig, seed int64, openingPlies int) (v1.Outcome, error) {
 	// vclock is a per-game VIRTUAL clock, not real wall time. internal/match
 	// enforces a per-color, per-match intent rate limit (match_throttle.go:
 	// 5-burst, 10/sec refill) as an anti-spam/anti-cheat safeguard -- a real
@@ -139,7 +139,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 
 	rng := rand.New(rand.NewSource(seed))
 	if err := playRandomOpening(svc, matchID, whiteGuest, whiteSecret, blackGuest, blackSecret, openingPlies, rng, nextNow); err != nil {
-		return engine.OutcomeDraw, fmt.Errorf("xgauntlet: opening setup: %w", err)
+		return v1.OutcomeDraw, fmt.Errorf("xgauntlet: opening setup: %w", err)
 	}
 
 	whiteEngine := white("white")
@@ -154,7 +154,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 	for ply := 0; ply < cfg.MaxPly; ply++ {
 		snapResp, err := svc.GetMatch(matchID)
 		if err != nil {
-			return engine.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
+			return v1.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
 		}
 		state := &snapResp.Match
 
@@ -171,7 +171,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 		for sub := 0; sub < cfg.MaxSubDecisionsPerTurn; sub++ {
 			refreshed, err := svc.GetMatch(matchID)
 			if err != nil {
-				return engine.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
+				return v1.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
 			}
 			state = &refreshed.Match
 			if state.Status != "active" {
@@ -217,7 +217,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 					// evaluation should have already caught via the last
 					// applied intent. If we get here, treat it as a draw
 					// rather than looping forever.
-					return engine.OutcomeDraw, nil
+					return v1.OutcomeDraw, nil
 				}
 				intent = fallback
 			}
@@ -230,7 +230,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 				// exist to find and fix exactly this class of problem for the
 				// new engine) -- surfaced to the caller rather than silently
 				// skipped, so a gauntlet run's error rate is itself a signal.
-				return engine.OutcomeDraw, fmt.Errorf("xgauntlet: engine %s submitted an invalid intent (type=%s): %w", state.Turn, intent.Type, err)
+				return v1.OutcomeDraw, fmt.Errorf("xgauntlet: engine %s submitted an invalid intent (type=%s): %w", state.Turn, intent.Type, err)
 			}
 			madeProgress = true
 			stuckPendingCard := false
@@ -241,7 +241,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 			for guard := 0; guard < 3; guard++ {
 				pendingSnap, err := svc.GetMatch(matchID)
 				if err != nil {
-					return engine.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
+					return v1.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
 				}
 				pendingState := &pendingSnap.Match
 				if pendingState.PendingCard == nil {
@@ -290,7 +290,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 				targetIntent.PlayerSecret = playerSecret
 				targetIntent.MatchID = matchID
 				if _, err := svc.ApplyIntent(*targetIntent, nextNow()); err != nil {
-					return engine.OutcomeDraw, fmt.Errorf("xgauntlet: engine %s submitted an invalid select_target: %w", state.Turn, err)
+					return v1.OutcomeDraw, fmt.Errorf("xgauntlet: engine %s submitted an invalid select_target: %w", state.Turn, err)
 				}
 			}
 
@@ -303,7 +303,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 				// resolution changing something before the engine gave up).
 				live, err := svc.GetMatch(matchID)
 				if err != nil {
-					return engine.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
+					return v1.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
 				}
 				if live.Match.Status != "active" {
 					return outcomeFromFinishedState(&live.Match), nil
@@ -317,20 +317,20 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 				}
 				fallback, ferr := fallbackMove(&live.Match)
 				if ferr != nil {
-					return engine.OutcomeDraw, nil
+					return v1.OutcomeDraw, nil
 				}
 				fallback.PlayerID = playerID
 				fallback.PlayerSecret = playerSecret
 				fallback.MatchID = matchID
 				if _, err := svc.ApplyIntent(*fallback, nextNow()); err != nil {
-					return engine.OutcomeDraw, fmt.Errorf("xgauntlet: fallback move rejected after a stuck pending card: %w", err)
+					return v1.OutcomeDraw, fmt.Errorf("xgauntlet: fallback move rejected after a stuck pending card: %w", err)
 				}
 				break
 			}
 
 			afterCard, err := svc.GetMatch(matchID)
 			if err != nil {
-				return engine.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
+				return v1.OutcomeDraw, fmt.Errorf("xgauntlet: get match: %w", err)
 			}
 			if afterCard.Match.Status != "active" {
 				return outcomeFromFinishedState(&afterCard.Match), nil
@@ -344,22 +344,22 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 			// loop and ask the same engine what to do next.
 		}
 		if !madeProgress {
-			return engine.OutcomeDraw, fmt.Errorf("xgauntlet: %s made no progress after %d sub-decisions", state.Turn, cfg.MaxSubDecisionsPerTurn)
+			return v1.OutcomeDraw, fmt.Errorf("xgauntlet: %s made no progress after %d sub-decisions", state.Turn, cfg.MaxSubDecisionsPerTurn)
 		}
 	}
 
 	// Ply cap reached with neither side converting.
-	return engine.OutcomeDraw, nil
+	return v1.OutcomeDraw, nil
 }
 
-func outcomeFromFinishedState(state *contracts.MatchState) engine.Outcome {
+func outcomeFromFinishedState(state *contracts.MatchState) v1.Outcome {
 	switch state.Winner {
 	case "white":
-		return engine.OutcomeWhiteWin
+		return v1.OutcomeWhiteWin
 	case "black":
-		return engine.OutcomeBlackWin
+		return v1.OutcomeBlackWin
 	default:
-		return engine.OutcomeDraw
+		return v1.OutcomeDraw
 	}
 }
 
@@ -485,10 +485,10 @@ type RunConfig struct {
 	Seed         int64
 	Elo0, Elo1   float64
 	Alpha, Beta  float64
-	OnGame       func(played int, r engine.GauntletResult)
+	OnGame       func(played int, r v1.GauntletResult)
 }
 
-// DefaultRunConfig mirrors internal/engine.DefaultGauntletConfig: +0 vs +10
+// DefaultRunConfig mirrors internal/v1.DefaultGauntletConfig: +0 vs +10
 // Elo at 5% error rates.
 func DefaultRunConfig() RunConfig {
 	return RunConfig{
@@ -499,21 +499,21 @@ func DefaultRunConfig() RunConfig {
 
 // RunGauntlet plays a colour-balanced match-up between contender A and
 // contender B, stopping early once SPRT reaches a verdict, exactly like
-// internal/engine.RunGauntlet -- this is the E0 deliverable: for the first
-// time, a is free to be internal/engine.ComputerOpponent and b free to be a
+// internal/v1.RunGauntlet -- this is the E0 deliverable: for the first
+// time, a is free to be internal/v1.ComputerOpponent and b free to be a
 // NewEngineAdapter (or vice versa), because both are just EngineFactory
 // values.
-func RunGauntlet(svc *match.Service, a, b EngineFactory, cfg RunConfig) engine.GauntletResult {
-	var result engine.GauntletResult
+func RunGauntlet(svc *match.Service, a, b EngineFactory, cfg RunConfig) v1.GauntletResult {
+	var result v1.GauntletResult
 	for pair := 0; pair < cfg.Pairs; pair++ {
 		seed := cfg.Seed + int64(pair)
 
 		outcomeA, errA := PlayOneGame(svc, a, b, cfg.Game, seed, cfg.OpeningPlies)
 		if errA == nil {
 			switch outcomeA {
-			case engine.OutcomeWhiteWin:
+			case v1.OutcomeWhiteWin:
 				result.AWins++
-			case engine.OutcomeBlackWin:
+			case v1.OutcomeBlackWin:
 				result.BWins++
 			default:
 				result.Draws++
@@ -526,9 +526,9 @@ func RunGauntlet(svc *match.Service, a, b EngineFactory, cfg RunConfig) engine.G
 		outcomeB, errB := PlayOneGame(svc, b, a, cfg.Game, seed, cfg.OpeningPlies)
 		if errB == nil {
 			switch outcomeB {
-			case engine.OutcomeWhiteWin:
+			case v1.OutcomeWhiteWin:
 				result.BWins++
-			case engine.OutcomeBlackWin:
+			case v1.OutcomeBlackWin:
 				result.AWins++
 			default:
 				result.Draws++
@@ -538,17 +538,17 @@ func RunGauntlet(svc *match.Service, a, b EngineFactory, cfg RunConfig) engine.G
 			cfg.OnGame(result.Games(), result)
 		}
 
-		if verdict, _ := result.SPRT(cfg.Elo0, cfg.Elo1, cfg.Alpha, cfg.Beta); verdict != engine.SPRTContinue {
+		if verdict, _ := result.SPRT(cfg.Elo0, cfg.Elo1, cfg.Alpha, cfg.Beta); verdict != v1.SPRTContinue {
 			return result
 		}
 	}
 	return result
 }
 
-// OldEngineFactory adapts internal/engine.ComputerOpponent to EngineFactory.
-func OldEngineFactory(difficulty engine.Difficulty) EngineFactory {
+// OldEngineFactory adapts internal/v1.ComputerOpponent to EngineFactory.
+func OldEngineFactory(difficulty v1.Difficulty) EngineFactory {
 	return func(color string) Engine {
-		return engine.NewComputerOpponent(difficulty, color)
+		return v1.NewComputerOpponent(difficulty, color)
 	}
 }
 

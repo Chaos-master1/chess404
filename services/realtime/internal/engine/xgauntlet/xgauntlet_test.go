@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chess404/realtime/internal/engine"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 	"github.com/chess404/realtime/internal/match"
 )
 
@@ -17,7 +17,7 @@ func TestPlayOneGameOldVsOldCompletes(t *testing.T) {
 	svc := match.NewService()
 	defer svc.Close()
 
-	factory := OldEngineFactory(engine.DifficultyBeginner)
+	factory := OldEngineFactory(v1.DifficultyBeginner)
 	cfg := GameConfig{MaxPly: 60, MaxSubDecisionsPerTurn: 5}
 
 	outcome, err := PlayOneGame(svc, factory, factory, cfg, 1, 4)
@@ -39,7 +39,7 @@ func TestPlayOneGameOldVsNewCompletes(t *testing.T) {
 	svc := match.NewService()
 	defer svc.Close()
 
-	oldFactory := OldEngineFactory(engine.DifficultyBeginner)
+	oldFactory := OldEngineFactory(v1.DifficultyBeginner)
 	// depth=1 here, deliberately, not a strength-relevant budget: the turn
 	// model means "depth" spans a card-decision node plus a move-decision
 	// node PER ply (see NewEngineFactory's doc), so even depth=2 can nest 4
@@ -76,8 +76,8 @@ func TestRunGauntletProducesAMeasurement(t *testing.T) {
 	svc := match.NewService()
 	defer svc.Close()
 
-	a := OldEngineFactory(engine.DifficultyBeginner)
-	b := OldEngineFactory(engine.DifficultyBeginner)
+	a := OldEngineFactory(v1.DifficultyBeginner)
+	b := OldEngineFactory(v1.DifficultyBeginner)
 
 	cfg := RunConfig{
 		Pairs:        3,

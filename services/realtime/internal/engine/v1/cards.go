@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"math/rand"
@@ -7,8 +7,8 @@ import (
 )
 
 type CardEvaluator struct {
-	rng      *rand.Rand
-	engine   *NNUE
+	rng    *rand.Rand
+	engine *NNUE
 }
 
 func NewCardEvaluator(rng *rand.Rand) *CardEvaluator {

@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"github.com/chess404/realtime/internal/contracts"

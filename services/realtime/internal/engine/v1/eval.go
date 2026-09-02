@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"github.com/chess404/realtime/internal/contracts"
@@ -604,7 +604,7 @@ func mobility(board [][]*contracts.Piece, color string) int {
 			}
 			switch piece.Type {
 			case "knight":
-				for _, d := range [8][2]int{{-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1}} {
+				for _, d := range [8][2]int{{-2, -1}, {-2, 1}, {-1, -2}, {-1, 2}, {1, -2}, {1, 2}, {2, -1}, {2, 1}} {
 					nr, nc := r+d[0], c+d[1]
 					if nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
 						target := board[nr][nc]
@@ -614,7 +614,7 @@ func mobility(board [][]*contracts.Piece, color string) int {
 					}
 				}
 			case "bishop":
-				for _, d := range [4][2]int{{-1,-1},{-1,1},{1,-1},{1,1}} {
+				for _, d := range [4][2]int{{-1, -1}, {-1, 1}, {1, -1}, {1, 1}} {
 					nr, nc := r+d[0], c+d[1]
 					for nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
 						target := board[nr][nc]
@@ -631,7 +631,7 @@ func mobility(board [][]*contracts.Piece, color string) int {
 					}
 				}
 			case "rook":
-				for _, d := range [4][2]int{{-1,0},{1,0},{0,-1},{0,1}} {
+				for _, d := range [4][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}} {
 					nr, nc := r+d[0], c+d[1]
 					for nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
 						target := board[nr][nc]
@@ -648,7 +648,7 @@ func mobility(board [][]*contracts.Piece, color string) int {
 					}
 				}
 			case "queen":
-				for _, d := range [8][2]int{{-1,-1},{-1,0},{-1,1},{0,-1},{0,1},{1,-1},{1,0},{1,1}} {
+				for _, d := range [8][2]int{{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}} {
 					nr, nc := r+d[0], c+d[1]
 					for nr >= 0 && nr < 8 && nc >= 0 && nc < 8 {
 						target := board[nr][nc]

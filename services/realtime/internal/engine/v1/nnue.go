@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"encoding/binary"
@@ -11,21 +11,21 @@ import (
 )
 
 type NNUE struct {
-	InputSize      int
-	HiddenSize     int
-	HiddenSize2    int
-	Weights [][]float32
-	Biases  [][]float32
-	loaded  bool
+	InputSize   int
+	HiddenSize  int
+	HiddenSize2 int
+	Weights     [][]float32
+	Biases      [][]float32
+	loaded      bool
 }
 
 const (
-	nnuePieceTypes = 12
-	nnueSquares    = 64
-	nnueModifiers  = 5
-	nnueHandSize   = 74
-	nnueInputSize  = nnuePieceTypes*nnueSquares + nnueModifiers + nnueHandSize
-	nnueHiddenSize = 1024
+	nnuePieceTypes  = 12
+	nnueSquares     = 64
+	nnueModifiers   = 5
+	nnueHandSize    = 74
+	nnueInputSize   = nnuePieceTypes*nnueSquares + nnueModifiers + nnueHandSize
+	nnueHiddenSize  = 1024
 	nnueHidden2Size = 1024
 )
 

@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/chess404/realtime/internal/contracts"
-	"github.com/chess404/realtime/internal/engine"
 	"github.com/chess404/realtime/internal/engine/actions"
 	"github.com/chess404/realtime/internal/engine/core"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 )
 
 // Card-tactics suite: hand-authored positions where a specific chess+card
@@ -131,7 +131,7 @@ func TestOldEngineDoesNotFindTheFreezeCombo(t *testing.T) {
 		Clock:         contracts.MatchClock{WhiteMS: 600000, BlackMS: 600000},
 	}
 
-	opponent := engine.NewComputerOpponent(engine.DifficultyExpert, "white")
+	opponent := v1.NewComputerOpponent(v1.DifficultyExpert, "white")
 	intent := opponent.MakeMove(state)
 
 	if intent == nil {

@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"os"
@@ -96,7 +96,7 @@ func TestNNUERelativeConsistency(t *testing.T) {
 	// White up a pawn: remove black pawn at e7
 	upPawn := MatchStateFromFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 	upPawn.Board[6][4] = nil // remove white pawn at e2 (black up a pawn from white's perspective? no)
-	
+
 	// Actually: white up a pawn = remove a black pawn
 	blackDownPawn := MatchStateFromFEN("rnbqkbnr/ppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
 	bdownEval := EvaluateWithModifiers(blackDownPawn.Board, "white", nil, nil, nil, nil, nil)

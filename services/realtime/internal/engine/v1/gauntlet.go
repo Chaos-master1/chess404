@@ -1,4 +1,4 @@
-package engine
+package v1
 
 // Engine-vs-engine strength measurement.
 //
@@ -74,8 +74,8 @@ type GauntletConfig struct {
 	Seed   int64
 	// Elo0/Elo1 are the SPRT hypothesis bounds: H0 "no better than Elo0" vs
 	// H1 "at least Elo1 better". Alpha/Beta are the error rates.
-	Elo0, Elo1   float64
-	Alpha, Beta  float64
+	Elo0, Elo1  float64
+	Alpha, Beta float64
 	// OnGame, if set, is called after each game for progress reporting.
 	OnGame func(played int, r GauntletResult)
 }

@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"math/rand"
@@ -12,10 +12,10 @@ import (
 // so that apply/unapply is O(1).
 
 type ZobristHasher struct {
-	pieceKeys [12][64]uint64  // [pieceIndex][squareIndex]
-	sideKey   uint64
-	epKeys    [8]uint64       // [file]
-	castleKeys [4]uint64      // KQkq order
+	pieceKeys  [12][64]uint64 // [pieceIndex][squareIndex]
+	sideKey    uint64
+	epKeys     [8]uint64 // [file]
+	castleKeys [4]uint64 // KQkq order
 }
 
 // pieceIndex maps type+color to 0..11.

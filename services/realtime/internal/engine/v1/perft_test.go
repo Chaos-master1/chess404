@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"testing"
@@ -196,7 +196,7 @@ func TestFortressBlocksOpponentEntry(t *testing.T) {
 	// 7 and 8 are covered. a7 is row 6, so NOT in fortress. Actually wait,
 	// TopRow=7, zone covers TopRow and TopRow+1 = 7 and 8 = rows 7, 8.
 	// But board only goes 0-7. So it's rows 7 only (row 8 doesn't exist).
-	// So the zone only covers row 7 (a8 and b8). 
+	// So the zone only covers row 7 (a8 and b8).
 	state.Turn = "black"
 	divide := PerftDivide(state, 1)
 	// Black king at a8 (7,0). Legal moves:

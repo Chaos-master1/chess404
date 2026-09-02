@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"testing"
@@ -29,13 +29,13 @@ import (
 // play_card intent for "lavaground" instead of a chess move.
 func TestComputerNeverSelectsAnUnplayableCard(t *testing.T) {
 	unplayableHand := []contracts.GameCard{
-		{ID: "c1", Mechanic: "lavaground"},   // dispatched, but findBestTarget has no case
-		{ID: "c2", Mechanic: "fakepiece"},    // same
-		{ID: "c3", Mechanic: "shield"},       // never dispatched at all
-		{ID: "c4", Mechanic: "fortress"},     // never dispatched at all
-		{ID: "c5", Mechanic: "teleport"},     // never dispatched at all
-		{ID: "c6", Mechanic: "swapme"},       // dispatched via a SelectionID that never validates
-		{ID: "c7", Mechanic: "joker"},        // never dispatched at all
+		{ID: "c1", Mechanic: "lavaground"}, // dispatched, but findBestTarget has no case
+		{ID: "c2", Mechanic: "fakepiece"},  // same
+		{ID: "c3", Mechanic: "shield"},     // never dispatched at all
+		{ID: "c4", Mechanic: "fortress"},   // never dispatched at all
+		{ID: "c5", Mechanic: "teleport"},   // never dispatched at all
+		{ID: "c6", Mechanic: "swapme"},     // dispatched via a SelectionID that never validates
+		{ID: "c7", Mechanic: "joker"},      // never dispatched at all
 	}
 
 	for _, name := range []string{"medium", "hard", "expert"} {

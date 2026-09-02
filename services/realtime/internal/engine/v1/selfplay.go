@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"encoding/json"
@@ -12,15 +12,15 @@ import (
 
 // SelfPlayConfig tunes the self-play generation.
 type SelfPlayConfig struct {
-	Games            int
-	MaxPly           int
-	SearchDepth      int
-	TimePerMove      time.Duration
-	TTEntryCount     int
+	Games              int
+	MaxPly             int
+	SearchDepth        int
+	TimePerMove        time.Duration
+	TTEntryCount       int
 	InitialTemperature float64 // 0 = deterministic, 1 = fully random
 	FinalTemperature   float64 // temperature at last game (linear decay)
-	RandomizeOpening bool
-	NumThreads       int
+	RandomizeOpening   bool
+	NumThreads         int
 }
 
 var DefaultSelfPlayConfig = SelfPlayConfig{
@@ -54,12 +54,12 @@ func genOpening(rng *rand.Rand) *contracts.MatchState {
 
 // SelfPlayResult holds the outcome of a self-play game.
 type SelfPlayResult struct {
-	GameNum     int                `json:"gameNum"`
-	PlyCount    int                `json:"plyCount"`
-	Result      string             `json:"result"`
-	Moves       []string           `json:"moves"`
-	FinalFEN    string             `json:"finalFEN"`
-	Positions   []TrainingPosition `json:"positions"`
+	GameNum   int                `json:"gameNum"`
+	PlyCount  int                `json:"plyCount"`
+	Result    string             `json:"result"`
+	Moves     []string           `json:"moves"`
+	FinalFEN  string             `json:"finalFEN"`
+	Positions []TrainingPosition `json:"positions"`
 }
 
 // TrainingPosition represents a single board position with its TD target.
@@ -190,11 +190,11 @@ func playOneGame(gameNum int, cfg SelfPlayConfig, rng *rand.Rand) SelfPlayResult
 	}
 
 	// TD(λ) targets propagate the game outcome through all positions.
-		// Use raw search scores (not TD targets) for cleaner NNUE training.
-		// TD(λ) smoothing is computed in the training script if needed.
-		for i := range positions {
-			positions[i].Outcome = outcome
-		}
+	// Use raw search scores (not TD targets) for cleaner NNUE training.
+	// TD(λ) smoothing is computed in the training script if needed.
+	for i := range positions {
+		positions[i].Outcome = outcome
+	}
 
 	return SelfPlayResult{
 		GameNum:   gameNum,
@@ -286,7 +286,7 @@ func GenRandomPositions(numPositions int) []TrainingPosition {
 
 		// Skip every other position to reduce correlation.
 		if rng.Intn(2) == 0 && len(positions) < numPositions {
-				score2 := ClassicalEval(state.Board, state.Turn, state.LavaSquares, state.FortressZones, state.BombPieces)
+			score2 := ClassicalEval(state.Board, state.Turn, state.LavaSquares, state.FortressZones, state.BombPieces)
 			positions = append(positions, TrainingPosition{
 				FEN:       boardToSimpleFEN(state),
 				Score:     score2,

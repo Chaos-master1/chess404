@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"fmt"
@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	ExactScore  = 0
-	LowerBound  = 1
-	UpperBound  = 2
+	ExactScore = 0
+	LowerBound = 1
+	UpperBound = 2
 )
 
 type TTEntry struct {
@@ -101,13 +101,13 @@ type SearchResult struct {
 }
 
 type SearchContext struct {
-	TT       *TranspositionTable
-	Nodes    int
-	Stopped  bool
-	Deadline time.Time
-	mu       sync.Mutex
-	KillerMoves [64][2]string
-	History     [6][64]int
+	TT           *TranspositionTable
+	Nodes        int
+	Stopped      bool
+	Deadline     time.Time
+	mu           sync.Mutex
+	KillerMoves  [64][2]string
+	History      [6][64]int
 	CounterMoves map[string]string
 }
 
@@ -259,18 +259,18 @@ func SearchWithTime(state *contracts.MatchState, maxDepth int, tt *Transposition
 }
 
 const (
-	lmrMinDepth      = 3
-	lmrReduction     = 1
-	nullMoveDepth    = 4
-	nullMoveR        = 2
-	aspirationDelta  = 50
-	checkExtension   = 1
-	razorDepth       = 3
-	razorMargin      = 300
-	futilityDepth    = 3
-	futilityMargin   = 200
-	iidDepthReduce   = 2
-	iidMinDepth      = 4
+	lmrMinDepth     = 3
+	lmrReduction    = 1
+	nullMoveDepth   = 4
+	nullMoveR       = 2
+	aspirationDelta = 50
+	checkExtension  = 1
+	razorDepth      = 3
+	razorMargin     = 300
+	futilityDepth   = 3
+	futilityMargin  = 200
+	iidDepthReduce  = 2
+	iidMinDepth     = 4
 )
 
 func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing bool, sc *SearchContext, nodes *int, ply int) (int, *Move) {
@@ -306,19 +306,19 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 
 	// Razoring: at shallow depths, if the static eval is far below alpha, drop to
 	// quiescence. Avoids searching hopeless positions.
-		if depth <= razorDepth && !isKingInCheck(state) {
-			staticEval := EvaluateWithModifiers(state.Board, state.Turn, state.LavaSquares, state.FortressZones, state.BombPieces, state.WhiteHand, state.BlackHand)
-			if !maximizing {
-				staticEval = -staticEval
-			}
-			margin := razorMargin + 50*(razorDepth-depth)
-			if staticEval+margin < alpha {
-				qScore := quiescence(state, alpha, beta, maximizing, sc, nodes, ply, hash)
-				if qScore < alpha+50 {
-					return qScore, nil
-				}
+	if depth <= razorDepth && !isKingInCheck(state) {
+		staticEval := EvaluateWithModifiers(state.Board, state.Turn, state.LavaSquares, state.FortressZones, state.BombPieces, state.WhiteHand, state.BlackHand)
+		if !maximizing {
+			staticEval = -staticEval
+		}
+		margin := razorMargin + 50*(razorDepth-depth)
+		if staticEval+margin < alpha {
+			qScore := quiescence(state, alpha, beta, maximizing, sc, nodes, ply, hash)
+			if qScore < alpha+50 {
+				return qScore, nil
 			}
 		}
+	}
 
 	if ply > 0 && depth >= nullMoveDepth && !isKingInCheck(state) {
 		nullState := cloneMatchState(state)
@@ -438,12 +438,12 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 				}
 			}
 
-		if eval > maxEval {
-			maxEval = eval
-			bestMove = &moves[i]
-		}
-		alpha = max(alpha, eval)
-		if beta <= alpha {
+			if eval > maxEval {
+				maxEval = eval
+				bestMove = &moves[i]
+			}
+			alpha = max(alpha, eval)
+			if beta <= alpha {
 				storeKillerMove(sc, ply, keyForSquare(moves[i].From)+keyForSquare(moves[i].To))
 				storeCounterMove(sc, state, &moves[i])
 				attacker := state.Board[moves[i].From.Row][moves[i].From.Col]
@@ -462,7 +462,7 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 			}
 			sc.TT.Store(hash, depth, maxEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
 		}
-	return maxEval, bestMove
+		return maxEval, bestMove
 	}
 
 	minEval := math.MaxInt - 1
@@ -545,16 +545,16 @@ func alphaBeta(state *contracts.MatchState, depth, alpha, beta int, maximizing b
 			break
 		}
 	}
-		if sc.TT != nil {
-			flag := ExactScore
-			if minEval <= alpha {
-				flag = UpperBound
-			} else if minEval >= beta {
-				flag = LowerBound
-			}
-			sc.TT.Store(hash, depth, minEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
+	if sc.TT != nil {
+		flag := ExactScore
+		if minEval <= alpha {
+			flag = UpperBound
+		} else if minEval >= beta {
+			flag = LowerBound
 		}
-		return minEval, bestMove
+		sc.TT.Store(hash, depth, minEval, flag, keyForSquare(bestMove.From)+keyForSquare(bestMove.To))
+	}
+	return minEval, bestMove
 }
 
 // quiescence searches captures at depth 0 (stand-pat) to reduce the horizon
@@ -1235,15 +1235,15 @@ func isInsufficientMaterial(board [][]*contracts.Piece) bool {
 
 func cloneMatchState(state *contracts.MatchState) *contracts.MatchState {
 	newState := &contracts.MatchState{
-		MatchID:     state.MatchID,
-		Turn:        state.Turn,
-		Status:      state.Status,
+		MatchID:       state.MatchID,
+		Turn:          state.Turn,
+		Status:        state.Status,
 		HalfMoveClock: state.HalfMoveClock,
-		FullMoveNum: state.FullMoveNum,
-		WhiteHand:   append([]contracts.GameCard{}, state.WhiteHand...),
-		BlackHand:   append([]contracts.GameCard{}, state.BlackHand...),
-		Moved:       append([]string{}, state.Moved...),
-		LastMove:    state.LastMove,
+		FullMoveNum:   state.FullMoveNum,
+		WhiteHand:     append([]contracts.GameCard{}, state.WhiteHand...),
+		BlackHand:     append([]contracts.GameCard{}, state.BlackHand...),
+		Moved:         append([]string{}, state.Moved...),
+		LastMove:      state.LastMove,
 	}
 	newState.Board = cloneBoard(state.Board)
 	if state.DoubleMove != nil {

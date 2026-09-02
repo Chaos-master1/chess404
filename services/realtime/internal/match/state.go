@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
-	"github.com/chess404/realtime/internal/engine"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 	"github.com/chess404/realtime/internal/logging"
 	"github.com/chess404/realtime/internal/metrics"
 )
@@ -56,7 +56,7 @@ type matchContainer struct {
 	presence *matchPresenceState
 	subs     map[chan contracts.MatchSnapshotResponse]string
 	seqNum   int64
-	computer *engine.ComputerOpponent
+	computer *v1.ComputerOpponent
 }
 
 func newMatchContainer(state *contracts.MatchState, events []contracts.ResolvedEvent, presence *matchPresenceState) *matchContainer {

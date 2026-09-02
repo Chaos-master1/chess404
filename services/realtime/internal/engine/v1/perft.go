@@ -1,4 +1,4 @@
-package engine
+package v1
 
 import (
 	"fmt"
@@ -190,5 +190,3 @@ func PrintPerftDivide(divide map[string]int) string {
 	lines = append(lines, "", fmt.Sprintf("Total: %d", total))
 	return strings.Join(lines, "\n")
 }
-
-
