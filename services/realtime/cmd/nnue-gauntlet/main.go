@@ -5,7 +5,7 @@
 //
 // Example:
 //
-//	go run ./cmd/nnue-gauntlet -weights internal/engine/nnue/pytrainer/trained.bin -games 200
+//	go run ./cmd/nnue-gauntlet -games 200
 package main
 
 import (
@@ -22,7 +22,7 @@ import (
 )
 
 func main() {
-	weightsPath := flag.String("weights", "", "path to a trained nnue.Network weights file (required)")
+	weightsPath := flag.String("weights", "", "path to a trained nnue.Network weights file (defaults to internal/engine/nnue/pytrainer/trained.bin when it exists)")
 	games := flag.Int("games", 200, "number of games to play (split evenly, alternating which side the NNUE plays)")
 	msPerMove := flag.Int("ms-per-move", 150, "time budget per move, in milliseconds")
 	maxDepth := flag.Int("max-depth", 32, "iterative-deepening depth cap")
@@ -32,7 +32,13 @@ func main() {
 	flag.Parse()
 
 	if *weightsPath == "" {
-		fmt.Fprintln(os.Stderr, "nnue-gauntlet: -weights is required")
+		const defaultPath = "internal/engine/nnue/pytrainer/trained.bin"
+		if _, err := os.Stat(defaultPath); err == nil {
+			*weightsPath = defaultPath
+		}
+	}
+	if *weightsPath == "" {
+		fmt.Fprintln(os.Stderr, "nnue-gauntlet: -weights is required (no trained.bin at internal/engine/nnue/pytrainer/)")
 		os.Exit(1)
 	}
 

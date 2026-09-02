@@ -31,8 +31,10 @@ Rules:
   (`internal/engine/nnue`) is a different, verified architecture:
   2580→128→32→1, Go and Python trainers in agreement — see
   [docs/audits/2026-09-02-nnue-verification.md](docs/audits/2026-09-02-nnue-verification.md)
-  (note: the tracked `nnue_weights.bin` is a v1-format file, not loadable by
-  the rebuild's `nnue.Load()`).
+  (the old v1-format `nnue_weights.bin` was removed from the repo on
+  2026-09-02 — wrong format for both engines, recoverable from git history;
+  the rebuild's real weights are `internal/engine/nnue/pytrainer/trained.bin`,
+  which the gauntlet now loads by default).
 - **Conventions worth knowing:** search score is always white-perspective
   (quiescence negates for the minimizing side); NNUE is used when
   `nnue_weights.bin` exists and falls back to classical eval otherwise.

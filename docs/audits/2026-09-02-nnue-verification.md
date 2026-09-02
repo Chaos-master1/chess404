@@ -106,6 +106,15 @@ if _, err := os.Stat(defaultPath); err == nil {
 
 And add a `services/realtime/.gitignore`-style entry to stop tracking the vestigial root-level `nnue_weights.bin` (or move it to `engine/v1/nnue_weights.bin` and have v1's `Load` open it from that path). Neither is urgent, and both are reversible.
 
+## Addendum (2026-09-02, later the same day)
+
+Both recommendations above are now done, with a Go toolchain available:
+
+- `cmd/nnue-gauntlet` defaults `-weights` to `internal/engine/nnue/pytrainer/trained.bin` when it exists (flag still overrides).
+- The vestigial root `services/realtime/nnue_weights.bin` was removed from the repo (recoverable from git history).
+
+**First gauntlet baseline (20 games, 100 ms/move, 80-ply cap, seed 7): the trained network lost 0–20 against the Phase 2 placeholder eval (score 0%, Elo diff ≈ −1600).** The encoder is verified correct and the file loads, so the deficit is in the weights themselves — the August training run (33.7 MB of self-play data, trained 2026-08-09) does not produce a network that plays better than material+overlay. Candidate causes for the Phase 3 session, in order of cheapness to check: eval scale/sign mismatch between `nnue.Network` output and the search's centipawn expectations; training-data quality (self-play with placeholder eval opponents); semantic drift in the feature layout since 2026-08-09 (dimensions match, so any drift would be silent); or simply undertrained weights. This makes Phase 3 (fresh self-play + retrain) a requirement, not an optimization — the pipeline (`cmd/nnue-selfplay` → `pytrainer/train.py`) is ready end-to-end.
+
 ## Files this report touched
 
 - `scripts/debug_independent_encoder.py` (new, 178 lines, pure-Python verification harness)
