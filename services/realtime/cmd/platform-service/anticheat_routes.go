@@ -15,37 +15,37 @@ import (
 // match. We use the existing AnalysisResult from internal/anticheat and
 // let the worker compute it; here we just receive and persist.
 type AnticheatAnalysisRequest struct {
-	MatchID        string  `json:"matchId"`
-	PlayerID       string  `json:"playerId"`
-	ModeID         string  `json:"modeId"`
-	Accuracy       float64 `json:"accuracy"`
-	AvgCPL         float64 `json:"avgCpl"`
-	MaxCPL         int     `json:"maxCpl"`
-	MoveCount      int     `json:"moveCount"`
-	CardMoves      int     `json:"cardMoves"`
-	Flags          []string `json:"flags"`
+	MatchID        string         `json:"matchId"`
+	PlayerID       string         `json:"playerId"`
+	ModeID         string         `json:"modeId"`
+	Accuracy       float64        `json:"accuracy"`
+	AvgCPL         float64        `json:"avgCpl"`
+	MaxCPL         int            `json:"maxCpl"`
+	MoveCount      int            `json:"moveCount"`
+	CardMoves      int            `json:"cardMoves"`
+	Flags          []string       `json:"flags"`
 	TimeProfile    map[string]any `json:"timeProfile"`
-	SuspicionScore float64 `json:"suspicionScore"`
+	SuspicionScore float64        `json:"suspicionScore"`
 }
 
 type anticheatAnalysisResponse struct {
-	AnalysisID      string `json:"analysisId"`
+	AnalysisID      string  `json:"analysisId"`
 	SuspicionScore  float64 `json:"suspicionScore"`
-	AutoAction      string `json:"autoAction"`
-	PlayerSummaryID string `json:"playerSummaryId"`
+	AutoAction      string  `json:"autoAction"`
+	PlayerSummaryID string  `json:"playerSummaryId"`
 }
 
 type anticheatFlaggedPlayerListResponse struct {
-	MinScore float64                              `json:"minScore"`
-	Limit    int                                  `json:"limit"`
-	Players  []platform.AnticheatPlayerSummary    `json:"players"`
+	MinScore float64                           `json:"minScore"`
+	Limit    int                               `json:"limit"`
+	Players  []platform.AnticheatPlayerSummary `json:"players"`
 }
 
 type anticheatPlayerDetailResponse struct {
-	PlayerID string                              `json:"playerId"`
-	Summary  platform.AnticheatPlayerSummary     `json:"summary"`
-	Analyses []platform.AnticheatAnalysisRecord  `json:"analyses"`
-	Stats    platform.AnticheatStats             `json:"stats"`
+	PlayerID string                             `json:"playerId"`
+	Summary  platform.AnticheatPlayerSummary    `json:"summary"`
+	Analyses []platform.AnticheatAnalysisRecord `json:"analyses"`
+	Stats    platform.AnticheatStats            `json:"stats"`
 }
 
 // registerAnticheatRoutes wires the four anticheat endpoints into the
@@ -53,10 +53,10 @@ type anticheatPlayerDetailResponse struct {
 // from growing unbounded; the rest of the wiring (store init, mux
 // registration) happens in main.go.
 //
-//   POST /api/platform/anticheat/analyses              (internal) receive a new analysis
-//   GET  /api/platform/anticheat/players?minScore=&limit=  (admin) list flagged players
-//   GET  /api/platform/anticheat/players/{playerId}    (admin) per-player detail
-//   POST /api/platform/anticheat/players/{playerId}/action (admin) take action
+//	POST /api/platform/anticheat/analyses              (internal) receive a new analysis
+//	GET  /api/platform/anticheat/players?minScore=&limit=  (admin) list flagged players
+//	GET  /api/platform/anticheat/players/{playerId}    (admin) per-player detail
+//	POST /api/platform/anticheat/players/{playerId}/action (admin) take action
 func registerAnticheatRoutes(mux *http.ServeMux, anticheatStore platform.AnticheatStore) {
 	mux.HandleFunc("/api/platform/anticheat/analyses", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
