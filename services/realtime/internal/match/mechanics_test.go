@@ -1123,7 +1123,7 @@ func TestCardGambler(t *testing.T) {
 	if len(result.Events) == 0 || result.Events[0].Type != "card_played" {
 		t.Fatal("expected card_played event")
 	}
-	outcome, _ := 	result.Events[0].Payload["outcome"].(string)
+	outcome, _ := result.Events[0].Payload["outcome"].(string)
 	if outcome != "win" && outcome != "lose" && outcome != "none" {
 		t.Fatalf("unexpected outcome %q", outcome)
 	}
@@ -1531,14 +1531,14 @@ func TestCardMechanicsGolden(t *testing.T) {
 	}, now)
 
 	type goldenEntry struct {
-		Index       int                      `json:"index"`
-		Mechanic    string                   `json:"mechanic"`
-		CardID      string                   `json:"cardId"`
-		BeforeBoard [][]*contracts.Piece     `json:"beforeBoard,omitempty"`
-		AfterBoard  [][]*contracts.Piece     `json:"afterBoard,omitempty"`
-		State       *contracts.MatchState    `json:"state,omitempty"`
+		Index       int                       `json:"index"`
+		Mechanic    string                    `json:"mechanic"`
+		CardID      string                    `json:"cardId"`
+		BeforeBoard [][]*contracts.Piece      `json:"beforeBoard,omitempty"`
+		AfterBoard  [][]*contracts.Piece      `json:"afterBoard,omitempty"`
+		State       *contracts.MatchState     `json:"state,omitempty"`
 		Events      []contracts.ResolvedEvent `json:"events,omitempty"`
-		Error       string                   `json:"error,omitempty"`
+		Error       string                    `json:"error,omitempty"`
 	}
 
 	type goldenResult struct {

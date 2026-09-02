@@ -13,8 +13,6 @@ import (
 	"github.com/chess404/realtime/internal/contracts"
 )
 
-
-
 //go:embed cards.json
 var cardsJSON []byte
 

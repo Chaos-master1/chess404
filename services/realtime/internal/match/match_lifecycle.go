@@ -596,14 +596,6 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 	s.broadcastLocked(c, snapshot)
 }
 
-
-
-
-
-
-
-
-
 func applyIntent(state *contracts.MatchState, intent contracts.PlayerIntent, now time.Time) ([]contracts.ResolvedEvent, error) {
 	switch intent.Type {
 	case "make_move":
@@ -626,20 +618,6 @@ func applyIntent(state *contracts.MatchState, intent contracts.PlayerIntent, now
 		return nil, fmt.Errorf("unsupported intent type: %s", intent.Type)
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 func ensureActive(state *contracts.MatchState) error {
 	if state.Status != "active" {
@@ -952,8 +930,6 @@ func maxInt64(a, b int64) int64 {
 	}
 	return b
 }
-
-
 
 func newMatchPresenceState(state *contracts.MatchState, now time.Time) *matchPresenceState {
 	presence := &matchPresenceState{}

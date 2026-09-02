@@ -45,8 +45,8 @@ func TestFusedRookMakingAKnightShapedMoveDoesNotHang(t *testing.T) {
 
 	state := service.getMatchContainer("fusion_knight_move").state
 	state.Board = emptyBoard()
-	state.Board[0][0] = &contracts.Piece{Type: "king", Color: "white"} // a1
-	state.Board[7][7] = &contracts.Piece{Type: "king", Color: "black"} // h8
+	state.Board[0][0] = &contracts.Piece{Type: "king", Color: "white"}   // a1
+	state.Board[7][7] = &contracts.Piece{Type: "king", Color: "black"}   // h8
 	state.Board[3][3] = &contracts.Piece{Type: "knight", Color: "white"} // d4, consumed
 	state.Board[3][4] = &contracts.Piece{Type: "rook", Color: "white"}   // e4, survives, fused
 	// A real fortress zone present too, covering f5 (row4,col5) -- the

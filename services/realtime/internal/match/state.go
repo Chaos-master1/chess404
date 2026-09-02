@@ -46,7 +46,7 @@ var (
 	// ErrUnauthorizedSeatClaim is returned when a caller matches a seat's guest
 	// ID but cannot prove ownership with that seat's player secret.
 	ErrUnauthorizedSeatClaim = errors.New("unauthorized seat claim")
-	ErrStaleClientState  = errors.New("client state is stale; refresh from latest snapshot")
+	ErrStaleClientState      = errors.New("client state is stale; refresh from latest snapshot")
 )
 
 type matchContainer struct {
@@ -1088,5 +1088,3 @@ func (s *Service) gcFinishedMatches(now time.Time) {
 		s.matches.Delete(matchID)
 	}
 }
-
-
