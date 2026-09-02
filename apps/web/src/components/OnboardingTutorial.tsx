@@ -52,6 +52,18 @@ export function OnboardingTutorial({ tutorial }: Props): React.ReactElement | nu
   const stepKeys = ['welcome', 'board', 'cards', 'mana', 'spells'];
   const currentIndex = stepKeys.indexOf(step);
 
+  // Escape and a backdrop click dismiss, matching every other modal surface.
+  React.useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      dismiss();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active, step, dismiss]);
+
   return (
     <div
       style={{
@@ -66,12 +78,24 @@ export function OnboardingTutorial({ tutorial }: Props): React.ReactElement | nu
         animation: 'fadeIn 0.25s ease-out',
         padding: '16px',
       }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) dismiss();
+      }}
     >
       <style>{`
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={s.title}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            dismiss();
+          }
+        }}
         style={{
           background: 'linear-gradient(165deg, rgba(16, 26, 44, 0.98) 0%, rgba(8, 14, 26, 0.99) 100%)',
           border: '1px solid rgba(255, 190, 90, 0.4)',

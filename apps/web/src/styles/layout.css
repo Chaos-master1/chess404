@@ -45,8 +45,15 @@
   display: grid;
   place-items: center;
   color: var(--text-on-accent);
-  background: linear-gradient(135deg, rgba(200, 134, 10, 1) 0%, rgba(120, 75, 8, 1) 100%);
-  box-shadow: 0 12px 24px rgba(200, 134, 10, 0.22);
+  background: linear-gradient(135deg, rgba(224, 160, 30, 1) 0%, rgba(120, 75, 8, 1) 100%);
+  box-shadow:
+    0 12px 24px rgba(200, 134, 10, 0.22),
+    inset 0 1px 0 rgba(255, 244, 210, 0.35),
+    inset 0 -6px 12px rgba(60, 36, 4, 0.35);
+}
+
+.app-shell__brand-mark svg {
+  filter: drop-shadow(0 1px 2px rgba(40, 22, 0, 0.5));
 }
 
 .app-shell__brand-copy {
@@ -100,13 +107,18 @@
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .app-shell__nav-item:hover {
   transform: translateX(2px);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-primary);
+}
+
+.app-shell__nav-item:focus-visible {
+  outline: 2px solid rgba(255, 200, 100, 0.55);
+  outline-offset: 2px;
 }
 
 .app-shell__nav-item--active {
@@ -125,6 +137,12 @@
   width: 3px;
   border-radius: 999px;
   background: var(--accent-hover);
+  box-shadow: 0 0 8px rgba(230, 160, 16, 0.6);
+}
+
+.app-shell__nav-item--active .app-shell__nav-icon {
+  color: var(--gold-300, #f0c040);
+  filter: drop-shadow(0 0 6px rgba(240, 192, 64, 0.35));
 }
 
 .app-shell__nav-main {
@@ -214,6 +232,10 @@
   display: flex;
   flex: 1;
   min-height: 0;
+  /* Flex-item min-width:auto would otherwise propagate descendants'
+     min-content width (e.g. the landing features grid) past the viewport,
+     clipping content on phones. Keep the shrink chain unbroken. */
+  min-width: 0;
 }
 
 .app-shell__mobile-tools,

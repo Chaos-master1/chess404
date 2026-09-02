@@ -75,8 +75,15 @@ export default function PlayHubPage({
   };
 
   const router = useRouter();
+  // The guest identity is minted asynchronously on first visit; until it lands,
+  // a click here would be a silent no-op. Surface that state instead.
+  const identityReady = Boolean(identity?.guestId);
+  const [computerMatchState, setComputerMatchState] = React.useState<'idle' | 'starting' | 'error'>('idle');
+  const computerStarting = computerMatchState === 'starting';
+
   const handlePlayComputer = useCallback(() => {
-    if (!identity?.guestId) return;
+    if (!identity?.guestId || computerMatchState === 'starting') return;
+    setComputerMatchState('starting');
     const difficulty = 'medium';
     createPrivateMatch({
       identity,
@@ -106,8 +113,11 @@ export default function PlayHubPage({
         blackClaimExpiresAt: result.seatColor === 'black' ? result.claim?.expiresAt : undefined,
       });
       router.push(`/match/${encodeURIComponent(result.matchId)}`);
-    }).catch(() => {});
-  }, [identity, router]);
+    }).catch(() => {
+      // Never leave the button stuck in its starting state; the visitor can retry.
+      setComputerMatchState('error');
+    });
+  }, [identity, router, computerMatchState]);
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px 28px 32px', color: '#f4e8c8' }}>
@@ -127,14 +137,18 @@ export default function PlayHubPage({
         <button
           data-testid="btn-play-computer"
           onClick={handlePlayComputer}
+          disabled={!identityReady || computerStarting}
+          aria-busy={computerStarting}
           style={{
             padding:'16px 24px',
             borderRadius:'16px',
-            background:'linear-gradient(180deg, rgba(130,80,210,0.95) 0%, rgba(70,40,130,0.98) 100%)',
-            border:'1px solid rgba(180,130,255,0.4)',
-            boxShadow:'0 8px 32px rgba(100,50,200,0.35), 0 0 60px rgba(130,80,210,0.15)',
-            color:'#f0e8ff',
-            cursor:'pointer',
+            background: identityReady
+              ? 'linear-gradient(180deg, rgba(200,134,10,0.92) 0%, rgba(112,71,8,0.96) 100%)'
+              : 'linear-gradient(180deg, rgba(64,68,86,0.9) 0%, rgba(38,42,58,0.95) 100%)',
+            border:'1px solid rgba(255,200,100,0.42)',
+            boxShadow:'0 8px 32px rgba(0,0,0,0.35), 0 0 44px rgba(200,134,10,0.18), inset 0 1px 0 rgba(255,244,210,0.22)',
+            color:'#fff6df',
+            cursor: identityReady && !computerStarting ? 'pointer' : 'wait',
             display:'flex',
             alignItems:'center',
             justifyContent:'center',
@@ -142,19 +156,27 @@ export default function PlayHubPage({
             width:'100%',
             transition:'transform 0.15s ease, box-shadow 0.15s ease',
           }}
-          onMouseEnter={e => { const el = e.currentTarget; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 12px 40px rgba(100,50,200,0.5), 0 0 60px rgba(130,80,210,0.25)'; }}
-          onMouseLeave={e => { const el = e.currentTarget; el.style.transform = ''; el.style.boxShadow = '0 8px 32px rgba(100,50,200,0.35), 0 0 60px rgba(130,80,210,0.15)'; }}
+          onMouseEnter={e => { const el = e.currentTarget; if (el.hasAttribute('disabled')) return; el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 12px 40px rgba(0,0,0,0.42), 0 0 56px rgba(200,134,10,0.28), inset 0 1px 0 rgba(255,244,210,0.25)'; }}
+          onMouseLeave={e => { const el = e.currentTarget; el.style.transform = ''; el.style.boxShadow = '0 8px 32px rgba(0,0,0,0.35), 0 0 44px rgba(200,134,10,0.18), inset 0 1px 0 rgba(255,244,210,0.22)'; }}
         >
           <span style={{ fontSize:'28px' }}>🤖</span>
           <div style={{ textAlign:'left' }}>
             <div style={{ fontWeight:900, fontSize:'16px', letterSpacing:'0.3px' }}>Play vs Computer</div>
-            <div style={{ fontSize:'12px', color:'rgba(220,210,255,0.75)', marginTop:'2px' }}>Challenge the built-in engine with full card effects</div>
+            <div style={{ fontSize:'12px', color:'rgba(255,240,205,0.82)', marginTop:'2px' }}>
+              {!identityReady
+                ? 'Preparing your guest seat…'
+                : computerStarting
+                  ? 'Creating your match…'
+                  : computerMatchState === 'error'
+                    ? 'Could not start — click to retry'
+                    : 'Challenge the built-in engine with full card effects'}
+            </div>
           </div>
           <span style={{
             marginLeft:'auto', padding:'6px 14px', borderRadius:'8px',
-            background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.15)',
+            background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,220,150,0.28)',
             fontSize:'13px', fontWeight:800,
-          }}>Play Now →</span>
+          }}>{computerStarting ? 'Starting…' : 'Play Now →'}</span>
         </button>
 
         {activeMatchId ? (
