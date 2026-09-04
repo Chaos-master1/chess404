@@ -1,0 +1,52 @@
+# Scheduled Postgres backups via deploy/postgres-backup.sh.
+#
+# No-ops with a clear notice until these repository secrets are configured:
+#   BACKUP_DATABASE_URL          — Postgres connection string (pg_dump target)
+#   BACKUP_AWS_S3_BUCKET         — S3-compatible bucket for uploads
+#   BACKUP_AWS_ACCESS_KEY_ID     — upload credentials
+#   BACKUP_AWS_SECRET_ACCESS_KEY
+#   BACKUP_AWS_REGION            — optional, defaults to us-east-1
+#
+# The runner's disk is ephemeral: without the S3 secrets there is nothing
+# to keep, so the job exits early instead of producing a throwaway dump.
+# Railway's dashboard PITR remains the recommended primary backup mechanism
+# (see docs/launch-audit/rollback-procedure.md and CLAUDE.md); this workflow
+# is the stopgap that does not depend on Railway cron.
+name: postgres-backup
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily 06:00 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: postgres-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      AWS_S3_BUCKET: ${{ secrets.BACKUP_AWS_S3_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.BACKUP_AWS_REGION || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip unless backup target is configured
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$AWS_S3_BUCKET" ] || [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "::notice::postgres-backup is not configured. Set the BACKUP_* repository secrets to enable daily dumps. Skipping."
+            exit 0
+          fi
+
+      - name: Dump and upload
+        run: |
+          chmod +x deploy/postgres-backup.sh
+          ./deploy/postgres-backup.sh
+        # The script's local-dir prune is meaningless on an ephemeral runner;
+        # keep retention by setting a lifecycle rule on the bucket (or
+        # extend the script to list/delete remote objects).

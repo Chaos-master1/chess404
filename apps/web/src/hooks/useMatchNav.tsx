@@ -63,6 +63,7 @@ interface UseMatchNavProps {
   socialAlert: SocialAlert | null;
   dismissedSocialAlertIdsRef: React.MutableRefObject<Set<string>>;
   turn: PieceColor;
+  authoritativeActionReady: boolean;
   openLiveMatch: (matchId: string) => void;
   setActivePage: React.Dispatch<React.SetStateAction<any>>;
   setSocialAlert: React.Dispatch<React.SetStateAction<SocialAlert | null>>;
@@ -78,7 +79,7 @@ export function useMatchNav(props: UseMatchNavProps) {
     authoritativeDisconnectGraceFor, authoritativeDisconnectGraceDeadline,
     authoritativeWhiteConnected, authoritativeBlackConnected,
     timeW, timeB, tickingState, clockActive,
-    socialAlert, dismissedSocialAlertIdsRef, turn,
+    socialAlert, dismissedSocialAlertIdsRef, turn, authoritativeActionReady,
     openLiveMatch, setActivePage, setSocialAlert,
   } = props;
 
@@ -350,7 +351,7 @@ export function useMatchNav(props: UseMatchNavProps) {
     ? (actorSeatForHostedControls === 'white' ? 'White' : 'Black')
     : 'Spectator';
   const controlSender: PieceColor = actorSeatForHostedControls ?? turn;
-  const hostedActionLocked = !!hostedRuntime && !viewerSeat;
+  const hostedActionLocked = !!hostedRuntime && (!viewerSeat || !authoritativeActionReady);
   const canRespondToDrawOffer = !hostedRuntime || (!!viewerSeat && viewerSeat === turn);
   const actorSeatLabel = actorSeatForHostedControls
     ? (actorSeatForHostedControls === 'white' ? '⚪ White' : '⚫ Black')

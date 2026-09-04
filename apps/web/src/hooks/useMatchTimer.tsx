@@ -2,24 +2,25 @@
 
 import React from 'react';
 import type { PieceColor } from '@chess404/contracts';
+import { CLOCK_START, ABORT_SECS } from '../constants';
 
 export interface UseMatchTimerProps {
-  initialClockStart: number;
-  initialAbortSecs: number;
-  over: boolean;
-  authoritativeLive: boolean;
-  onTimeout: (loser: PieceColor) => void;
-  onAbort: () => void;
+  initialClockStart?: number;
+  initialAbortSecs?: number;
+  over?: boolean;
+  authoritativeLive?: boolean;
+  onTimeout?: (loser: PieceColor) => void;
+  onAbort?: () => void;
 }
 
 export function useMatchTimer({
-  initialClockStart,
-  initialAbortSecs,
-  over,
-  authoritativeLive,
-  onTimeout,
-  onAbort,
-}: UseMatchTimerProps) {
+  initialClockStart = CLOCK_START,
+  initialAbortSecs = ABORT_SECS,
+  over = false,
+  authoritativeLive = false,
+  onTimeout = () => {},
+  onAbort = () => {},
+}: UseMatchTimerProps = {}) {
   const [timeW, setTimeW] = React.useState(initialClockStart);
   const [timeB, setTimeB] = React.useState(initialClockStart);
   const [clockActive, setClockActive] = React.useState(false);

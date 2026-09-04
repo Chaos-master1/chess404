@@ -7,6 +7,7 @@ export type {
   CardPendingState,
   DoubleMove,
   FogZone,
+  FortressZone,
   GameCard,
   LavaSquare,
   MatchState,

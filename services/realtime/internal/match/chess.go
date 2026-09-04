@@ -579,8 +579,6 @@ func isRookPiece(piece *contracts.Piece, expectedColor string) bool {
 	return true
 }
 
-
-
 func clonePieceAsType(piece *contracts.Piece, pieceType string) *contracts.Piece {
 	if piece == nil {
 		return nil

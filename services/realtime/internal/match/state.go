@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
-	"github.com/chess404/realtime/internal/engine"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 	"github.com/chess404/realtime/internal/logging"
 	"github.com/chess404/realtime/internal/metrics"
 )
@@ -46,7 +46,7 @@ var (
 	// ErrUnauthorizedSeatClaim is returned when a caller matches a seat's guest
 	// ID but cannot prove ownership with that seat's player secret.
 	ErrUnauthorizedSeatClaim = errors.New("unauthorized seat claim")
-	ErrStaleClientState  = errors.New("client state is stale; refresh from latest snapshot")
+	ErrStaleClientState      = errors.New("client state is stale; refresh from latest snapshot")
 )
 
 type matchContainer struct {
@@ -56,7 +56,7 @@ type matchContainer struct {
 	presence *matchPresenceState
 	subs     map[chan contracts.MatchSnapshotResponse]string
 	seqNum   int64
-	computer *engine.ComputerOpponent
+	computer *v1.ComputerOpponent
 }
 
 func newMatchContainer(state *contracts.MatchState, events []contracts.ResolvedEvent, presence *matchPresenceState) *matchContainer {
@@ -386,17 +386,14 @@ func (s *Service) MarkDisconnected(matchID string, playerID string, playerSecret
 	return nil
 }
 
-// redactPlayerSecret returns a short fingerprint of a player
-// secret so logs are useful for debugging without exposing the full
-// secret. Empty string becomes "<empty>".
+// redactPlayerSecret keeps bearer credentials out of logs entirely. A prefix
+// is credential material too, so use one fixed marker for every non-empty
+// value. Empty string remains distinguishable for configuration diagnostics.
 func redactPlayerSecret(s string) string {
 	if s == "" {
 		return "<empty>"
 	}
-	if len(s) <= 6 {
-		return s[:1] + "***"
-	}
-	return s[:6] + "...len=" + strconv.Itoa(len(s))
+	return "<redacted>"
 }
 
 // Subscribe attaches a snapshot stream for a viewer. playerSecret must prove
@@ -1088,5 +1085,3 @@ func (s *Service) gcFinishedMatches(now time.Time) {
 		s.matches.Delete(matchID)
 	}
 }
-
-

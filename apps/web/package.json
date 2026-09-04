@@ -7,13 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "node ./scripts/lint-types.mjs",
-    "test": "npm run lint"
+    "test": "npm run lint && vitest run"
   },
   "dependencies": {
     "@chess404/contracts": "workspace:*",
     "@chess404/game-core": "workspace:*",
     "@sentry/nextjs": "^8.0.0",
-    "next": "^15.5.18",
+    "next": "15.5.21",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

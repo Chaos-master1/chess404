@@ -178,13 +178,13 @@ func TestFairPlaySearchTimedReturnsSortedAggregatedResults(t *testing.T) {
 // (cardless) turn.
 func TestBestMoveReportsNoActionWhenEveryMobilePieceIsFrozen(t *testing.T) {
 	p := core.NewEmptyPosition()
-	p.SetPiece(core.NewSquare(0, 0), core.Piece{Type: core.King, Color: core.White})   // a1
-	knight := core.NewSquare(6, 4)                                                     // g5
+	p.SetPiece(core.NewSquare(0, 0), core.Piece{Type: core.King, Color: core.White}) // a1
+	knight := core.NewSquare(6, 4)                                                   // g5
 	p.SetPiece(knight, core.Piece{Type: core.Knight, Color: core.White})
-	p.SetPiece(core.NewSquare(7, 7), core.Piece{Type: core.King, Color: core.Black})    // h8
-	p.SetPiece(core.NewSquare(1, 3), core.Piece{Type: core.Knight, Color: core.Black})  // b4, covers a2
-	p.SetPiece(core.NewSquare(3, 1), core.Piece{Type: core.Knight, Color: core.Black})  // d2, covers b1
-	p.SetPiece(core.NewSquare(2, 3), core.Piece{Type: core.Knight, Color: core.Black})  // c4, covers b2
+	p.SetPiece(core.NewSquare(7, 7), core.Piece{Type: core.King, Color: core.Black})   // h8
+	p.SetPiece(core.NewSquare(1, 3), core.Piece{Type: core.Knight, Color: core.Black}) // b4, covers a2
+	p.SetPiece(core.NewSquare(3, 1), core.Piece{Type: core.Knight, Color: core.Black}) // d2, covers b1
+	p.SetPiece(core.NewSquare(2, 3), core.Piece{Type: core.Knight, Color: core.Black}) // c4, covers b2
 	ov := core.NewCardOverlay()
 	ov.SetFrozen(knight, true)
 

@@ -37,9 +37,14 @@
   --space-4: 16px; --space-5: 20px;  --space-6: 24px;
   --space-8: 32px; --space-10: 40px; --space-12: 48px;
   
-  /* Typography */
-  --font-sans: var(--font-sans), 'Segoe UI', sans-serif;
-  --font-mono: var(--font-mono), 'Consolas', monospace;
+  /* Typography
+     --font-sans / --font-mono are injected on <html> by next/font (layout.tsx).
+     Do NOT redeclare them here — a :root re-declaration races the next/font
+     class in the cascade and silently kills the loaded fonts. The vars below
+     only REFERENCE them, with system-stack fallbacks if next/font is absent. */
+  --font-body: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  --font-display: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  --font-mono-stack: var(--font-mono, ui-monospace, 'JetBrains Mono', Consolas, monospace);
   --text-xs: 11px; --text-sm: 13px; --text-base: 15px;
   --text-lg: 17px; --text-xl: 20px; --text-2xl: 24px;
   --text-3xl: 30px; --text-4xl: 38px;
@@ -54,6 +59,12 @@
   --shadow-md: 0 4px 24px rgba(0,0,0,0.45);
   --shadow-lg: 0 8px 48px rgba(0,0,0,0.6);
   --shadow-gold: 0 0 24px rgba(200,134,10,0.4);
+
+  /* Surfaces (referenced by components.css) */
+  --bg-panel: rgba(16, 20, 34, 0.92);
+  --bg-panel-raised: linear-gradient(180deg, rgba(22, 28, 46, 0.96) 0%, rgba(14, 18, 30, 0.98) 100%);
+  --text-subtle: rgba(180, 194, 220, 0.55);
+  --shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.24);
   
   /* Transitions */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -64,7 +75,6 @@
   --bg-base: var(--bg-0);
   --bg-canvas: var(--bg-1);
   --bg-surface: var(--bg-2);
-  --font-body: var(--font-sans);
   --accent-primary: var(--gold-500);
   --accent-hover: var(--gold-400);
   --shadow-panel: var(--shadow-md);

@@ -7,7 +7,7 @@ a live drill** — see "What's not yet verified" at the end.
 ## The one thing to unlearn first
 
 The obvious assumption — "if something breaks, click rollback in the Railway
-dashboard" — is not reliably available. Checked live: every one of the 7
+dashboard" — is not reliably available. Checked live: every one of the
 services' deployment history shows every deployment *before* the current one
 as `REMOVED`. Per Railway's own docs, once a deployment is superseded it
 starts counting down against the plan's **image retention window**, and

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
-	"github.com/chess404/realtime/internal/engine"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 )
 
 func main() {
@@ -30,14 +30,14 @@ func main() {
 	flag.Parse()
 
 	if *dashboard {
-		engine.StartDashboard(*dashPort)
+		v1.StartDashboard(*dashPort)
 		fmt.Println("Dashboard started on port", *dashPort)
 	}
 
 	if *genPositions > 0 {
-		positions := engine.GenRandomPositions(*genPositions)
-		ds := &engine.TrainingDataSet{
-			Games: []engine.SelfPlayResult{{
+		positions := v1.GenRandomPositions(*genPositions)
+		ds := &v1.TrainingDataSet{
+			Games: []v1.SelfPlayResult{{
 				GameNum:   1,
 				PlyCount:  *genPositions,
 				Result:    "*",
@@ -61,7 +61,7 @@ func main() {
 	fmt.Println("404chess-engine v1.0 by chess404")
 	scanner := bufio.NewScanner(os.Stdin)
 
-	var tt *engine.TranspositionTable
+	var tt *v1.TranspositionTable
 	var currentState *contracts.MatchState
 
 	for scanner.Scan() {
@@ -80,7 +80,7 @@ func main() {
 
 		case "isready":
 			if tt == nil {
-				tt = engine.NewTranspositionTable(1 << 20)
+				tt = v1.NewTranspositionTable(1 << 20)
 			}
 			fmt.Println("readyok")
 
@@ -99,7 +99,7 @@ func main() {
 				moveStart = 8
 			}
 
-			currentState = engine.MatchStateFromFEN(fen)
+			currentState = v1.MatchStateFromFEN(fen)
 			if currentState == nil {
 				fmt.Printf("info string error: failed to parse FEN: %s\n", fen)
 				continue
@@ -114,7 +114,7 @@ func main() {
 				if move == nil {
 					break
 				}
-				currentState = engine.ApplyMoveCopy(currentState, move)
+				currentState = v1.ApplyMoveCopy(currentState, move)
 			}
 
 		case "go":
@@ -122,13 +122,13 @@ func main() {
 				continue
 			}
 			if tt == nil {
-				tt = engine.NewTranspositionTable(1 << 20)
+				tt = v1.NewTranspositionTable(1 << 20)
 			}
 
 			isWhite := currentState.Turn == "white"
-			moves := engine.GenerateAllMoves(currentState, isWhite)
+			moves := v1.GenerateAllMoves(currentState, isWhite)
 			if len(moves) == 0 {
-				if engine.IsKingInCheck(currentState) {
+				if v1.IsKingInCheck(currentState) {
 					fmt.Println("info string checkmate")
 				} else {
 					fmt.Println("info string stalemate")
@@ -136,9 +136,9 @@ func main() {
 				continue
 			}
 
-			var result engine.SearchResult
+			var result v1.SearchResult
 			if *useMCTS {
-				mctsEngine := engine.NewMCTSEngine()
+				mctsEngine := v1.NewMCTSEngine()
 				mctsEngine.Config.Simulations = *mctsSims
 				result = mctsEngine.FindBestMove(currentState)
 				fmt.Printf("info string mcts sims=%d score=%d\n", result.Nodes, result.Score)
@@ -160,9 +160,9 @@ func main() {
 					}
 				}
 				if *threads > 1 {
-					result = engine.ParallelSearch(currentState, depth, tt, time.Duration(timePerMove)*time.Millisecond, *threads)
+					result = v1.ParallelSearch(currentState, depth, tt, time.Duration(timePerMove)*time.Millisecond, *threads)
 				} else {
-					result = engine.SearchWithTime(currentState, depth, tt, time.Duration(timePerMove)*time.Millisecond)
+					result = v1.SearchWithTime(currentState, depth, tt, time.Duration(timePerMove)*time.Millisecond)
 				}
 				fmt.Printf("info depth %d score cp %d nodes %d\n", depth, result.Score, result.Nodes)
 			}
@@ -170,7 +170,7 @@ func main() {
 				result.BestMove.To.Row == 0 && result.BestMove.To.Col == 0 {
 				result.BestMove = moves[0]
 			}
-			fmt.Printf("bestmove %s\n", engine.MoveToUCI(&result.BestMove))
+			fmt.Printf("bestmove %s\n", v1.MoveToUCI(&result.BestMove))
 
 		case "perft":
 			if currentState == nil || len(parts) < 2 {
@@ -180,7 +180,7 @@ func main() {
 			if err != nil {
 				continue
 			}
-			divide := engine.PerftDivide(currentState, depth)
+			divide := v1.PerftDivide(currentState, depth)
 			total := 0
 			for move, count := range divide {
 				fmt.Printf("%s: %d\n", move, count)
@@ -190,7 +190,7 @@ func main() {
 
 		case "print":
 			if currentState != nil {
-				fmt.Println(engine.BoardToSimpleFEN(currentState))
+				fmt.Println(v1.BoardToSimpleFEN(currentState))
 			}
 
 		case "quit", "exit":
@@ -199,7 +199,7 @@ func main() {
 	}
 }
 
-func parseUCIMove(uci string) *engine.Move {
+func parseUCIMove(uci string) *v1.Move {
 	if len(uci) < 4 {
 		return nil
 	}
@@ -207,7 +207,7 @@ func parseUCIMove(uci string) *engine.Move {
 	fromRow := int(uci[1] - '1')
 	toCol := int(uci[2] - 'a')
 	toRow := int(uci[3] - '1')
-	m := &engine.Move{
+	m := &v1.Move{
 		From: contracts.Square{Row: fromRow, Col: fromCol},
 		To:   contracts.Square{Row: toRow, Col: toCol},
 	}
@@ -227,7 +227,7 @@ func parseUCIMove(uci string) *engine.Move {
 }
 
 func runSelfPlay(games int, output string, tempInit, tempFinal float64, timePerMoveMs, depth int, threads int) {
-	cfg := engine.DefaultSelfPlayConfig
+	cfg := v1.DefaultSelfPlayConfig
 	cfg.Games = games
 	cfg.InitialTemperature = tempInit
 	cfg.FinalTemperature = tempFinal
@@ -238,7 +238,7 @@ func runSelfPlay(games int, output string, tempInit, tempFinal float64, timePerM
 	fmt.Printf("Starting self-play: %d games, temp %.2f→%.2f, %dms/move, depth %d\n",
 		games, tempInit, tempFinal, timePerMoveMs, depth)
 
-	results := engine.RunSelfPlay(cfg)
+	results := v1.RunSelfPlay(cfg)
 
 	totalPly := 0
 	wins := 0
@@ -261,7 +261,7 @@ func runSelfPlay(games int, output string, tempInit, tempFinal float64, timePerM
 	fmt.Printf("Games: %d | White wins: %d | Black wins: %d | Draws: %d\n", games, wins, losses, draws)
 	fmt.Printf("Avg ply: %.1f | Total positions: %d\n", float64(totalPly)/float64(games), totalPositions)
 
-	ds := &engine.TrainingDataSet{
+	ds := &v1.TrainingDataSet{
 		Config: cfg,
 		Games:  results,
 	}

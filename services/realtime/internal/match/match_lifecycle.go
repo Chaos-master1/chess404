@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
-	"github.com/chess404/realtime/internal/engine"
+	v1 "github.com/chess404/realtime/internal/engine/v1"
 )
 
 // redactToken replaces common token and secret patterns with [REDACTED].
@@ -95,8 +95,8 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 	c := newMatchContainer(state, []contracts.ResolvedEvent{startEvent}, newMatchPresenceState(state, now))
 
 	if string(req.ModeID) == "computer" {
-		diff := engine.ParseDifficulty(req.Difficulty)
-		c.computer = engine.NewComputerOpponent(diff, "black")
+		diff := v1.ParseDifficulty(req.Difficulty)
+		c.computer = v1.NewComputerOpponent(diff, "black")
 		state.BlackGuestID = "computer"
 		state.BlackName = computerDisplayName(req.Difficulty)
 		// requireIntentColor demands a matching secret before it will
@@ -596,14 +596,6 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 	s.broadcastLocked(c, snapshot)
 }
 
-
-
-
-
-
-
-
-
 func applyIntent(state *contracts.MatchState, intent contracts.PlayerIntent, now time.Time) ([]contracts.ResolvedEvent, error) {
 	switch intent.Type {
 	case "make_move":
@@ -626,20 +618,6 @@ func applyIntent(state *contracts.MatchState, intent contracts.PlayerIntent, now
 		return nil, fmt.Errorf("unsupported intent type: %s", intent.Type)
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 func ensureActive(state *contracts.MatchState) error {
 	if state.Status != "active" {
@@ -952,8 +930,6 @@ func maxInt64(a, b int64) int64 {
 	}
 	return b
 }
-
-
 
 func newMatchPresenceState(state *contracts.MatchState, now time.Time) *matchPresenceState {
 	presence := &matchPresenceState{}

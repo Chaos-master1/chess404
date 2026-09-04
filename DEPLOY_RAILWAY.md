@@ -166,6 +166,22 @@ MATCHMAKING_TICKET_STORE_REDIS_URL=rediss://default:<upstash-password>@<upstash-
 
 ALLOWED_ORIGINS=https://<web-domain>
 INTERNAL_SERVICE_TOKEN=<shared-secret>
+
+# account email delivery (password-reset mails). DEFAULT IS `preview`,
+# which only logs the reset link — real email is never sent until you
+# set this block. The `smtp` provider is implemented in
+# cmd/platform-service/account_email_delivery.go.
+ACCOUNT_EMAIL_DELIVERY_PROVIDER=smtp
+ACCOUNT_EMAIL_SMTP_ADDRESS=<smtp-host>:587
+ACCOUNT_EMAIL_SMTP_FROM=no-reply@chess404.example
+ACCOUNT_EMAIL_SMTP_USERNAME=<smtp-username>
+ACCOUNT_EMAIL_SMTP_PASSWORD=<smtp-password>
+# Required (true) for any non-loopback host — cleartext credentials are rejected otherwise.
+ACCOUNT_EMAIL_SMTP_TLS=true
+# Optional:
+ACCOUNT_EMAIL_SMTP_FROM_NAME=Chess404
+ACCOUNT_EMAIL_SMTP_REPLY_TO=support@chess404.example
+ACCOUNT_EMAIL_SMTP_MESSAGE_DOMAIN=chess404.example
 ```
 
 ## First staging checklist

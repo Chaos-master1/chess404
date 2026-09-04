@@ -25,6 +25,16 @@ func newSecurityTestMatch(t *testing.T, service *Service, matchID string, now ti
 	}, now)
 }
 
+func TestRedactPlayerSecretNeverIncludesCredentialMaterial(t *testing.T) {
+	secret := "MixedCase-Bearer-Secret"
+	if got := redactPlayerSecret(secret); got != "<redacted>" {
+		t.Fatalf("expected a fixed redaction marker, got %q", got)
+	}
+	if got := redactPlayerSecret(""); got != "<empty>" {
+		t.Fatalf("expected empty secret marker, got %q", got)
+	}
+}
+
 // Seat secrets are bearer credentials for a seat: holding one lets you move,
 // play cards and resign as that player. They must never be serialized into a
 // client-facing snapshot. Previously GET /api/matches/{id} returned both,
