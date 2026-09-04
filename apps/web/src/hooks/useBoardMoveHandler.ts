@@ -239,11 +239,13 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     if (hostedRuntime) {
       if (viewerSeatRef.current !== piece.color) return false;
       if (turnRef.current !== piece.color) return false;
+      const actor = authoritativeActorForColor(piece.color);
+      if (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken)) return false;
     }
     if (piece.fusedWith || piece.invisible || piece.shielded || piece.frozen) return false;
     if (target?.fusedWith || target?.shielded || target?.invisible) return false;
     return true;
-  }, [cardPending, selectedCard, promo, promoPicker, cardPromo, jokerPicker, hostedRuntime, authoritativeMatchIdRef, boardRef, ghostRef, turnRef, viewerSeatRef]);
+  }, [cardPending, selectedCard, promo, promoPicker, cardPromo, jokerPicker, hostedRuntime, authoritativeActorForColor, authoritativeMatchIdRef, boardRef, ghostRef, turnRef, viewerSeatRef]);
 
   const doMove = React.useCallback((fr: number, fc: number, tr: number, tc: number, forcePromo?: PieceType) => {
     if (overRef.current) return;
@@ -264,9 +266,11 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
       liveGhost.col === fc &&
       (!hostedRuntime || (viewerSeatRef.current === liveGhost.ownerColor && turnRef.current === liveGhost.ownerColor))
     ) {
+      const actor = authoritativeActorForColor(turnRef.current);
+      if (hostedRuntime && (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken))) return;
       const backendMoveIntent: Omit<Extract<PlayerIntent, { type: 'make_move' }>, 'matchId'> = {
         type: 'make_move',
-        ...authoritativeActorForColor(turnRef.current),
+        ...actor,
         from: { row: fr, col: fc },
         to: { row: tr, col: tc },
       };
@@ -282,6 +286,8 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     }
 
     if (isAuthoritativePromotion && !forcePromo) {
+      const actor = authoritativeActorForColor(turnRef.current);
+      if (hostedRuntime && (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken))) return;
       setPromo({
         row: tr,
         col: tc,
@@ -322,6 +328,10 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
         return;
       }
     }
+    // Hosted matches are server-authoritative. If this move is not ready to
+    // submit (for example while its seat credentials are hydrating), do not
+    // fall through into the offline board-mutation path.
+    if (matchId && hostedRuntime) return;
     const b    = boardRef.current;
     const t    = turnRef.current;
     const mv   = movedRef.current;
@@ -604,9 +614,11 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
   const doPromo = React.useCallback((type: PieceType) => {
     if (!promo) return;
     if (promo.authoritativeMatchId && promo.from && promo.to) {
+      const actor = authoritativeActorForColor(promo.turn ?? turn);
+      if (hostedRuntime && (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken))) return;
       const backendMoveIntent: Omit<Extract<PlayerIntent, { type: 'make_move' }>, 'matchId'> = {
         type: 'make_move',
-        ...authoritativeActorForColor(promo.turn ?? turn),
+        ...actor,
         from: promo.from,
         to: promo.to,
         promotion: type,
@@ -666,7 +678,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
 
     checkEndGame(nb, next, newMv, newLm, newHmc, newPh, posKey, fen, t);
     if (!over) finalPositionRef.current = { fen, turn: next };
-  }, [promo, board, turn, posHist, resetCardUsed, setTicking, checkEndGame, over, applyAuthoritativeSnapshot, authoritativeActorForColor, finalPositionRef, setBoard, setCardMsg, setClockActive, setFmn, setHmc, setLm, setMovHist, setMoved, setPosHist, setPromo, setSnapshots, setTurn]);
+  }, [promo, board, turn, posHist, resetCardUsed, setTicking, checkEndGame, over, applyAuthoritativeSnapshot, authoritativeActorForColor, finalPositionRef, hostedRuntime, setBoard, setCardMsg, setClockActive, setFmn, setHmc, setLm, setMovHist, setMoved, setPosHist, setPromo, setSnapshots, setTurn]);
 
   const filterFusionChecks = React.useCallback((
     b: Board,

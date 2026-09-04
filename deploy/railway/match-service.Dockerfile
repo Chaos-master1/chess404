@@ -17,17 +17,15 @@ RUN apk add --no-cache ca-certificates tzdata curl
 COPY --from=build /out/match-service /usr/local/bin/match-service
 
 # NNUE is opt-in (CHESS404_ENGINE_NNUE=1) and off by default -- see
-# internal/engine/nnue.go -- because the committed weights predate a fix to
-# the trainer/inference contract and need retraining before they're useful.
-# This still ships the file and points the loader at an absolute path so that
-# whenever a corrected retrain lands, enabling it in production is a one-line
-# env var change, not another silent "file not found from an unexpected
-# working directory" bug -- which is exactly what previously happened: the
-# runtime image never shipped the file at all, and even if it had, this
-# stage's CMD runs from /, which none of the loader's relative fallback paths
-# resolve from.
-COPY services/realtime/nnue_weights.bin /usr/local/share/chess404/nnue_weights.bin
-ENV CHESS404_NNUE_WEIGHTS_PATH=/usr/local/share/chess404/nnue_weights.bin
+# internal/engine/v1/nnue.go. The old v1-format nnue_weights.bin shipped here
+# was removed from the repo (2026-09-02): it predates a fix to the
+# trainer/inference contract and both engines' loaders reject it, so shipping
+# it only wasted 7.6MB. When a corrected retrain lands, restore the file and
+# re-add here:
+#   COPY services/realtime/nnue_weights.bin /usr/local/share/chess404/nnue_weights.bin
+#   ENV CHESS404_NNUE_WEIGHTS_PATH=/usr/local/share/chess404/nnue_weights.bin
+# (absolute path matters: this stage's CMD runs from /, which none of the
+# loader's relative fallback paths resolve from.)
 
 RUN adduser -D -g '' -u 1001 chess404
 USER chess404

@@ -1,6 +1,7 @@
 import type { MatchModeId, MatchSnapshotMessage, PieceColor } from '@chess404/contracts';
 import { DEFAULT_MATCH_MODE_ID } from '@chess404/contracts';
-import type { MatchSeatClaim } from './platform-service';
+import type { GuestSession, MatchSeatClaim } from './platform-service';
+import { writeStoredGuestIdentity } from './session-storage';
 
 export interface PrivateMatchIdentity {
   guestId?: string;
@@ -16,6 +17,10 @@ export interface PrivateMatchAccessResponse {
   waitingForOpponent: boolean;
   snapshot: MatchSnapshotMessage;
   claim?: MatchSeatClaim;
+  // The gateway may mint a replacement guest session when the browser submits
+  // an expired one. Persisting this resolved identity prevents the new room
+  // from being created for a guest the browser can no longer authenticate as.
+  guestSession?: GuestSession;
 }
 
 export async function createPrivateMatch(input: {
@@ -49,7 +54,7 @@ export async function createPrivateMatch(input: {
     }),
   });
 
-  return unwrapResponse<PrivateMatchAccessResponse>(response);
+  return persistResolvedGuestSession(await unwrapResponse<PrivateMatchAccessResponse>(response));
 }
 
 export async function joinPrivateMatch(input: {
@@ -76,7 +81,7 @@ export async function joinPrivateMatch(input: {
     }),
   });
 
-  return unwrapResponse<PrivateMatchAccessResponse>(response);
+  return persistResolvedGuestSession(await unwrapResponse<PrivateMatchAccessResponse>(response));
 }
 
 export async function rematchPrivateMatch(input: {
@@ -103,7 +108,21 @@ export async function rematchPrivateMatch(input: {
     }),
   });
 
-  return unwrapResponse<PrivateMatchAccessResponse>(response);
+  return persistResolvedGuestSession(await unwrapResponse<PrivateMatchAccessResponse>(response));
+}
+
+function persistResolvedGuestSession(result: PrivateMatchAccessResponse): PrivateMatchAccessResponse {
+  const session = result.guestSession;
+  if (!session?.guest?.guestId || !session.sessionSecret) return result;
+
+  // Private-room entry points are driven by the browser's primary guest
+  // identity.  Seat colour describes the room assignment, not a second local
+  // account, so a joiner assigned Black still persists this as its White slot.
+  writeStoredGuestIdentity('white', session.guest.guestId, session.sessionSecret, {
+    sessionToken: session.sessionToken ?? null,
+    sessionExpiresAt: session.expiresAt ?? null,
+  });
+  return result;
 }
 
 async function unwrapResponse<T>(response: Response): Promise<T> {

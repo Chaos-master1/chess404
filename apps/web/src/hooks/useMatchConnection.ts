@@ -206,7 +206,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
 
     stopAbortCountdown(true);
     const streamIdentity = hostedRuntime && viewerSeat ? authoritativeActorForColor(viewerSeat) : null;
-    if (hostedRuntime && viewerSeat && !streamIdentity?.playerSecret && !streamIdentity?.playerClaimToken) {
+    if (hostedRuntime && viewerSeat && (!streamIdentity?.playerId || (!streamIdentity.playerSecret && !streamIdentity.playerClaimToken))) {
       setAuthoritativeLive(false);
       setStreamDisconnected(true);
       setCardMsg('Cannot connect: missing player credentials. Try re-entering the match.');
@@ -262,8 +262,13 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     let cancelled = false;
     const sendHeartbeat = async () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+      const actor = authoritativeActorForColor(viewerSeat);
+      // Match seat hydration and the initial snapshot are asynchronous. Do
+      // not convert that harmless short window into a malformed presence
+      // request; the effect re-runs once the authoritative actor is ready.
+      if (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken)) return;
       try {
-        await sendMatchPresenceHeartbeat(authoritativeMatchId, authoritativeActorForColor(viewerSeat));
+        await sendMatchPresenceHeartbeat(authoritativeMatchId, actor);
         if (!cancelled) {
           setCardMsg(prev => prev === PRESENCE_RETRY_MESSAGE ? '' : prev);
         }

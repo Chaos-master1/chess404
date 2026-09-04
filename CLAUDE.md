@@ -92,6 +92,35 @@ node packages/game-core/scripts/sync-cards-json.mjs
 
 ## Current status (2026-08-24)
 
+### Release gate — 2026-09-04
+
+**Do not launch yet.** Direct Playwright coverage against the live Railway site
+found that a new computer match can fail to submit its first action with
+`unrecognized player id` / `unauthorized player secret`; after resignation,
+the expected archived replay was absent. Public health probes remain green, so
+those probes are not a launch sign-off.
+
+The working tree now contains a focused repair (not deployed): the web façade
+automatically bootstraps routed matches, hydrates the authoritative seat ID,
+secret and claim before enabling hosted traffic, and activates the existing
+stream/presence/reconnect path; the gateway returns and the browser persists a
+replacement guest session; incomplete identity plus a claim token is resolved
+defensively by the gateway. Private snapshot reads now verify platform seat
+ownership before forwarding a case-preserved player credential to the match
+service, while fresh direct-match invitees join through the gateway before a
+private read. The standard web check now runs its Vitest suite (11 tests),
+`pnpm lint`, `pnpm test`, `pnpm build`, and the complete realtime `go test
+./... -count=1 -timeout 300s` suite pass locally on 2026-09-04. A controlled
+deploy and the same complete private/computer-match → finish → history/replay
+E2E flow must pass before this gate can be cleared.
+
+Remaining human/operations gates: configure a real SMTP provider (password
+reset still uses preview delivery), enable and verify database backups, appoint
+at least one moderation admin, triage the dependency-security scan, and review
+Railway capacity/billing (the account showed only 18 days or $3.46 remaining on
+2026-09-04). Do not create production environments or enable paid features
+without the owner's explicit approval.
+
 Production topology (verified directly against Railway, not from docs):
 
 - URL: `https://web-production-1caefb.up.railway.app` (the older `web-production-ddc27` host is dead)

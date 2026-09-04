@@ -11,17 +11,16 @@
 ```bash
 # from repo root
 pnpm lint                          # turbo lint (contracts, game-core, web)
+pnpm test && pnpm build             # includes the web Vitest suite and production bundle
 export PATH=$PATH:/home/Houssem/sdk/go1.25.6/bin
-(cd services/realtime && go vet ./... && go test ./... )  # 24 packages, ~30s
+(cd services/realtime && go vet ./... && go test ./... -count=1 -timeout 300s)
 (cd services/realtime && go test -race ./internal/match -count=1)  # catches the Close-vs-Upsert race
-npx playwright test e2e/pages-smoke.spec.ts --reporter=list  # 6 routes, ~50s, hits live web
-# for full e2e (serial, ~6 min total, one file at a time):
-for f in e2e/solo.spec.ts e2e/auth.spec.ts e2e/private-invite.spec.ts e2e/reconnect.spec.ts e2e/card-play.spec.ts e2e/history-replay.spec.ts e2e/multiplayer.spec.ts; do
-  timeout 120 npx playwright test "$f" --reporter=line || break
-done
 ```
 
-If any of the above were `cache hit` from a prior run, touch one file or run with `turbo run lint --force`.
+Do not count a Playwright run against the current public Railway URL as
+pre-deploy proof for a new candidate—it exercises the old release. Run the
+live scenarios below only after Railway reports the intended commit as
+successfully deployed.
 
 ## How to deploy (Railway has no auto-deploy)
 
@@ -36,7 +35,7 @@ After pushing to `main`, Railway does not necessarily build. Check and trigger:
 
 Every service should converge on the same `main` commit within a few minutes. Watch its build log; a second `connect` after a transient `FAILED` usually succeeds.
 
-## Smoke checks after deploy
+## Mandatory live gate after deploy
 
 ```bash
 BASE=https://web-production-1caefb.up.railway.app
@@ -55,6 +54,20 @@ On the client, open the live site, create a **vs computer** match (Play → Begi
 - `e2-e4` → engine replies within 15 s,
 - reload → board + `Resign` button reappear (reconnect test),
 - `/watch` → no private/computer rooms are listed (spectate privacy).
+
+Then run the release-critical flows serially against the deployed Railway URL:
+
+```bash
+BASE=https://web-production-1caefb.up.railway.app
+for f in e2e/solo.spec.ts e2e/private-invite.spec.ts e2e/reconnect.spec.ts e2e/history-replay.spec.ts; do
+  E2E_BASE_URL="$BASE" timeout 300 pnpm exec playwright test "$f" --reporter=line || exit 1
+done
+```
+
+The minimum launch evidence is: a computer player can make its first move;
+a cold invitee receives and can use the open private seat; a reload/offline
+reconnect remains playable; and a finished game appears in history with a
+replay frame. Any failure is a release blocker, even if health probes are 200.
 
 ## Logs to tail during deploy
 

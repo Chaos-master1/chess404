@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/chess404/realtime/internal/contracts"
@@ -56,17 +55,14 @@ func accountIDOf(s *platform.GuestSession) string {
 	return "<guest-only>"
 }
 
-// redactSecret returns a short fingerprint of a secret (first 6
-// chars + length) so logs are useful for debugging without exposing
-// the full secret. Empty string becomes "<empty>".
+// redactSecret keeps bearer credentials out of logs entirely. A prefix is
+// still credential material and can make a brute-force or log-correlation
+// attack easier, so non-empty values have a single fixed representation.
 func redactSecret(s string) string {
 	if s == "" {
 		return "<empty>"
 	}
-	if len(s) <= 6 {
-		return s[:1] + "***"
-	}
-	return s[:6] + "...len=" + strconv.Itoa(len(s))
+	return "<redacted>"
 }
 
 func ensureGatewayPrivateAccountSession(config GatewayConfig, client *http.Client, identity *GatewayAccountIdentity, guestSession *platform.GuestSession, r *http.Request) (*platform.AccountSession, int, error) {
@@ -102,16 +98,12 @@ func proxyGatewayIntent(w http.ResponseWriter, r *http.Request, config GatewayCo
 	}
 
 	req.Intent.MatchID = matchID
-	// A claim token is a one-time bootstrap into playerID+playerSecret --
-	// resolving it deletes it from the store (see MatchClaimStore.GetByToken),
-	// so it must only be consumed when the caller doesn't already have a
-	// secret. authoritativeActorForColor on the client sends both fields
-	// together once a secret is known; resolving the token unconditionally
-	// here meant whichever of presence/intents happened to fire first
-	// consumed the single-use token, and every other call -- still sending
-	// that same now-dead token alongside a perfectly valid secret -- was
-	// rejected as "unknown room claim token".
-	if strings.TrimSpace(req.Intent.PlayerSecret) == "" && strings.TrimSpace(req.Intent.PlayerClaimToken) != "" {
+	// A claim token is a one-time bootstrap into playerID+playerSecret. Resolve
+	// it if either durable field is absent: a client with an empty player ID and
+	// a stale secret is not authenticated yet. When both values are present the
+	// claim must be left untouched, because a presence/intent race must not
+	// consume the one-time token that accompanies an otherwise valid secret.
+	if strings.TrimSpace(req.Intent.PlayerClaimToken) != "" && (strings.TrimSpace(req.Intent.PlayerID) == "" || strings.TrimSpace(req.Intent.PlayerSecret) == "") {
 		claim, errMessage := resolveGatewayClaimByToken(config, client, matchID, strings.TrimSpace(req.Intent.PlayerClaimToken), r)
 		if errMessage != "" {
 			httputil.WriteError(w, http.StatusUnauthorized, errMessage)
@@ -145,10 +137,9 @@ func proxyGatewayPresence(w http.ResponseWriter, r *http.Request, config Gateway
 		}
 	}
 
-	// See the matching comment in proxyGatewayIntent: a claim token is
-	// single-use (MatchClaimStore.GetByToken deletes on read), so it must
-	// only be resolved when the caller doesn't already have a secret.
-	if strings.TrimSpace(req.PlayerSecret) == "" && strings.TrimSpace(req.PlayerClaimToken) != "" {
+	// See the matching intent path: replace incomplete identity fields with the
+	// claim exactly once, but leave a complete playerID+secret untouched.
+	if strings.TrimSpace(req.PlayerClaimToken) != "" && (strings.TrimSpace(req.PlayerID) == "" || strings.TrimSpace(req.PlayerSecret) == "") {
 		claim, errMessage := resolveGatewayClaimByToken(config, client, matchID, strings.TrimSpace(req.PlayerClaimToken), r)
 		if errMessage != "" {
 			httputil.WriteError(w, http.StatusUnauthorized, errMessage)

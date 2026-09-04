@@ -37,7 +37,7 @@ import {
   type StoredRoomMeta,
   writeStoredRoomMeta,
 } from '../lib/match-service';
-import { rematchPrivateMatch } from '../lib/private-match-service';
+import { joinPrivateMatch, rematchPrivateMatch } from '../lib/private-match-service';
 import {
   type GuestProfile,
 } from '../lib/platform-service';
@@ -358,6 +358,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const [authoritativeBlackConnected, setAuthoritativeBlackConnected] = React.useState(false);
   const [authoritativeDisconnectGraceFor, setAuthoritativeDisconnectGraceFor] = React.useState<PieceColor | null>(null);
   const [authoritativeDisconnectGraceDeadline, setAuthoritativeDisconnectGraceDeadline] = React.useState<string | null>(null);
+  const [streamDisconnected, setStreamDisconnected] = React.useState(false);
 
   const authoritativeActorForColor = React.useCallback((color: PieceColor): { playerId: string; playerSecret?: string; playerClaimToken?: string } => {
     const seatId = authoritativeSeatIdsRef.current[color];
@@ -366,15 +367,98 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     const claimExpiresAt = authoritativeClaimExpiresAtRef.current[color];
     const tokenValid = !!claimToken && (!claimExpiresAt || new Date(claimExpiresAt).getTime() > Date.now());
     return {
-      playerId: seatId || (color === 'white' ? 'white' : 'black'),
+      // A hosted action must carry the server-owned guest ID.  Falling back to
+      // the display colour here turns a hydration race into a malformed action
+      // such as playerId="white", which the match service cannot authorize.
+      playerId: seatId || (hostedRuntime ? '' : color),
       playerSecret: seatSecret || undefined,
       playerClaimToken: tokenValid ? claimToken : undefined,
     };
-  }, [authoritativeClaimExpiresAtRef, authoritativeClaimTokensRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef]);
+  }, [authoritativeClaimExpiresAtRef, authoritativeClaimTokensRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, hostedRuntime]);
 
   const applyAuthoritativeSnapshot = React.useCallback((snapshot: MatchSnapshotMessage) => {
     const match = snapshot.match;
     if (!match) return;
+
+    // Snapshot hydration is the boundary between a public match URL and an
+    // authenticated player action.  The façade used to update only the board,
+    // leaving the authoritative actor refs empty.  A fast first click then
+    // submitted a fabricated colour as playerId.  Keep the exact seat ID and
+    // credential that were issued for this room together before enabling play.
+    const storedRoomMeta = readStoredRoomMeta(match.matchId);
+    authoritativeSeatIdsRef.current = {
+      white: match.whiteGuestId ?? null,
+      black: match.blackGuestId ?? null,
+    };
+    authoritativeSeatSecretsRef.current = {
+      white: storedRoomMeta?.whitePlayerSecret ?? authoritativeSeatSecretsRef.current.white,
+      black: storedRoomMeta?.blackPlayerSecret ?? authoritativeSeatSecretsRef.current.black,
+    };
+    authoritativeClaimTokensRef.current = {
+      white: storedRoomMeta?.whiteClaimToken ?? authoritativeClaimTokensRef.current.white,
+      black: storedRoomMeta?.blackClaimToken ?? authoritativeClaimTokensRef.current.black,
+    };
+    authoritativeClaimExpiresAtRef.current = {
+      white: storedRoomMeta?.whiteClaimExpiresAt ?? authoritativeClaimExpiresAtRef.current.white,
+      black: storedRoomMeta?.blackClaimExpiresAt ?? authoritativeClaimExpiresAtRef.current.black,
+    };
+
+    const localWhiteGuestID = whiteProfileRef.current?.guestId ?? readStoredGuestIdentity('white').guestId ?? null;
+    const localBlackGuestID = blackProfileRef.current?.guestId ?? readStoredGuestIdentity('black').guestId ?? null;
+    let derivedViewerSeat: PieceColor | null = null;
+    if (hostedRuntime) {
+      if (localWhiteGuestID && match.whiteGuestId === localWhiteGuestID) {
+        derivedViewerSeat = 'white';
+      } else if (localBlackGuestID && match.blackGuestId === localBlackGuestID) {
+        derivedViewerSeat = 'black';
+      } else {
+        derivedViewerSeat = storedRoomMeta?.viewerSeat ?? null;
+      }
+    } else {
+      derivedViewerSeat = 'white';
+    }
+    viewerSeatRef.current = derivedViewerSeat;
+    setViewerSeat(derivedViewerSeat);
+
+    const nextRoomMeta: StoredRoomMeta = {
+      ...storedRoomMeta,
+      queue: match.queue ?? storedRoomMeta?.queue,
+      modeId: match.modeId ?? storedRoomMeta?.modeId ?? DEFAULT_MATCH_MODE_ID,
+      difficulty: storedRoomMeta?.difficulty,
+      viewerSeat: derivedViewerSeat,
+      whiteGuestId: match.whiteGuestId ?? storedRoomMeta?.whiteGuestId,
+      blackGuestId: match.blackGuestId ?? storedRoomMeta?.blackGuestId,
+      whiteAccountId: match.whiteAccountId ?? storedRoomMeta?.whiteAccountId,
+      blackAccountId: match.blackAccountId ?? storedRoomMeta?.blackAccountId,
+      whiteName: match.whiteName ?? storedRoomMeta?.whiteName,
+      blackName: match.blackName ?? storedRoomMeta?.blackName,
+      whitePlayerSecret: authoritativeSeatSecretsRef.current.white ?? undefined,
+      blackPlayerSecret: authoritativeSeatSecretsRef.current.black ?? undefined,
+      whiteClaimToken: authoritativeClaimTokensRef.current.white ?? undefined,
+      blackClaimToken: authoritativeClaimTokensRef.current.black ?? undefined,
+      whiteClaimExpiresAt: authoritativeClaimExpiresAtRef.current.white ?? undefined,
+      blackClaimExpiresAt: authoritativeClaimExpiresAtRef.current.black ?? undefined,
+    };
+    // A browser must never retain the other hosted player's secret merely
+    // because it has loaded the same public room URL.
+    if (hostedRuntime && derivedViewerSeat === 'white') {
+      delete nextRoomMeta.blackPlayerSecret;
+      delete nextRoomMeta.blackClaimToken;
+      delete nextRoomMeta.blackClaimExpiresAt;
+    } else if (hostedRuntime && derivedViewerSeat === 'black') {
+      delete nextRoomMeta.whitePlayerSecret;
+      delete nextRoomMeta.whiteClaimToken;
+      delete nextRoomMeta.whiteClaimExpiresAt;
+    }
+    writeStoredRoomMeta(match.matchId, nextRoomMeta);
+    writeStoredActiveMatchId(match.matchId);
+    setMatchSeatMeta({
+      whiteGuestId: nextRoomMeta.whiteGuestId,
+      blackGuestId: nextRoomMeta.blackGuestId,
+      whiteName: nextRoomMeta.whiteName,
+      blackName: nextRoomMeta.blackName,
+    });
+
     setAuthoritativeMatchId(match.matchId);
     authoritativeMatchIdRef.current = match.matchId;
     setAuthoritativeLive(match.status === 'active' || match.status === 'waiting');
@@ -415,17 +499,21 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setClockActive(true);
       setTicking(match.turn);
     }
-  }, [authoritativeMatchIdRef, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setLavaSquares, setFogZones, setFortressZones, setBombPieces, stopAbortCountdown, setClockActive, setTicking]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;
+    if (hostedRuntime && (!intent?.playerId || (!intent?.playerSecret && !intent?.playerClaimToken))) {
+      setCardMsg('Live match is still synchronizing your player session. Please try again in a moment.');
+      return;
+    }
     try {
       const snap = await applyIntent(authoritativeMatchIdRef.current, intent);
       applyAuthoritativeSnapshot(snap);
     } catch {
       // Reconcile on failure
     }
-  }, [authoritativeMatchIdRef, applyAuthoritativeSnapshot]);
+  }, [authoritativeMatchIdRef, applyAuthoritativeSnapshot, hostedRuntime, setCardMsg]);
 
   const {
     cancelCard, getSafeTransforms, getFusedMoves, checkFusionRedundancy, activateDoubleMove,
@@ -473,12 +561,82 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     const matchId = requestedMatchIdRef.current || gatewayRecoveredMatchIdRef.current;
     if (!matchId) return;
     try {
-      const snapshot = await fetchMatch(matchId);
-      applyAuthoritativeSnapshot(snapshot);
+      const roomMeta = readStoredRoomMeta(matchId);
+      const heldCredential = roomMeta?.viewerSeat === 'white'
+        ? roomMeta.whitePlayerSecret ?? roomMeta.whiteClaimToken
+        : roomMeta?.viewerSeat === 'black'
+          ? roomMeta.blackPlayerSecret ?? roomMeta.blackClaimToken
+          : null;
+      const guest = readStoredGuestIdentity('white');
+
+      // A direct-match URL is a bearer invitation, not a spectator API. Claim
+      // an available seat through the gateway before requesting any private
+      // snapshot. Re-opening an existing seat also succeeds here because the
+      // guest session secret proves ownership; a full room falls through to
+      // the authenticated fetch below.
+      if (!heldCredential && guest.guestId) {
+        const account = readStoredAccountIdentity('white');
+        try {
+          const joined = await joinPrivateMatch({
+            matchId,
+            identity: {
+              guestId: guest.guestId,
+              sessionSecret: guest.sessionSecret,
+              sessionToken: guest.sessionToken,
+              accountId: account.accountId,
+              accountSessionToken: account.sessionToken,
+            },
+          });
+          const seatCredentials = joined.seatColor === 'white'
+            ? {
+              whitePlayerSecret: joined.claim?.playerSecret,
+              whiteClaimToken: joined.claim?.claimToken,
+              whiteClaimExpiresAt: joined.claim?.expiresAt,
+            }
+            : {
+              blackPlayerSecret: joined.claim?.playerSecret,
+              blackClaimToken: joined.claim?.claimToken,
+              blackClaimExpiresAt: joined.claim?.expiresAt,
+            };
+          writeStoredRoomMeta(matchId, {
+            ...roomMeta,
+            queue: joined.snapshot.match.queue ?? roomMeta?.queue,
+            modeId: joined.snapshot.match.modeId ?? roomMeta?.modeId ?? DEFAULT_MATCH_MODE_ID,
+            viewerSeat: joined.seatColor,
+            whiteGuestId: joined.snapshot.match.whiteGuestId,
+            blackGuestId: joined.snapshot.match.blackGuestId,
+            whiteAccountId: joined.snapshot.match.whiteAccountId,
+            blackAccountId: joined.snapshot.match.blackAccountId,
+            whiteName: joined.snapshot.match.whiteName,
+            blackName: joined.snapshot.match.blackName,
+            ...seatCredentials,
+          });
+          applyAuthoritativeSnapshot(joined.snapshot);
+          return;
+        } catch {
+          // A room may already be full. Its seated owner can still fetch a
+          // seat-scoped view below; a third party receives the route's normal
+          // private-match response instead of any fallback snapshot.
+        }
+      }
+      applyAuthoritativeSnapshot(await fetchMatch(matchId));
     } catch {
       // Keep offline or initial state
     }
   }, [hostedRuntime, requestedMatchIdRef, gatewayRecoveredMatchIdRef, applyAuthoritativeSnapshot]);
+
+  // A route change only updates refs and router state; it does not itself
+  // hydrate the match. Watching the routed match surface makes every direct
+  // /match/<id> navigation hydrate through the same gateway-first path as a
+  // fresh page load, including newly created computer matches. A fresh invitee receives
+  // its guest identity asynchronously from the initial gateway bootstrap;
+  // wait for that before attempting to claim the open seat. Otherwise the
+  // first fetch succeeds as an anonymous spectator and no later dependency
+  // change retries the join.
+  React.useEffect(() => {
+    if (!hostedRuntime || !guestProfilesReady || (!pathname.startsWith('/match/') && activePage !== 'Match')) return;
+    void bootstrapAuthoritativeMatch();
+  }, [activePage, bootstrapAuthoritativeMatch, guestProfilesReady, hostedRuntime, pathname]);
 
   const resetBoardEffectsCallback = React.useCallback(() => {
     setLavaSquares([]);
@@ -607,6 +765,45 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     turn,
     openLiveMatch,
     dismissedSocialAlertIdsRef,
+    authoritativeActionReady: !hostedRuntime || (!!viewerSeat && (() => {
+      const actor = authoritativeActorForColor(viewerSeat);
+      return !!actor.playerId && !!(actor.playerSecret || actor.playerClaimToken);
+    })()),
+  });
+
+  const { onStreamReconnect } = useMatchConnection({
+    sets: {
+      setAuthoritativeMatchId,
+      setAuthoritativeLive,
+      setStreamDisconnected,
+      setAuthoritativeStatus,
+      setAuthoritativeWhiteConnected,
+      setAuthoritativeBlackConnected,
+      setAuthoritativeDisconnectGraceFor,
+      setAuthoritativeDisconnectGraceDeadline,
+      setViewerSeat,
+      setMatchSeatMeta,
+      setCardMsg,
+      setAuthoritativeRematchBusy,
+      setMatchDestinationNotice,
+      setActivePage,
+    },
+    authoritativeMatchId,
+    authoritativeMatchIdRef,
+    authoritativeClaimTokensRef,
+    authoritativeClaimExpiresAtRef,
+    hostedRuntime,
+    viewerSeat,
+    over,
+    primaryAccountIdentity,
+    openLiveMatch,
+    buildGatewayBootstrapRequest,
+    applyGatewayGuestSessions,
+    applyGatewayMatchClaims,
+    applyGatewayAccountSessions,
+    onSnapshot: applyAuthoritativeSnapshot,
+    stopAbortCountdown,
+    authoritativeActorForColor,
   });
 
   const {
@@ -626,7 +823,6 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const kingPos = check && !isReviewing ? findKing(board, turn) : null;
   const roundNumber = React.useMemo(() => Math.floor(fmn), [fmn]);
   const abortActive = abortCountdown !== null && abortCountdown > 0;
-  const streamDisconnected = false;
   const hasPrimaryAccountSession = !!primaryAccountIdentity?.sessionToken;
 
   const createAuthoritativeRematchRoom = React.useCallback(async () => {
@@ -680,10 +876,6 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setAuthoritativeRematchBusy(false);
     }
   }, [authoritativeMatchIdRef, openLiveMatch, primaryAccountIdentity?.accountId, primaryAccountIdentity?.sessionToken, setAuthoritativeRematchBusy, setMatchDestinationNotice]);
-
-  const onStreamReconnect = React.useCallback(() => {
-    void fetchMatch(authoritativeMatchIdRef.current || '').then(applyAuthoritativeSnapshot).catch(() => {});
-  }, [authoritativeMatchIdRef, applyAuthoritativeSnapshot]);
 
   return {
     sfReady, isThinking, ev, sfErr, analyse, stop, resetEval,

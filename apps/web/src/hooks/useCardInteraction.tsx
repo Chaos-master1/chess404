@@ -325,10 +325,14 @@ export function useCardInteraction(props: UseCardInteractionProps) {
 
   const canUseCard = React.useCallback((card: GameCard, playerColor: PieceColor): boolean => {
     if (over) return false;
-    if (hostedRuntime && viewerSeatRef.current !== playerColor) return false;
+    if (hostedRuntime) {
+      if (viewerSeatRef.current !== playerColor) return false;
+      const actor = authoritativeActorForColor(playerColor);
+      if (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken)) return false;
+    }
     if (card.type !== 'trap' && turn !== playerColor) return false;
     return !cardUsedByRef.current[playerColor];
-  }, [over, turn, hostedRuntime, cardUsedByRef, viewerSeatRef]);
+  }, [over, turn, hostedRuntime, authoritativeActorForColor, cardUsedByRef, viewerSeatRef]);
 
   const handleCardClick = React.useCallback((row: number, col: number) => {
     if (!cardPending) return;

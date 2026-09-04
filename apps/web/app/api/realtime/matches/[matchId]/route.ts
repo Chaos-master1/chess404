@@ -17,10 +17,20 @@ export async function GET(
   context: { params: Promise<{ matchId: string }> }
 ): Promise<Response> {
   const { matchId } = await context.params;
+  const verifiedSeat = await resolveVerifiedMatchSeat(request, matchId);
   const upstreamUrl = `${matchServiceBaseUrl}/api/matches/${encodeURIComponent(matchId)}`;
+  const upstreamHeaders = buildInternalHeaders(request.headers, 'match');
+  if (verifiedSeat) {
+    // The match service applies the per-seat hidden-card view. Only forward a
+    // bearer credential after the platform service has established that this
+    // browser owns that exact match seat; never treat a public guest ID as
+    // sufficient proof.
+    upstreamHeaders.set('X-Player-ID', verifiedSeat.guestId);
+    upstreamHeaders.set('X-Player-Secret', verifiedSeat.playerSecret);
+  }
   const upstream = await fetch(upstreamUrl, {
     method: 'GET',
-    headers: buildInternalHeaders(request.headers, 'match'),
+    headers: upstreamHeaders,
     cache: 'no-store',
   });
   const body = await upstream.text();
@@ -39,10 +49,7 @@ export async function GET(
     return Response.json({ error: 'invalid match service response' }, { status: 502 });
   }
 
-  const requestOwnsSeat = await requestOwnsMatchSeat(request, matchId);
-  const guestIdMatch = !requestOwnsSeat && ownsMatchSeatByGuestId(request, snapshot);
-  const isDirectMatch = normalize(snapshot.match?.queue) === 'direct';
-  if (isLocalRequest(request) || requestOwnsSeat || guestIdMatch || isDirectMatch) {
+  if (isLocalRequest(request) || verifiedSeat) {
     return Response.json(snapshot, { status: 200, headers: noStoreHeaders() });
   }
 
@@ -112,6 +119,8 @@ function buildPublicSpectatorSnapshot(snapshot: MatchSnapshotResponse): MatchSna
   delete match.blackGuestId;
   delete match.whiteAccountId;
   delete match.blackAccountId;
+  delete match.whitePlayerSecret;
+  delete match.blackPlayerSecret;
   delete match.seenClientMoveIds;
   delete match.whiteHand;
   delete match.blackHand;
@@ -140,24 +149,24 @@ function buildPublicSpectatorSnapshot(snapshot: MatchSnapshotResponse): MatchSna
   };
 }
 
-async function requestOwnsMatchSeat(request: Request, matchId: string): Promise<boolean> {
+interface VerifiedMatchSeat {
+  guestId: string;
+  playerSecret: string;
+}
+
+async function resolveVerifiedMatchSeat(request: Request, matchId: string): Promise<VerifiedMatchSeat | null> {
   const candidates = readGuestSessionCandidates(request.headers);
   const sideSecrets = readSideSecretsFromCookies(request.headers);
   for (const candidate of candidates) {
+    const playerSecret = candidate.sessionSecret || (candidate.side ? sideSecrets[candidate.side] : undefined);
     const payload: Record<string, string> = {
       matchId,
       guestId: candidate.guestId,
     };
     if (candidate.sessionToken) {
       payload.sessionToken = candidate.sessionToken;
-    } else if (candidate.sessionSecret) {
-      payload.sessionSecret = candidate.sessionSecret;
-    } else {
-      const side = resolveCandidateSide(candidate.guestId, candidates);
-      const secret = side ? sideSecrets[side] : undefined;
-      if (secret) {
-        payload.sessionSecret = secret;
-      }
+    } else if (playerSecret) {
+      payload.sessionSecret = playerSecret;
     }
 
     try {
@@ -172,27 +181,35 @@ async function requestOwnsMatchSeat(request: Request, matchId: string): Promise<
       }
       const claim = await response.json() as MatchClaimResponse;
       if (normalize(claim.matchId) === normalize(matchId) && normalize(claim.guestId) === normalize(candidate.guestId) && isRecoverableClaimStatus(claim.status)) {
-        return true;
+        // A session token establishes platform ownership but cannot scope the
+        // match-service response on its own. Do not downgrade to a broad
+        // snapshot when the browser lacks the seat's player secret.
+        return playerSecret ? { guestId: candidate.guestId, playerSecret } : null;
       }
     } catch {
       continue;
     }
   }
-  return false;
+  return null;
 }
 
-function readGuestSessionCandidates(headers: Headers): Array<{ guestId: string; sessionToken?: string; sessionSecret?: string }> {
+function readGuestSessionCandidates(headers: Headers): Array<{ guestId: string; sessionToken?: string; sessionSecret?: string; side?: 'white' | 'black' }> {
   const sides = ['white', 'black'] as const;
-  const candidates = sides.map((side) => ({
-    guestId: normalize(headers.get(`x-chess404-${side}-guest-id`)),
-    sessionToken: normalize(headers.get(`x-chess404-${side}-session-token`)) || undefined,
-    sessionSecret: normalize(headers.get(`x-chess404-${side}-session-secret`)) || undefined,
+  const candidates: Array<{ guestId: string; sessionToken?: string; sessionSecret?: string; side?: 'white' | 'black' }> = sides.map((side) => ({
+    side,
+    // IDs, session tokens, and session secrets are opaque values. In
+    // particular, tokens and secrets may be base64url values, where changing
+    // case changes the credential. Normalize only when comparing identifiers,
+    // never while forwarding an authentication value.
+    guestId: trimValue(headers.get(`x-chess404-${side}-guest-id`)),
+    sessionToken: trimValue(headers.get(`x-chess404-${side}-session-token`)) || undefined,
+    sessionSecret: trimValue(headers.get(`x-chess404-${side}-session-secret`)) || undefined,
   })).filter((candidate) => candidate.guestId);
 
-  const generic = {
-    guestId: normalize(headers.get('x-chess404-guest-id')),
-    sessionToken: normalize(headers.get('x-chess404-session-token')) || undefined,
-    sessionSecret: normalize(headers.get('x-chess404-session-secret')) || undefined,
+  const generic: { guestId: string; sessionToken?: string; sessionSecret?: string } = {
+    guestId: trimValue(headers.get('x-chess404-guest-id')),
+    sessionToken: trimValue(headers.get('x-chess404-session-token')) || undefined,
+    sessionSecret: trimValue(headers.get('x-chess404-session-secret')) || undefined,
   };
   if (generic.guestId) {
     candidates.push(generic);
@@ -212,28 +229,6 @@ function readSideSecretsFromCookies(headers: Headers): Record<'white' | 'black',
   };
 }
 
-function resolveCandidateSide(guestId: string, candidates: Array<{ guestId: string }>): 'white' | 'black' | undefined {
-  if (candidates.length >= 2 && normalize(candidates[0].guestId) === normalize(guestId)) return 'white';
-  if (candidates.length >= 2 && normalize(candidates[1].guestId) === normalize(guestId)) return 'black';
-  if (candidates.length === 1) {
-    return candidates[0].guestId === guestId ? 'white' : undefined;
-  }
-  return undefined;
-}
-
-function ownsMatchSeatByGuestId(request: Request, snapshot: MatchSnapshotResponse): boolean {
-  const match = snapshot.match ?? {};
-  const whiteGuestId = normalize(match.whiteGuestId);
-  const blackGuestId = normalize(match.blackGuestId);
-  if (!whiteGuestId && !blackGuestId) return false;
-
-  const requestWhiteGuestId = normalize(request.headers.get('x-chess404-white-guest-id'));
-  const requestBlackGuestId = normalize(request.headers.get('x-chess404-black-guest-id'));
-
-  return (!!requestWhiteGuestId && requestWhiteGuestId === whiteGuestId) ||
-         (!!requestBlackGuestId && requestBlackGuestId === blackGuestId);
-}
-
 function isRecoverableClaimStatus(status?: string): boolean {
   const value = normalize(status);
   return value === 'waiting' || value === 'active';
@@ -249,6 +244,10 @@ function isLocalRequest(request: Request): boolean {
 
 function normalize(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function trimValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function noStoreHeaders(): Headers {

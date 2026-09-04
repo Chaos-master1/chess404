@@ -127,6 +127,7 @@ func createGatewayPrivateMatchForSession(
 		WaitingForOpponent: snapshot.Match.Status == "waiting",
 		Snapshot:           snapshot,
 		Claim:              sanitizeSeatClaim(claim),
+		GuestSession:       session,
 	}, http.StatusCreated, nil
 }
 
@@ -193,6 +194,7 @@ func joinGatewayPrivateMatch(config GatewayConfig, client *http.Client, matchID 
 		WaitingForOpponent: joined.WaitingForOpponent,
 		Snapshot:           joined.Match,
 		Claim:              sanitizeSeatClaim(claim),
+		GuestSession:       session,
 	}, http.StatusOK, nil
 }
 

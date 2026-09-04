@@ -386,17 +386,14 @@ func (s *Service) MarkDisconnected(matchID string, playerID string, playerSecret
 	return nil
 }
 
-// redactPlayerSecret returns a short fingerprint of a player
-// secret so logs are useful for debugging without exposing the full
-// secret. Empty string becomes "<empty>".
+// redactPlayerSecret keeps bearer credentials out of logs entirely. A prefix
+// is credential material too, so use one fixed marker for every non-empty
+// value. Empty string remains distinguishable for configuration diagnostics.
 func redactPlayerSecret(s string) string {
 	if s == "" {
 		return "<empty>"
 	}
-	if len(s) <= 6 {
-		return s[:1] + "***"
-	}
-	return s[:6] + "...len=" + strconv.Itoa(len(s))
+	return "<redacted>"
 }
 
 // Subscribe attaches a snapshot stream for a viewer. playerSecret must prove

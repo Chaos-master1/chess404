@@ -154,6 +154,7 @@ type GatewayPrivateMatchResponse struct {
 	WaitingForOpponent bool                            `json:"waitingForOpponent"`
 	Snapshot           contracts.MatchSnapshotResponse `json:"snapshot"`
 	Claim              *GatewaySeatClaim               `json:"claim,omitempty"`
+	GuestSession       *platform.GuestSession          `json:"guestSession,omitempty"`
 }
 
 type GatewayDirectChallengeRequest struct {

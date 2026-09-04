@@ -51,6 +51,16 @@ func TestResolveInternalServiceURLTrimsWhitespace(t *testing.T) {
 	}
 }
 
+func TestRedactSecretNeverIncludesCredentialMaterial(t *testing.T) {
+	secret := "MixedCase-Bearer-Secret"
+	if got := redactSecret(secret); got != "<redacted>" {
+		t.Fatalf("expected a fixed redaction marker, got %q", got)
+	}
+	if got := redactSecret(""); got != "<empty>" {
+		t.Fatalf("expected empty secret marker, got %q", got)
+	}
+}
+
 func TestGatewayStatusAggregatesHealthyServices(t *testing.T) {
 	matchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "service": "match-service"})
@@ -587,6 +597,9 @@ func TestGatewayCreatesPrivateMatch(t *testing.T) {
 	if payload.MatchID != "private-room-1" || payload.SeatColor != "white" || !payload.WaitingForOpponent {
 		t.Fatalf("unexpected private room create payload: %#v", payload)
 	}
+	if payload.GuestSession == nil || payload.GuestSession.Guest.GuestID != "white-guest" || payload.GuestSession.SessionSecret == "" {
+		t.Fatal("expected create response to return the resolved guest session")
+	}
 }
 
 func TestGatewayJoinsPrivateMatch(t *testing.T) {
@@ -680,6 +693,9 @@ func TestGatewayJoinsPrivateMatch(t *testing.T) {
 	}
 	if payload.MatchID != "private-room-2" || payload.SeatColor != "black" || payload.WaitingForOpponent {
 		t.Fatalf("unexpected private room join payload: %#v", payload)
+	}
+	if payload.GuestSession == nil || payload.GuestSession.Guest.GuestID != "black-guest" || payload.GuestSession.SessionSecret == "" {
+		t.Fatal("expected join response to return the resolved guest session")
 	}
 }
 
@@ -803,6 +819,9 @@ func TestGatewayCreatesPrivateRematchRoom(t *testing.T) {
 	}
 	if payload.MatchID != "private-room-rematch-1" || payload.SeatColor != "black" || !payload.WaitingForOpponent {
 		t.Fatalf("unexpected private rematch payload: %#v", payload)
+	}
+	if payload.GuestSession == nil || payload.GuestSession.Guest.GuestID != "black-guest" || payload.GuestSession.SessionSecret == "" {
+		t.Fatal("expected rematch response to return the resolved guest session")
 	}
 }
 
@@ -1351,7 +1370,8 @@ func TestGatewayIntentProxyResolvesClaimToken(t *testing.T) {
 		"intent":{
 			"type":"offer_draw",
 			"matchId":"room-intents",
-			"playerId":"ignored-client-id",
+			"playerId":"",
+			"playerSecret":"stale-client-secret",
 			"playerClaimToken":"claimtok_gateway"
 		}
 	}`))
@@ -1426,7 +1446,8 @@ func TestGatewayPresenceProxyResolvesClaimToken(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/matches/room-presence/presence", strings.NewReader(`{
-		"playerId":"ignored-client-id",
+		"playerId":"",
+		"playerSecret":"stale-client-secret",
 		"playerClaimToken":"claimtok_presence"
 	}`))
 	req.Header.Set("Content-Type", "application/json")

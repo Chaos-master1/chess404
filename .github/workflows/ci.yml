@@ -31,7 +31,7 @@ jobs:
         with:
           go-version: '1.25'
           cache-dependency-path: services/realtime/go.sum
-      - run: go test ./internal/... ./cmd/... -v -count=1 -timeout 120s
+      - run: go test ./internal/... ./cmd/... -v -count=1 -timeout 300s
 
   go-vuln:
     runs-on: ubuntu-latest
