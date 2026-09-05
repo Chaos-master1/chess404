@@ -35,7 +35,8 @@ describe('private match snapshot route', () => {
           guestId: 'White-Guest',
           sessionSecret: 'White-Session-Secret',
         });
-        return new Response(JSON.stringify({ matchId, guestId: 'White-Guest', status: 'active' }));
+        // Mirrors the real IssuedMatchSeatClaim payload, which has no status field.
+        return new Response(JSON.stringify({ matchId, guestId: 'White-Guest' }));
       }
       expect(url).toBe(matchUrl);
       const headers = new Headers(init?.headers);

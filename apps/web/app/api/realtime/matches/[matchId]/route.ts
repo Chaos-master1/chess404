@@ -180,7 +180,11 @@ async function resolveVerifiedMatchSeat(request: Request, matchId: string): Prom
         continue;
       }
       const claim = await response.json() as MatchClaimResponse;
-      if (normalize(claim.matchId) === normalize(matchId) && normalize(claim.guestId) === normalize(candidate.guestId) && isRecoverableClaimStatus(claim.status)) {
+      // The platform claims route only answers 200 while the claimed match is
+      // still active (it 404s finished matches itself), and the claim payload
+      // carries no status field -- a matched matchId + guestId pair is the
+      // complete ownership proof.
+      if (normalize(claim.matchId) === normalize(matchId) && normalize(claim.guestId) === normalize(candidate.guestId)) {
         // A session token establishes platform ownership but cannot scope the
         // match-service response on its own. Do not downgrade to a broad
         // snapshot when the browser lacks the seat's player secret.
@@ -227,11 +231,6 @@ function readSideSecretsFromCookies(headers: Headers): Record<'white' | 'black',
     white: parse('session_secret_white'),
     black: parse('session_secret_black'),
   };
-}
-
-function isRecoverableClaimStatus(status?: string): boolean {
-  const value = normalize(status);
-  return value === 'waiting' || value === 'active';
 }
 
 function isLocalRequest(request: Request): boolean {
