@@ -23,6 +23,7 @@ import {
   readStoredActiveMatchId,
   writeStoredActiveMatchId,
   clearRequestedMatchQuery,
+  resolveGuestSessionWrite,
 } from '../lib/session-storage';
 import {
   readStoredRoomMeta,
@@ -216,10 +217,14 @@ export function usePlatformState(props: UsePlatformStateProps) {
     black?: { guest: GuestProfile; sessionSecret: string; sessionToken?: string; expiresAt?: string };
   }) => {
     if (guestSessions?.white) {
-      guestSessionSecretsRef.current.white = guestSessions.white.sessionSecret;
-      writeStoredGuestIdentity('white', guestSessions.white.guest.guestId, guestSessions.white.sessionSecret, {
-        sessionToken: guestSessions.white.sessionToken ?? null,
-        sessionExpiresAt: guestSessions.white.expiresAt ?? null,
+      const resolved = resolveGuestSessionWrite(
+        { guestId: guestSessions.white.guest.guestId, sessionSecret: guestSessions.white.sessionSecret, sessionToken: guestSessions.white.sessionToken, sessionExpiresAt: guestSessions.white.expiresAt },
+        readStoredGuestIdentity('white'),
+      );
+      guestSessionSecretsRef.current.white = resolved.sessionSecret;
+      writeStoredGuestIdentity('white', resolved.guestId, resolved.sessionSecret, {
+        sessionToken: resolved.sessionToken,
+        sessionExpiresAt: resolved.sessionExpiresAt ?? null,
       });
       setWhiteProfile(guestSessions.white.guest);
     }
@@ -227,10 +232,14 @@ export function usePlatformState(props: UsePlatformStateProps) {
       if (hostedRuntime) {
         setBlackProfile((current: any) => current ?? guestSessions.black?.guest ?? null);
       } else {
-        guestSessionSecretsRef.current.black = guestSessions.black.sessionSecret;
-        writeStoredGuestIdentity('black', guestSessions.black.guest.guestId, guestSessions.black.sessionSecret, {
-          sessionToken: guestSessions.black.sessionToken ?? null,
-          sessionExpiresAt: guestSessions.black.expiresAt ?? null,
+        const resolved = resolveGuestSessionWrite(
+          { guestId: guestSessions.black.guest.guestId, sessionSecret: guestSessions.black.sessionSecret, sessionToken: guestSessions.black.sessionToken, sessionExpiresAt: guestSessions.black.expiresAt },
+          readStoredGuestIdentity('black'),
+        );
+        guestSessionSecretsRef.current.black = resolved.sessionSecret;
+        writeStoredGuestIdentity('black', resolved.guestId, resolved.sessionSecret, {
+          sessionToken: resolved.sessionToken,
+          sessionExpiresAt: resolved.sessionExpiresAt ?? null,
         });
         setBlackProfile(guestSessions.black.guest);
       }

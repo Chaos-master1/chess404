@@ -128,6 +128,25 @@ export function readStoredGuestIdentity(side: 'white' | 'black'): {
   return { guestId, sessionSecret, sessionToken, sessionExpiresAt };
 }
 
+// The gateway redacts the session secret/token in a bootstrap response when it
+// just resumed the caller's own stored credentials (the browser is assumed to
+// still hold them). Persisting that redacted session verbatim would destroy
+// the only copy of the secret, so a resume-ack for the same guest id keeps the
+// stored credentials; a minted or replaced session (different guest id, or a
+// secret actually present) overwrites as before.
+export function resolveGuestSessionWrite(
+  incoming: { guestId: string; sessionSecret?: string; sessionToken?: string; sessionExpiresAt?: string },
+  stored: { guestId?: string; sessionSecret?: string; sessionToken?: string },
+): { guestId: string; sessionSecret: string; sessionToken: string | null; sessionExpiresAt?: string } {
+  const isResumeAck = !incoming.sessionSecret && !!stored.sessionSecret && stored.guestId === incoming.guestId;
+  return {
+    guestId: incoming.guestId,
+    sessionSecret: incoming.sessionSecret || (isResumeAck ? stored.sessionSecret! : ''),
+    sessionToken: incoming.sessionToken || (isResumeAck ? stored.sessionToken ?? null : null),
+    sessionExpiresAt: incoming.sessionExpiresAt,
+  };
+}
+
 export function writeStoredGuestIdentity(
   side: 'white' | 'black',
   guestId: string,
