@@ -60,12 +60,15 @@ came from using the full dataset, but the data itself is the bottleneck.
 
 ## Next step (started 2026-09-06)
 
-Fresh self-play from a deeper decider, then retrain and re-gauntlet:
+Fresh self-play from a deeper decider, then retrain and re-gauntlet. Fixed
+depth 6 proved impractically slow (PIMC hand-sampling multiplies the search;
+not one game finished in 12 minutes), so the run uses a time budget instead —
+5× the old data's 200 ms/move, ~2-4 min/game, started 2026-09-06:
 
 ```bash
-go run ./cmd/nnue-selfplay -games 150 -depth 6 -plies 140 -seed 202 \
-  -out internal/engine/nnue/pytrainer/selfplay_depth6.jsonl
-python3 train.py selfplay_depth6.jsonl trained-v3.bin
+go run ./cmd/nnue-selfplay -games 120 -ms-per-move 1000 -plies 140 -seed 202 \
+  -out internal/engine/nnue/pytrainer/selfplay_1s.jsonl
+python3 train.py selfplay_1s.jsonl trained-v3.bin
 NNUE_WEIGHTS_PATH=../nnue/pytrainer/trained-v3.bin \
   go test ./internal/engine/search/ -run TestNNUEEvalScaleAndSign -v
 go run ./cmd/nnue-gauntlet -weights internal/engine/nnue/pytrainer/trained-v3.bin -games 40

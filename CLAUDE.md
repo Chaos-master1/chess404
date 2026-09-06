@@ -120,7 +120,12 @@ property it guards was verified live server-side on 2026-09-06: a
 play_card → select_target intent sequence returned 200 and the dealt hand
 shrank 3 → 2 across fresh authenticated snapshot reads. Repairing the spec's
 canvas-target interaction (edge squares are the suspects) is follow-up work,
-not a launch blocker. Mimosa deep-scan triage is done
+not a launch blocker. Full-suite state after the fixes: 25 of 27 specs pass
+against production; `card-play` (above) and `multiplayer` casual-queue
+pairing fail — both browsers create real tickets, the second never
+transitions to a match (matchmaking pairing/second-joiner transition needs a
+dedicated diagnosis; casual PvP is not part of this gate's required flow).
+Mimosa deep-scan triage is done
 ([docs/audits/2026-09-06-mimosa-scan-triage.md](docs/audits/2026-09-06-mimosa-scan-triage.md);
 152 findings, all dispositioned, no code changes required).
 
