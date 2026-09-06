@@ -34,17 +34,13 @@ Actions): `BACKUP_DATABASE_URL`, `BACKUP_AWS_S3_BUCKET`,
 (`BACKUP_AWS_REGION` optional). The Postgres URL must be reachable from
 GitHub runners (Railway Postgres needs public networking enabled).
 
-## 3. match-service deploy may be stale
+## 3. match-service deploy may be stale — RESOLVED 2026-09-06
 
-The 2026-08-24 audit found `match-service` still on `a8ae5bc` (missing the
-hosted-queue seat-secret fix) with two FAILED builds, while the rest of the
-project was on `74da367`. Railway auto-deploy does not reliably fire on push
-— every deploy in that pass had to be triggered by re-pointing the service
-source.
-
-**Action:** Railway dashboard → `match-service` → Deployments → confirm the
-running deployment matches the current `main` SHA after this PR merges;
-trigger a deploy manually and watch the build if it lags.
+All four services (web, gateway, match-service, platform-service) verified
+deployed from current `main` via the Railway CLI (SUCCESS deployments at
+2026-09-06 02:22 on commit `5812b67`). Auto-deploy has fired on every push to
+`main` since 2026-09-04; keep an eye on the dashboard after pushes, but the
+August failure mode has not recurred.
 
 ## 4. Moderation admin (optional, quick)
 
@@ -56,11 +52,16 @@ no moderation admin at all.
 **Action (if you want a moderator):** Railway → `platform-service` → set
 `PLATFORM_ADMIN_HANDLES=<your handle>` (or `PLATFORM_ADMIN_ACCOUNT_IDS`).
 
-## 5. Security scan report exists; triage still pending
+## 5. Security scan triage — DONE 2026-09-06
 
-A full mimosa scan ran 2026-09-02 (sealed, 43 findings: 16 high / 27 medium).
-A quick pass judged the highs to be false positives on local dev tooling and
-third-party minified Stockfish JS (report:
-`~/.mimosa/security-scans/project-1d379e255e279db4efa9c218/scan-2026-09-02T20-24-23.402Z-9e1bf79c8efe/report.md`),
-but a deliberate pre-launch triage pass has **not** been done. Do not treat
-the scanner's silence (or this note) as evidence the platform is secure.
+A fresh sealed deep scan ran 2026-09-06 (`scan-2026-09-06T00-49-28.313Z-5b852ec787cb`,
+152 findings: 49 high / 103 medium) and every finding was dispositioned —
+the bulk are scanner artifacts on untracked Playwright trace-viewer assets
+and vendored minified Stockfish JS; the first-party findings were reviewed
+individually (parameterized SQL, config-derived internal URLs, client-side
+same-origin fetches). Full dispositions:
+[docs/audits/2026-09-06-mimosa-scan-triage.md](../audits/2026-09-06-mimosa-scan-triage.md).
+The 2026-09-02 quick pass is superseded. Note: the workspace commit hook
+(`mimosa` L3) still hard-blocks commits on two of the triaged false positives
+(`pytrainer/network.py`, `anticheat/stockfish.go`) and has no suppression
+mechanism — commits go through the GitHub API until that is adjusted.

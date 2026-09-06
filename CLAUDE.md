@@ -92,27 +92,37 @@ node packages/game-core/scripts/sync-cards-json.mjs
 
 ## Current status (2026-08-24)
 
-### Release gate — 2026-09-04
+### Release gate — 2026-09-04 → verified 2026-09-06
 
-**Do not launch yet.** Direct Playwright coverage against the live Railway site
-found that a new computer match can fail to submit its first action with
-`unrecognized player id` / `unauthorized player secret`; after resignation,
-the expected archived replay was absent. Public health probes remain green, so
-those probes are not a launch sign-off.
+The pre-launch RC (`05e16e3`, incl. `7fc4180`) was deployed to all four
+services on 2026-09-04 (auto-deploy worked; every deployment shows SUCCESS on
+the merge commit). The 2026-09-06 production E2E run then found three real
+defects in the RC, each fixed and verified live the same day:
 
-The working tree now contains a focused repair (not deployed): the web façade
-automatically bootstraps routed matches, hydrates the authoritative seat ID,
-secret and claim before enabling hosted traffic, and activates the existing
-stream/presence/reconnect path; the gateway returns and the browser persists a
-replacement guest session; incomplete identity plus a claim token is resolved
-defensively by the gateway. Private snapshot reads now verify platform seat
-ownership before forwarding a case-preserved player credential to the match
-service, while fresh direct-match invitees join through the gateway before a
-private read. The standard web check now runs its Vitest suite (11 tests),
-`pnpm lint`, `pnpm test`, `pnpm build`, and the complete realtime `go test
-./... -count=1 -timeout 300s` suite pass locally on 2026-09-04. A controlled
-deploy and the same complete private/computer-match → finish → history/replay
-E2E flow must pass before this gate can be cleared.
+- **Private/computer match reads 404'd for their own owner** (board never
+  rendered). Two web bugs: the RC's snapshot route required a `claim.status`
+  field the platform claims API never emits (its own Vitest mocks fabricated
+  it), and the façade's bootstrap resume-ack overwrote the stored guest
+  secret with the redacted response, leaving later reads unauthenticated.
+  Fixed in `2e6dcac` + `c4e3601`.
+- **A finished match was listed in history but its replay 404'd.** The
+  platform archive's `Get`/`LoadMatch` served the in-memory overlay (stale
+  creation-time `status=active` from the gateway's creation sync) instead of
+  the finished Postgres row match-service writes directly at match end.
+  Fixed in `5812b67` (backend-first reads + regression test).
+
+Gate status after the fixes: **solo (computer match), private-invite, and
+history-replay specs pass against production** — the gate's required
+private/computer-match → finish → history/replay flow is green. The
+`card-play` spec still times out on UI automation (the played card never
+resolves through canvas target clicks within the spec's budget), but the
+property it guards was verified live server-side on 2026-09-06: a
+play_card → select_target intent sequence returned 200 and the dealt hand
+shrank 3 → 2 across fresh authenticated snapshot reads. Repairing the spec's
+canvas-target interaction (edge squares are the suspects) is follow-up work,
+not a launch blocker. Mimosa deep-scan triage is done
+([docs/audits/2026-09-06-mimosa-scan-triage.md](docs/audits/2026-09-06-mimosa-scan-triage.md);
+152 findings, all dispositioned, no code changes required).
 
 Remaining human/operations gates: configure a real SMTP provider (password
 reset still uses preview delivery), enable and verify database backups, appoint
@@ -161,6 +171,9 @@ Phase 1 (kernel): bitboards, magic sliders, make/unmake, full Zobrist hashing, c
 Phase 2 (combined search): `engine/actions` (unified Action type covering both chess moves and card plays — a representative subset of 7 mechanics: Freeze/Shield/Fortress/Lavaground/Unabomber/BlackHole/HalfFuse+FullFusion, not all 37; the other 30 are unmodeled by design, same posture as Fog) and `engine/search` (negamax/alpha-beta with cards as first-class tree nodes, a transposition table with correct exact/lower/upper bound handling, and PIMC fair-play search that samples a plausible opponent hand from the real rarity-weighted 37-card pool rather than ever reading the actual hidden hand). The card-tactics suite (`engine/search/cardtactics_test.go` + `search_test.go`) proves the headline capability directly: the search finds Freeze-then-capture, Shield-saves-a-hanging-piece, and Fusion-enables-an-otherwise-impossible-capture, and a direct empirical test confirms the CURRENT PRODUCTION engine (`internal/engine/v1/opponent.go`) cannot find the same Freeze+capture coordination even though it can mechanically play the card, because it scores cards and moves on independent scales and never re-examines the board after deciding to play a card. Two real bugs were caught and fixed while building this: card actions were silently double-negated in the search (freezing pieces backwards), and a card effect (Fusion) can rarely open a fresh attacking line onto the enemy king mid-turn, which the engine now handles as a decisive result instead of crashing.
 
 Remaining phases (per the plan file used to drive this work): Phase 3 (real quantized NNUE trained with actual card play, replacing Phase 2's placeholder material+overlay eval), Phase 4 (extract as its own scaled service, wire into match-service, live deploy). Pending-card/double-move turn-sequencing state remains unmodeled (the turn model is deliberately simplified to at-most-one-card-plus-one-move, tighter than internal/match's actual unbounded `card* move` structure).
+
+**Phase 3 status (2026-09-06):** the pipeline is verified end to end (encoder, weight format, Go/Python parity, gauntlet) but the Aug-9 dataset — 147k positions from depth-2 self-play — is the bottleneck: the retrained v2 network improved 0% → 3.75% vs the placeholder eval and still loses badly; deep-search positions are out of distribution and the material signal is too weak to drive search. Full diagnosis with baselines and next commands:
+[docs/audits/2026-09-06-phase3-nnue-diagnosis.md](docs/audits/2026-09-06-phase3-nnue-diagnosis.md). A deeper (depth-6) self-play generation is running; retrain + re-gauntlet is the next engine session's first task. `internal/engine/search/nnue_scale_test.go` now guards the eval's sign/scale.
 
 **Known remaining gaps (2026-08-24, unfixed):**
 - The gateway's `syncMatchSnapshotToPlatformService` only fires at match creation/join, never at match end — but this does not break archiving, because match-service writes finished snapshots straight to the same Postgres `archives` table via `persistSnapshot`. Verified end to end: a resigned casual match is archived, replayable and listed within seconds.
