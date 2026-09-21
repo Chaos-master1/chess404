@@ -72,10 +72,18 @@ test.describe('card play', () => {
       throw new Error('live match stream stuck on "Reconnecting..." for 60s (zombie-stream regression)');
     }
 
-    // Try to use ONE viewer card: returns true if the hand shrank (the server
-    // resolved a card). Iterates the viewer's cards first; when "Use" is
-    // disabled the turn belongs to the engine, so bail out cheaply instead of
-    // sweeping targets against a locked card.
+    // While a card is pending the hand container is swapped out by the
+    // target-selection panel ({cardPending ? ... : ...}), so a bare hand count
+    // can drop spuriously. Only trust the count once no pending panel is up.
+    async function pendingPanelVisible(): Promise<boolean> {
+      return page.getByText('✕ cancel', { exact: false }).isVisible().catch(() => false);
+    }
+
+    // Try to use ONE viewer card: returns true if the hand shrank with no
+    // pending panel active (the server resolved and consumed a card).
+    // Iterates the viewer's cards first; when "Use" is disabled the turn
+    // belongs to the engine, so bail out cheaply instead of sweeping targets
+    // against a locked card.
     async function tryUseOneCard(): Promise<boolean> {
       const count = await viewerHand.count();
       for (let i = count - 1; i >= 0; i--) {
@@ -93,12 +101,14 @@ test.describe('card play', () => {
         }
         await use.click();
         for (const target of targets) {
-          if ((await viewerHand.count()) < count) return true;
+          if (!(await pendingPanelVisible()) && (await viewerHand.count()) < count) return true;
           await clickSquare(page, target);
           await page.waitForTimeout(600);
         }
-        if ((await viewerHand.count()) < count) return true;
+        // Clear any half-armed pending card, then re-measure on the real hand.
         await cancelPendingCard();
+        await page.waitForTimeout(1_000);
+        if (!(await pendingPanelVisible()) && (await viewerHand.count()) < count) return true;
       }
       return false;
     }
