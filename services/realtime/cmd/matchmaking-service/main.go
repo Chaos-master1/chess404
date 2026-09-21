@@ -349,13 +349,26 @@ func checkAccountRestriction(ctx context.Context, baseURL, token, accountID stri
 	return payload.Restricted, payload.RestrictionKind
 }
 
+// resolveInternalServiceURL normalizes the misconfigured-Railway-variable
+// shapes production has actually shipped. It mirrors the gateway's resolver
+// (gateway_util.go): unresolved "${{...}}" template text falls back to the
+// default, and a hostname with no port (the trailing-colon shape Railway
+// stores when a private-domain variable is set by hand) gets the default
+// port appended. The previous version here DISCARDED any configured
+// *.railway.internal URL and fell back to the compose-style default, which
+// does not resolve on Railway -- matchmaking then dialed port 80 of the
+// internal hostname, CreateMatch failed, and the queue silently deleted
+// both paired tickets on every pairing attempt.
 func resolveInternalServiceURL(explicit, fallback string) string {
 	value := strings.TrimRight(strings.TrimSpace(explicit), "/")
 	if value == "" {
 		return strings.TrimRight(strings.TrimSpace(fallback), "/")
 	}
-	if strings.HasSuffix(strings.ToLower(value), ".railway.internal") {
+	if strings.Contains(value, "${{") {
 		return strings.TrimRight(strings.TrimSpace(fallback), "/")
+	}
+	if strings.HasSuffix(value, ":") {
+		value += "8080"
 	}
 	return value
 }
