@@ -64,7 +64,19 @@ func applyPlayCard(state *contracts.MatchState, intent contracts.PlayerIntent, n
 		return nil, errors.New("resolve the active double move before playing another card")
 	}
 	if state.PendingCard != nil {
-		return nil, errors.New("resolve the pending card target first")
+		// The pending card still sits in its owner's hand (it is only removed
+		// when its target resolves), so re-playing by the SAME player is an
+		// implicit abandon-and-switch: clear the old pending state and proceed
+		// with the newly chosen card. Without this, a client that dismisses a
+		// pending card without sending cancel_card (old bundles, a dropped
+		// cancel request) deadlocked the match: every later play_card bounced
+		// with "resolve the pending card target first" forever -- 44 consecutive
+		// rejections observed live in production. The opponent's pending card
+		// stays protected.
+		if state.PendingCard.OwnerColor != owner {
+			return nil, errors.New("resolve the pending card target first")
+		}
+		state.PendingCard = nil
 	}
 
 	card, found := cardFromHand(state, owner, intent.CardID)
