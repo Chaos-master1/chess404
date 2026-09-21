@@ -14,6 +14,7 @@ import {
   writeStoredGuestIdentity,
 } from '../lib/session-storage';
 import { joinPrivateMatch } from '../lib/private-match-service';
+import { buildPendingCardFromSnapshot as buildPendingCardFromSnapshotShared } from '../lib/pending-card-from-snapshot';
 import { cloneBoard, positionKey, toFEN, gameStatus, insuffMat } from '../chessEngine';
 import { OPP } from '../constants';
 import type { GuestProfile, MatchSeatClaim } from '../lib/platform-service';
@@ -199,29 +200,9 @@ export function useGameState(
     pending: import('@chess404/contracts').MatchState['pendingCard'],
     whiteCards: GameCard[],
     blackCards: GameCard[],
-  ): CardPendingState => {
-    if (!pending || pending.mechanic === 'joker') return null;
-    const ownerCards = pending.ownerColor === 'white' ? whiteCards : blackCards;
-    const card = ownerCards.find(item => item.id === pending.cardId);
-    if (!card) return null;
-    return {
-      card,
-      playerColor: pending.ownerColor as PieceColor,
-      mechanic: pending.mechanic as CardMechanic,
-      step: pending.target ? 2 : 1,
-      data: {
-        sq: pending.target ?? undefined,
-        from: pending.mechanic === 'teleport' || pending.mechanic === 'jump' || pending.mechanic === 'clone' ? (pending.target ?? undefined) : undefined,
-        sq1: ['swapme', 'swapus', 'swaphim', 'halffuse', 'fullfusion'].includes(pending.mechanic) ? (pending.target ?? undefined) : undefined,
-        hostSq: pending.mechanic === 'parasite' ? (pending.target ?? undefined) : undefined,
-        type1: pending.mechanic === 'halffuse' || pending.mechanic === 'fullfusion' ? (pending.options?.[0] as PieceType | undefined) : undefined,
-        selected: pending.mechanic === 'smallsacrifice' || pending.mechanic === 'bigsacrifice'
-          ? (pending.options ?? []).map(v => { const [r, c] = v.split(',').map(Number); return { row: r, col: c }; }).filter(sq => Number.isInteger(sq.row) && Number.isInteger(sq.col))
-          : undefined,
-        options: pending.options ?? undefined,
-      },
-    };
-  }, []);
+  ): CardPendingState =>
+    buildPendingCardFromSnapshotShared(pending, whiteCards, blackCards),
+  []);
 
   const applyAuthoritativeSnapshot = React.useCallback((snapshot: MatchSnapshotMessage) => {
     if (snapshot.seqNum != null && snapshot.seqNum <= lastAppliedSeqNumRef.current) return;

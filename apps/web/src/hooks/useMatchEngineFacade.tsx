@@ -38,6 +38,7 @@ import {
   writeStoredRoomMeta,
 } from '../lib/match-service';
 import { joinPrivateMatch, rematchPrivateMatch } from '../lib/private-match-service';
+import { buildPendingCardFromSnapshot } from '../lib/pending-card-from-snapshot';
 import {
   type GuestProfile,
 } from '../lib/platform-service';
@@ -487,6 +488,17 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
     if (match.whiteHand) setWhiteHand(match.whiteHand as GameCard[]);
     if (match.blackHand) setBlackHand(match.blackHand as GameCard[]);
+
+    // Re-sync the pending-card UI from the authoritative snapshot. Without
+    // this, a play_card intent response or a post-reconnect snapshot restores
+    // the board/hands but not the armed target selection -- the server keeps
+    // the pending card while the client shows nothing, so the card can never
+    // be completed (and every other card click bounces off it).
+    setCardPending(buildPendingCardFromSnapshot(
+      match.pendingCard ?? null,
+      (match.whiteHand as GameCard[] | undefined) ?? [],
+      (match.blackHand as GameCard[] | undefined) ?? [],
+    ));
     if (match.lavaSquares) setLavaSquares(match.lavaSquares as any);
     if (match.fogZones) setFogZones(match.fogZones as any);
     if (match.fortressZones) setFortressZones(match.fortressZones as any);
@@ -500,7 +512,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setClockActive(true);
       setTicking(match.turn);
     }
-  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;
