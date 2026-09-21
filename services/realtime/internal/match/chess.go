@@ -151,6 +151,57 @@ func firstLegalMoveForColor(board [][]*contracts.Piece, color string, lastMove *
 	return contracts.Square{}, contracts.Square{}, false
 }
 
+// firstLegalMoveForColorConstrained is ensureComputerMadeProgressLocked's
+// fallback: like firstLegalMoveForColor, but it also honors the active
+// double-move constraint ("same" must move the tracked piece again, "diff"
+// must move a different piece) -- the unconstrained variant could return a
+// move applyMove then rejects, which previously produced the log line
+// "fallback legal move rejected: twin double move requires moving a
+// different piece" and left the match stuck on black's turn.
+func firstLegalMoveForColorConstrained(state *contracts.MatchState) (contracts.Square, contracts.Square, bool) {
+	movedSet := sliceToSet(state.Moved)
+	board := state.Board
+	color := state.Turn
+	opponent := opposite(color)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece == nil || piece.Color != color {
+				continue
+			}
+			from := contracts.Square{Row: r, Col: c}
+			if state.DoubleMove != nil && state.DoubleMove.MovesLeft == 1 && state.DoubleMove.TrackedSq != nil {
+				tracked := *state.DoubleMove.TrackedSq
+				same := from.Row == tracked.Row && from.Col == tracked.Col
+				if state.DoubleMove.Type == "same" && !same {
+					continue
+				}
+				if state.DoubleMove.Type == "diff" && same {
+					continue
+				}
+			}
+			if piece.Frozen {
+				continue
+			}
+			moves := legalMovesWithFusion(board, from, state.LastMove, movedSet, state.FortressZones)
+			for _, move := range moves {
+				testBoard := cloneBoard(board)
+				moving := testBoard[from.Row][from.Col]
+				if moving == nil {
+					continue
+				}
+				captureEmptyDiagonal := moving.Type == "pawn" && move.Col != from.Col && pieceAt(board, move) == nil
+				movePiece(testBoard, from, move, moving, captureEmptyDiagonal)
+				king := findKing(testBoard, color)
+				if king != nil && !isAttackedWithFusion(testBoard, *king, opponent, state.FortressZones) {
+					return from, move, true
+				}
+			}
+		}
+	}
+	return contracts.Square{}, contracts.Square{}, false
+}
+
 func gameStatusWithFusion(board [][]*contracts.Piece, player string, lastMove *contracts.LastMove, moved map[string]struct{}, fortressZones []contracts.FortressZone) (bool, bool, bool) {
 	king := findKing(board, player)
 	if king == nil {

@@ -501,6 +501,10 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     ));
     if (match.lavaSquares) setLavaSquares(match.lavaSquares as any);
     if (match.fogZones) setFogZones(match.fogZones as any);
+    // Radar is now delivered server-side (the snapshot's opposing hand is
+    // replaced with real cards while radarRevealFor names this viewer), so
+    // mirror the flag into the UI each snapshot.
+    setRadarActive(Boolean(match.radarRevealFor));
     if (match.fortressZones) setFortressZones(match.fortressZones as any);
     if (match.bombPieces) setBombPieces(match.bombPieces as any);
 
@@ -512,7 +516,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setClockActive(true);
       setTicking(match.turn);
     }
-  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;

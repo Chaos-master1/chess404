@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
-	v1 "github.com/chess404/realtime/internal/engine/v1"
 	"github.com/chess404/realtime/internal/logging"
 	"github.com/chess404/realtime/internal/metrics"
 )
@@ -33,6 +33,16 @@ const (
 	maxIntentsPerSecondPerPlayer = 10
 	matchMapShards               = 32
 )
+
+// computerOpponentImpl selects the vs-computer brain: "search" (default)
+// uses the rebuilt engine stack for chess moves (v1 keeps cards), "v1" is
+// the legacy heuristic opponent kept as an instant rollback switch.
+var computerOpponentImpl = strings.ToLower(strings.TrimSpace(func() string {
+	if v := os.Getenv("COMPUTER_OPPONENT"); v != "" {
+		return v
+	}
+	return "search"
+}()))
 
 type matchShard struct {
 	mu      sync.RWMutex
@@ -56,7 +66,7 @@ type matchContainer struct {
 	presence *matchPresenceState
 	subs     map[chan contracts.MatchSnapshotResponse]string
 	seqNum   int64
-	computer *v1.ComputerOpponent
+	computer computerOpponent
 }
 
 func newMatchContainer(state *contracts.MatchState, events []contracts.ResolvedEvent, presence *matchPresenceState) *matchContainer {

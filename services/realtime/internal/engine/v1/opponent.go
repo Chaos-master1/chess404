@@ -245,6 +245,32 @@ func reverseIsCurrentlyLegal(state *contracts.MatchState, color string) bool {
 	return true
 }
 
+// MakeCardDecision returns a play_card intent when the card evaluator says a
+// card is worth playing this turn, and nil otherwise. It is exactly the card
+// block of MakeMove (same hand filtering, same difficulty gates), extracted
+// so composite opponents can ask for a card decision WITHOUT paying for the
+// full chess search MakeMove also runs.
+func (co *ComputerOpponent) MakeCardDecision(state *contracts.MatchState) *contracts.PlayerIntent {
+	// Card scoring reads WhiteHand/BlackHand straight off state; evaluate
+	// against a filtered copy so a card the computer cannot complete is never
+	// even a candidate, instead of catching the failure after the fact.
+	cardState := *state
+	cardState.WhiteHand = filterCurrentlyIllegalReverse(filterHandForComputer(state.WhiteHand), state, "white")
+	cardState.BlackHand = filterCurrentlyIllegalReverse(filterHandForComputer(state.BlackHand), state, "black")
+
+	if state.DoubleMove == nil && co.cardEval.ShouldPlayCard(&cardState, co.Color == "white") {
+		play := co.cardEval.BestCardToPlay(&cardState, co.Color == "white")
+		if play != nil && co.Difficulty.ShouldPlayCard(play.Card, play.Score) {
+			return &contracts.PlayerIntent{
+				Type:    "play_card",
+				MatchID: state.MatchID,
+				CardID:  play.Card.ID,
+			}
+		}
+	}
+	return nil
+}
+
 func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.PlayerIntent {
 	co.mu.Lock()
 	defer co.mu.Unlock()
@@ -260,29 +286,8 @@ func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.Pla
 	cardState.WhiteHand = filterCurrentlyIllegalReverse(filterHandForComputer(state.WhiteHand), state, "white")
 	cardState.BlackHand = filterCurrentlyIllegalReverse(filterHandForComputer(state.BlackHand), state, "black")
 
-	// A card can never be played while a double move is in progress
-	// (applyPlayCard's guard, match_cards.go:26-28: "resolve the active
-	// double move before playing another card") -- but nothing here checked
-	// state.DoubleMove before now, so ShouldPlayCard could still decide to
-	// play a newly-favourable card mid-double-move, submit it, and have it
-	// rejected outright by the real rules. Found by xgauntlet's E0
-	// cross-engine gauntlet: a real game failed with exactly that rejection.
-	// The consequence is silent, not a crash: autoPlayComputerDepthLimited
-	// (match_lifecycle.go) restores state on a rejected intent and returns,
-	// so the computer's second move of its own double move simply never
-	// happens that cycle -- the same "computer contributes nothing this
-	// turn" shape the original push-push-push bug had, just gated on a
-	// rarer precondition (a double move in progress at the moment a new
-	// card also scores high enough to want to play).
-	if state.DoubleMove == nil && co.cardEval.ShouldPlayCard(&cardState, co.Color == "white") {
-		play := co.cardEval.BestCardToPlay(&cardState, co.Color == "white")
-		if play != nil && co.Difficulty.ShouldPlayCard(play.Card, play.Score) {
-			return &contracts.PlayerIntent{
-				Type:    "play_card",
-				MatchID: state.MatchID,
-				CardID:  play.Card.ID,
-			}
-		}
+	if intent := co.MakeCardDecision(state); intent != nil {
+		return intent
 	}
 
 	// Probe opening book first (only in opening phase). Skipped entirely

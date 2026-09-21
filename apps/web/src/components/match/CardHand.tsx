@@ -30,6 +30,7 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
       overflow:'visible', zIndex:0,
     }}>
       {hand.map((card, i) => {
+        const key = card.id || `hidden-${i}`;
         const mid   = (hand.length - 1) / 2;
         const angle = hand.length > 1 ? ((i - mid) / Math.max(hand.length - 1, 1)) * spread : 0;
         const yOff  = hand.length > 1 ? Math.min(12, Math.abs(i - mid) * 3) : 0;
@@ -38,9 +39,13 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
         const isJokerCard = card.mechanic === 'joker';
 
         if (!isBottom) {
-          if (radarActive) {
+          // Face-down stubs from the server carry no card fields at all; they
+          // must never reach the radar renderer (RARITY_STYLE[card.rarity]
+          // would throw on an unknown rarity).
+          const isHiddenStub = !card.id && !card.mechanic && !card.rarity;
+          if (radarActive && !isHiddenStub) {
             return (
-              <div key={card.id} style={{
+              <div key={key} style={{
                 position:'absolute', top:`${yOff}px`,
                 left:`calc(50% + ${xOff}px - ${CW/2}px)`,
                 width:`${CW}px`, height:`${CH}px`,

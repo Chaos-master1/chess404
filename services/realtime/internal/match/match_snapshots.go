@@ -126,12 +126,48 @@ func FilterSnapshotForColor(resp contracts.MatchSnapshotResponse, color string) 
 	return resp
 }
 
+// hiddenHandStub returns one face-down placeholder for a hidden card. Every
+// CardDefinition field is neutral, so shipping it to the opposing seat leaks
+// no gameplay information -- only the count of cards in the hand.
+func hiddenHandStub() contracts.GameCard {
+	return contracts.GameCard{}
+}
+
+// stubHiddenHand returns n face-down placeholders (or nil when n <= 0).
+func stubHiddenHand(n int) []contracts.GameCard {
+	if n <= 0 {
+		return nil
+	}
+	hand := make([]contracts.GameCard, n)
+	for i := range hand {
+		hand[i] = hiddenHandStub()
+	}
+	return hand
+}
+
 func filterStateForColor(state contracts.MatchState, color string) contracts.MatchState {
 	state = redactSeatSecrets(state)
+
+	// The opposing hand must stay hidden, but a player still needs to see HOW
+	// MANY cards their opponent holds -- the local (in-process) game always
+	// rendered face-down card backs for the opponent. Ship per-card-neutral
+	// stubs so the client can draw card backs without learning any card
+	// identity. The one exception is radar: while RadarRevealFor names this
+	// viewer, the reveal is delivered server-side by replacing the stubs with
+	// the opponent's real cards. RadarRevealFor is cleared as soon as the
+	// viewer's turn ends, so a stale flag cannot keep the hand revealed.
 	if color == "white" {
-		state.BlackHand = nil
+		if state.RadarRevealFor == "white" {
+			// full reveal: keep BlackHand as-is
+		} else {
+			state.BlackHand = stubHiddenHand(len(state.BlackHand))
+		}
 	} else if color == "black" {
-		state.WhiteHand = nil
+		if state.RadarRevealFor == "black" {
+			// full reveal: keep WhiteHand as-is
+		} else {
+			state.WhiteHand = stubHiddenHand(len(state.WhiteHand))
+		}
 	} else {
 		state.WhiteHand = nil
 		state.BlackHand = nil

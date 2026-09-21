@@ -357,9 +357,15 @@ func TestApplyIntentHTTPResponseHidesOpponentHand(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("expected intent response to decode, got %v", err)
 	}
-	if len(resp.Match.BlackHand) != 0 {
-		t.Fatalf("expected the mover's (white) response to hide the opponent's (black) hand, got %d black cards: %+v",
-			len(resp.Match.BlackHand), resp.Match.BlackHand)
+	// The opposing hand ships as face-down stubs (count visible, identity
+	// hidden) -- the security property this test exists to enforce.
+	if len(resp.Match.BlackHand) == 0 {
+		t.Fatal("expected the mover's (white) response to carry the opponent's hand count as face-down stubs")
+	}
+	for i, stub := range resp.Match.BlackHand {
+		if stub.ID != "" || stub.Name != "" || stub.Mechanic != "" || stub.Rarity != "" {
+			t.Fatalf("opponent hand stub %d leaks card identity: %+v", i, stub)
+		}
 	}
 	if len(resp.Match.WhiteHand) == 0 {
 		t.Fatal("expected the mover's own (white) hand to still be visible in their own move response")

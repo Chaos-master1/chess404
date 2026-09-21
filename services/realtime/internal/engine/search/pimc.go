@@ -92,10 +92,30 @@ func FairPlaySearchTimed(p *core.Position, ov *core.CardOverlay, myHand actions.
 			if depth > 1 && time.Now().After(deadline) {
 				break
 			}
+			// The deadline must also be checked PER ROOT ACTION, not only
+			// between depths: a single depth iteration over every root
+			// action (up to 20+ moves plus one card action per held card --
+			// dozens of subtrees) can run many seconds against a
+			// milliseconds-scale per-sample budget, and the caller holds a
+			// live match's mutex for the whole search. A partially-searched
+			// depth is DISCARDED wholesale -- mixing depth-d scores for the
+			// first actions with depth-(d-1) scores for the rest would make
+			// the aggregate incomparable across actions, which is exactly
+			// what iterating all actions at one depth exists to prevent.
+			depthScores := make([]float64, len(root))
+			aborted := false
 			for i, a := range root {
+				if depth > 1 && time.Now().After(deadline) {
+					aborted = true
+					break
+				}
 				score := s.applyAndRecurse(p, ov, hands, myColor, a, true, depth, 1, -scoreInfinity, scoreInfinity)
-				lastCompleted[i] = float64(score)
+				depthScores[i] = float64(score)
 			}
+			if aborted {
+				break
+			}
+			copy(lastCompleted, depthScores)
 			if time.Now().After(deadline) {
 				break
 			}

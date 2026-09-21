@@ -108,8 +108,16 @@ func TestSubscribeRejectsWrongSecret(t *testing.T) {
 	if len(initial.Match.BlackHand) == 0 {
 		t.Fatal("black seat should receive its own hand")
 	}
-	if len(initial.Match.WhiteHand) != 0 {
-		t.Fatal("black seat must not receive the opponent's hand")
+	// The opposing hand ships as face-down stubs: the count must survive
+	// (so the seat can see how many cards the opponent holds) but no card
+	// identity may leak.
+	if len(initial.Match.WhiteHand) == 0 {
+		t.Fatal("black seat should still see the opposing hand count via face-down stubs")
+	}
+	for i, stub := range initial.Match.WhiteHand {
+		if stub.ID != "" || stub.Name != "" || stub.Mechanic != "" || stub.Rarity != "" {
+			t.Fatalf("opponent hand stub %d leaks card identity: %+v", i, stub)
+		}
 	}
 	if initial.Match.WhitePlayerSecret != "" || initial.Match.BlackPlayerSecret != "" {
 		t.Fatal("subscribe snapshot leaked a seat secret")

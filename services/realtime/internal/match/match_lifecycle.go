@@ -96,7 +96,11 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 
 	if string(req.ModeID) == "computer" {
 		diff := v1.ParseDifficulty(req.Difficulty)
-		c.computer = v1.NewComputerOpponent(diff, "black")
+		if computerOpponentImpl == "search" {
+			c.computer = newSearchOpponent(diff)
+		} else {
+			c.computer = v1.NewComputerOpponent(diff, "black")
+		}
 		state.BlackGuestID = "computer"
 		state.BlackName = computerDisplayName(req.Difficulty)
 		// requireIntentColor demands a matching secret before it will
@@ -559,7 +563,7 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 	}
 	c.state.PendingCard = nil
 
-	from, to, ok := firstLegalMoveForColor(c.state.Board, "black", c.state.LastMove, sliceToSet(c.state.Moved), c.state.FortressZones)
+	from, to, ok := firstLegalMoveForColorConstrained(c.state)
 	if !ok {
 		// No legal move at all -- genuine checkmate/stalemate, not a bug;
 		// the normal automatic-finish path (evaluated on the human's next
