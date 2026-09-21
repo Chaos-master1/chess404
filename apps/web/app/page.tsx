@@ -123,6 +123,18 @@ export default async function HomePage({
           </div>
         ))}
       </section>
+      <footer style={{
+        maxWidth: '1080px', margin: '0 auto', padding: '32px 20px 48px',
+        display: 'flex', gap: '20px', alignItems: 'center', justifyContent: 'center',
+        flexWrap: 'wrap', color: 'rgba(243,230,191,0.55)', fontSize: '13px',
+        borderTop: '1px solid rgba(255,190,90,0.12)', marginTop: '24px',
+      }}>
+        <span>© 2026 Chess404</span>
+        <span aria-hidden="true">·</span>
+        <Link href="/terms" style={{ color: '#ffbe5a', textDecoration: 'none' }}>Terms of Service</Link>
+        <span aria-hidden="true">·</span>
+        <Link href="/privacy" style={{ color: '#ffbe5a', textDecoration: 'none' }}>Privacy Policy</Link>
+      </footer>
     </div>
   );
 }

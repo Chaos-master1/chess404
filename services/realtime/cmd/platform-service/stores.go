@@ -191,6 +191,27 @@ func isRecoverableMatchStatus(status string) bool {
 }
 
 func buildMatchSeatClaim(matchState contracts.MatchState, guestID, fallbackSecret string) (platform.MatchSeatClaim, bool) {
+	claim, ok := buildMatchSeatClaimFromSnapshot(matchState, guestID, fallbackSecret)
+	if !ok {
+		return platform.MatchSeatClaim{}, false
+	}
+	// Snapshot-carried secrets are redacted placeholders: match-service
+	// strips seat secrets from everything it emits or persists, so a queue
+	// seat's server-generated secret only ever exists inside match-service.
+	// Ask it for the real credential (identity was already proven by the
+	// caller's guest-session resume) so the claim authenticates the player
+	// instead of failing every subsequent call with 400/401.
+	if seatSecretIsRedacted(claim.PlayerSecret) {
+		if secret, err := resolveMatchSeatSecret(matchState.MatchID, guestID); err == nil {
+			claim.PlayerSecret = secret
+		} else {
+			log.Printf("seat secret resolve failed for match=%s guest=%s: %v", matchState.MatchID, guestID, err)
+		}
+	}
+	return claim, true
+}
+
+func buildMatchSeatClaimFromSnapshot(matchState contracts.MatchState, guestID, fallbackSecret string) (platform.MatchSeatClaim, bool) {
 	seatColor := ""
 	playerSecret := ""
 	switch guestID {
@@ -239,6 +260,13 @@ func refreshStoredMatchClaim(
 	}
 	refreshed.ClaimToken = claim.ClaimToken
 	refreshed.ExpiresAt = claim.ExpiresAt
+	// A claim first issued from a live join (session-secret secret) can be
+	// refreshed after match-service rotated or the archive only ever held the
+	// redacted placeholder. Prefer the real seat secret over the fallback so
+	// the refreshed claim still authenticates against match-service.
+	if seatSecretIsRedacted(refreshed.PlayerSecret) && !seatSecretIsRedacted(fallbackSecret) {
+		refreshed.PlayerSecret = strings.TrimSpace(fallbackSecret)
+	}
 	return refreshed, true
 }
 

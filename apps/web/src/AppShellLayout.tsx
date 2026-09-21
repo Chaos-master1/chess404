@@ -71,7 +71,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
     primaryNavItems, secondaryNavItems, shellPageMeta, utilityGroups,
     activeSecondaryNav, showReturnToMatch, hasPrimaryAccountSession,
     visibleSocialAlert, handleSocialAlertAction, dismissSocialAlert,
-    showPlayHub, showBoardSurface, authoritativeMatchId, boardStatusLabel,
+    showPlayHub, showBoardSurface, authoritativeMatchId, boardStatusLabel, matchLoadError,
     openLiveMatch, copyLiveMatchLink,
     snapshots, reviewIdx, reviewPrev, reviewNext,
     setSel, setHints, setDrag, setDragPos, setPromo, setCardPromo,
@@ -360,6 +360,67 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
         )
       ) : showBoardSurface && hostedRuntime && !authoritativeMatchId ? (
         pathname?.startsWith('/match/') || engine.requestedMatchIdRef?.current ? (
+          matchLoadError ? (
+            <ErrorBoundary>
+              <div style={{
+                display:'flex', flex:1, minHeight:0, alignItems:'center', justifyContent:'center',
+                background:'#0a0d16', padding:'28px'
+              }}>
+                <div style={{
+                  width:'min(640px, 100%)',
+                  padding:'28px 30px',
+                  borderRadius:'20px',
+                  background:'linear-gradient(180deg, rgba(14,18,30,0.96) 0%, rgba(9,12,20,0.98) 100%)',
+                  border:'1px solid rgba(255,110,80,0.25)',
+                  boxShadow:'0 18px 60px rgba(0,0,0,0.35)',
+                  textAlign:'center',
+                }}>
+                  <div style={{ fontSize:'14px', fontWeight:800, letterSpacing:'1.5px', textTransform:'uppercase', color:'#ff8f6b', marginBottom:'10px' }}>
+                    Match could not load
+                  </div>
+                  <div style={{ color:'#f3e6bf', fontSize:'22px', fontWeight:800, marginBottom:'10px' }}>
+                    {matchLoadError}
+                  </div>
+                  <div style={{ color:'rgba(255,232,180,0.72)', fontSize:'14px', lineHeight:1.6, marginBottom:'20px' }}>
+                    If this room was shared with you, ask your opponent for a fresh invite link.
+                  </div>
+                  <div style={{ display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap' }}>
+                    <button
+                      onClick={() => { engine.setMatchLoadError(null); void engine.bootstrapAuthoritativeMatch(); }}
+                      style={{
+                        padding:'12px 22px',
+                        background:'linear-gradient(180deg, #c8860a 0%, #7a5008 100%)',
+                        color:'#fff8e0',
+                        border:'1px solid rgba(255,180,60,0.45)',
+                        borderRadius:'10px',
+                        cursor:'pointer',
+                        fontSize:'13px',
+                        fontWeight:800,
+                        boxShadow:'0 6px 20px rgba(200,134,10,0.35)',
+                      }}
+                    >
+                      Retry
+                    </button>
+                    <button
+                      onClick={() => { engine.setMatchLoadError(null); setActivePage('Play'); }}
+                      style={{
+                        padding:'12px 22px',
+                        background:'rgba(255,255,255,0.03)',
+                        color:'rgba(255,232,180,0.82)',
+                        border:'1px solid rgba(255,255,255,0.10)',
+                        borderRadius:'10px',
+                        cursor:'pointer',
+                        fontSize:'13px',
+                        fontWeight:700,
+                      }}
+                    >
+                      Back To Play Hub
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </ErrorBoundary>
+          ) : (
           <div style={{
             display:'flex', flex:1, minHeight:0, alignItems:'center', justifyContent:'center',
             background:'#0a0d16'
@@ -374,6 +435,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
               }} />
             </div>
           </div>
+          )
         ) : (
         <ErrorBoundary>
         <div style={{ display:'flex', flex:1, minHeight:0, alignItems:'center', justifyContent:'center', padding:'28px' }}>

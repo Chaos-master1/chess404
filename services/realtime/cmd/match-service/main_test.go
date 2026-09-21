@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -195,6 +196,120 @@ func TestJoinMatchSeatHTTPResponseRedactsSeatSecrets(t *testing.T) {
 	if resp.Match.Match.WhitePlayerSecret != "" || resp.Match.Match.BlackPlayerSecret != "" {
 		t.Fatalf("expected both seat secrets to be redacted from the join HTTP response, got white=%q black=%q",
 			resp.Match.Match.WhitePlayerSecret, resp.Match.Match.BlackPlayerSecret)
+	}
+}
+
+// TestSeatSecretEndpointDeliversCredentialOnlyToTrustedCaller covers the
+// internal seat-secret endpoint used by the platform claim pipeline. Queue-
+// matched rooms are created with server-generated seat secrets that no client
+// ever receives; this endpoint is the one trusted path that hands the real
+// credential back (service-token gated, computer-match seats rejected).
+func TestSeatSecretEndpointDeliversCredentialOnlyToTrustedCaller(t *testing.T) {
+	tempDir := t.TempDir()
+	archive, err := platform.NewMatchArchiveStore(filepath.Join(tempDir, "archive.json"))
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = archive.Close() }()
+
+	t.Setenv("INTERNAL_SERVICE_TOKEN", "test-internal-token")
+
+	service := match.NewService()
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	service.CreateMatch(contracts.CreateMatchRequest{
+		MatchID:           "seat_secret_delivery_test",
+		Queue:             "casual",
+		WhiteGuestID:      "guest_white_queued",
+		WhitePlayerSecret: "server-generated-white-secret",
+		BlackGuestID:      "guest_black_queued",
+		BlackPlayerSecret: "server-generated-black-secret",
+	}, now)
+
+	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024)
+
+	postSeatSecret := func(guestID string, token string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"guestId":%q}`, guestID)
+		req := httptest.NewRequest(http.MethodPost, "/api/matches/seat_secret_delivery_test/seat-secret", strings.NewReader(body))
+		if token != "" {
+			req.Header.Set("X-Chess404-Service-Token", token)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Without the service token the endpoint must refuse (401), even for a
+	// legitimately seated guest -- this is the client-facing attack surface.
+	if rec := postSeatSecret("guest_white_queued", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without service token, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := postSeatSecret("guest_white_queued", "wrong-token"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with a wrong service token, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// A guest who owns no seat on the match must never get a secret.
+	if rec := postSeatSecret("guest_stranger", "test-internal-token"); rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for a guest with no seat, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// A seated guest queried by a trusted caller gets exactly their seat's
+	// secret and nothing else.
+	rec := postSeatSecret("guest_black_queued", "test-internal-token")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with service token, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Secret string `json:"secret"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("expected seat-secret payload to decode, got %v", err)
+	}
+	if payload.Secret != "server-generated-black-secret" {
+		t.Fatalf("expected the black seat's real secret, got %q", payload.Secret)
+	}
+
+	// An unknown match must 404, not leak anything.
+	req := httptest.NewRequest(http.MethodPost, "/api/matches/room_unknown/seat-secret", strings.NewReader(`{"guestId":"guest_white_queued"}`))
+	req.Header.Set("X-Chess404-Service-Token", "test-internal-token")
+	rec2 := httptest.NewRecorder()
+	mux.ServeHTTP(rec2, req)
+	if rec2.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown match, got %d", rec2.Code)
+	}
+}
+
+// TestSeatSecretEndpointRejectsComputerMatches pins the rule that the engine
+// seat of a computer match is never claimable: only human seats resolve.
+func TestSeatSecretEndpointRejectsComputerMatches(t *testing.T) {
+	tempDir := t.TempDir()
+	archive, err := platform.NewMatchArchiveStore(filepath.Join(tempDir, "archive.json"))
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = archive.Close() }()
+
+	t.Setenv("INTERNAL_SERVICE_TOKEN", "test-internal-token")
+
+	service := match.NewService()
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	service.CreateMatch(contracts.CreateMatchRequest{
+		MatchID:      "seat_secret_computer_test",
+		Queue:        "computer",
+		ModeID:       contracts.MatchModeComputer,
+		WhiteGuestID: "guest_human",
+	}, now)
+
+	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024)
+
+	for _, guestID := range []string{"guest_human", "guest_engine"} {
+		body := fmt.Sprintf(`{"guestId":%q}`, guestID)
+		req := httptest.NewRequest(http.MethodPost, "/api/matches/seat_secret_computer_test/seat-secret", strings.NewReader(body))
+		req.Header.Set("X-Chess404-Service-Token", "test-internal-token")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK {
+			t.Fatalf("expected computer match seat-secret to be refused for guest %q, got 200 body=%s", guestID, rec.Body.String())
+		}
 	}
 }
 

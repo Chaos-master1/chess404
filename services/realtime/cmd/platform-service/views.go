@@ -173,6 +173,10 @@ func writeAccountAuthError(w http.ResponseWriter, err error) {
 		http.Error(w, `{"error":"account access restricted"}`, http.StatusForbidden)
 	case platform.ErrInvalidAccountEmail:
 		http.Error(w, `{"error":"invalid account email"}`, http.StatusBadRequest)
+	case platform.ErrInvalidAccountHandle:
+		http.Error(w, `{"error":"invalid account handle"}`, http.StatusBadRequest)
+	case platform.ErrAccountHandleTaken:
+		http.Error(w, `{"error":"account handle already taken"}`, http.StatusConflict)
 	case platform.ErrAccountEmailTaken:
 		http.Error(w, `{"error":"account email already taken"}`, http.StatusConflict)
 	case platform.ErrInvalidAccountPassword:

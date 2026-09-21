@@ -41,7 +41,7 @@ func ensurePieceRemovalKeepsOwnKingSafe(board [][]*contracts.Piece, square contr
 	nextBoard := cloneBoard(board)
 	nextBoard[square.Row][square.Col] = nil
 	king := findKing(nextBoard, piece.Color)
-	if king != nil && isAttacked(nextBoard, *king, opposite(piece.Color), fortressZones) {
+	if king != nil && isAttackedWithFusion(nextBoard, *king, opposite(piece.Color), fortressZones) {
 		return errors.New("removal would leave king in check")
 	}
 	return nil
@@ -52,13 +52,13 @@ func ensureRemovalDoesNotCreateCheck(board [][]*contracts.Piece, target contract
 	nextBoard[target.Row][target.Col] = nil
 
 	ownerKing := findKing(nextBoard, ownerColor)
-	if ownerKing != nil && isAttacked(nextBoard, *ownerKing, opposite(ownerColor), fortressZones) {
+	if ownerKing != nil && isAttackedWithFusion(nextBoard, *ownerKing, opposite(ownerColor), fortressZones) {
 		return errors.New("cannot remove that piece because it would leave your king in check")
 	}
 
 	enemyColor := opposite(ownerColor)
 	enemyKing := findKing(nextBoard, enemyColor)
-	if enemyKing != nil && isAttacked(nextBoard, *enemyKing, ownerColor, fortressZones) {
+	if enemyKing != nil && isAttackedWithFusion(nextBoard, *enemyKing, ownerColor, fortressZones) {
 		return errors.New("cannot remove that piece because it would leave enemy king in check")
 	}
 
@@ -166,15 +166,10 @@ func isPawnOnPromotionRanks(row int, color string) bool {
 }
 
 func kingsRemainSafe(board [][]*contracts.Piece, fortressZones []contracts.FortressZone) bool {
-	whiteKing := findKing(board, "white")
-	if whiteKing != nil && isAttacked(board, *whiteKing, "black", fortressZones) {
-		return false
-	}
-	blackKing := findKing(board, "black")
-	if blackKing != nil && isAttacked(board, *blackKing, "white", fortressZones) {
-		return false
-	}
-	return true
+	// Fusion-aware: a fused piece attacks as both of its types, so king safety
+	// must match the rules layer (isAttackedWithFusion) or cards could create
+	// board states the chess rules themselves call "in check".
+	return kingsRemainSafeWithFusion(board, fortressZones)
 }
 
 func kingsRemainSafeWithFusion(board [][]*contracts.Piece, fortressZones []contracts.FortressZone) bool {

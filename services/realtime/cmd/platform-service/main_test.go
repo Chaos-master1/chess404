@@ -463,6 +463,71 @@ func TestAccountAuthRegisterRejectsDuplicateEmail(t *testing.T) {
 	}
 }
 
+// Regression test for the live-confirmed 500: writeAccountAuthError had no
+// case for ErrInvalidAccountHandle / ErrAccountHandleTaken, so both fell
+// through to the 500 default and the client showed a generic failure.
+// Invalid handles must map to 400 and taken handles to 409.
+func TestAccountAuthRegisterMapsHandleErrors(t *testing.T) {
+	tempDir := t.TempDir()
+	archive, err := platform.NewMatchArchiveStore(filepath.Join(tempDir, "archive.json"))
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = archive.Close() }()
+	guests, err := platform.NewGuestStore(filepath.Join(tempDir, "guests.json"))
+	if err != nil {
+		t.Fatalf("expected guest store to initialize, got %v", err)
+	}
+	defer func() { _ = guests.Close() }()
+	accounts, err := platform.NewAccountStore(filepath.Join(tempDir, "accounts.json"))
+	if err != nil {
+		t.Fatalf("expected account store to initialize, got %v", err)
+	}
+	defer func() { _ = accounts.Close() }()
+	claims := platform.NewMatchClaimStore()
+	handler := buildTestPlatformMuxWithAccounts(t, archive, guests, accounts, claims)
+
+	invalidGuest, err := guests.EnsureGuest("guest_handle_invalid", "")
+	if err != nil {
+		t.Fatalf("expected invalid-handle guest session creation to succeed, got %v", err)
+	}
+	takenGuestA, err := guests.EnsureGuest("guest_handle_alpha", "")
+	if err != nil {
+		t.Fatalf("expected alpha guest session creation to succeed, got %v", err)
+	}
+	takenGuestB, err := guests.EnsureGuest("guest_handle_beta", "")
+	if err != nil {
+		t.Fatalf("expected beta guest session creation to succeed, got %v", err)
+	}
+
+	invalidReq := httptest.NewRequest(http.MethodPost, "/api/platform/account-auth/register", strings.NewReader(`{"guestId":"`+invalidGuest.Guest.GuestID+`","sessionToken":"`+invalidGuest.SessionToken+`","handle":"Bad Handle!","email":"invalid-handle@example.com","password":"Swordfish88"}`))
+	invalidRec := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid handle to map to 400, got status %d body=%s", invalidRec.Code, invalidRec.Body.String())
+	}
+	if !strings.Contains(invalidRec.Body.String(), "invalid account handle") {
+		t.Fatalf("expected invalid-handle error message, got body=%s", invalidRec.Body.String())
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/platform/account-auth/register", strings.NewReader(`{"guestId":"`+takenGuestA.Guest.GuestID+`","sessionToken":"`+takenGuestA.SessionToken+`","handle":"taken_handle","email":"handle-alpha@example.com","password":"Swordfish88"}`))
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first taken-handle registration to succeed, got status %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/platform/account-auth/register", strings.NewReader(`{"guestId":"`+takenGuestB.Guest.GuestID+`","sessionToken":"`+takenGuestB.SessionToken+`","handle":"taken_handle","email":"handle-beta@example.com","password":"Swordfish99"}`))
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf("expected taken handle to map to 409, got status %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondRec.Body.String(), "account handle already taken") {
+		t.Fatalf("expected taken-handle error message, got body=%s", secondRec.Body.String())
+	}
+}
+
 func TestAccountAuthLoginRateLimitReturnsTooManyRequests(t *testing.T) {
 	tempDir := t.TempDir()
 	archive, err := platform.NewMatchArchiveStore(filepath.Join(tempDir, "archive.json"))

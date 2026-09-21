@@ -353,6 +353,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   const [authoritativeLive, setAuthoritativeLive] = React.useState(false);
   const [authoritativeMatchId, setAuthoritativeMatchId] = React.useState<string | null>(null);
+  const [matchLoadError, setMatchLoadError] = React.useState<string | null>(null);
   const [authoritativeStatus, setAuthoritativeStatus] = React.useState<'waiting' | 'active' | 'finished' | null>(null);
   const [authoritativeWhiteConnected, setAuthoritativeWhiteConnected] = React.useState(false);
   const [authoritativeBlackConnected, setAuthoritativeBlackConnected] = React.useState(false);
@@ -560,6 +561,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     if (!hostedRuntime) return;
     const matchId = requestedMatchIdRef.current || gatewayRecoveredMatchIdRef.current;
     if (!matchId) return;
+    setMatchLoadError(null);
     try {
       const roomMeta = readStoredRoomMeta(matchId);
       const heldCredential = roomMeta?.viewerSeat === 'white'
@@ -620,8 +622,21 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
         }
       }
       applyAuthoritativeSnapshot(await fetchMatch(matchId));
-    } catch {
-      // Keep offline or initial state
+    } catch (err) {
+      // A failed match hydration must never leave the player on a silently
+      // blank/loading board. Surface a real, actionable message; the shell
+      // renders it in place of the loading bar on /match/<id>.
+      const status = (err as { status?: number } | null)?.status;
+      let message = 'Could not load this match. Check your connection and try again.';
+      if (status === 404 || status === 410) {
+        message = 'This match no longer exists or has finished.';
+      } else if (status === 401 || status === 403) {
+        message = 'You do not have access to this match room.';
+      } else if (status === 429) {
+        message = 'Too many requests — wait a moment and try again.';
+      }
+      console.error('[bootstrapAuthoritativeMatch] failed:', err);
+      setMatchLoadError(message);
     }
   }, [hostedRuntime, requestedMatchIdRef, gatewayRecoveredMatchIdRef, applyAuthoritativeSnapshot]);
 
@@ -935,6 +950,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     chatMessages, setChatMessages, chatInput, setChatInput, chatRef, resetChat,
     roundNumber, abortActive, streamDisconnected, hasPrimaryAccountSession,
     submitAuthoritativeIntent, bootstrapAuthoritativeMatch, requestedMatchIdRef,
+    matchLoadError, setMatchLoadError,
     engineOn, setEngineOn, finalPositionRef, reviewBoard,
   };
 }

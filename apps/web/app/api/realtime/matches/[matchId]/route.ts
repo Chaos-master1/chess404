@@ -96,6 +96,13 @@ interface MatchClaimResponse {
   matchId?: string;
   guestId?: string;
   status?: string;
+  playerSecret?: string;
+}
+
+// Redaction markers match-service writes into snapshots/archive rows. A claim
+// secret equal to one of these is not a credential.
+function isUsableSeatSecret(secret: string): boolean {
+  return secret !== '' && secret !== '<redacted>';
 }
 
 function isPublicSpectatorReadable(snapshot: MatchSnapshotResponse): boolean {
@@ -185,9 +192,19 @@ async function resolveVerifiedMatchSeat(request: Request, matchId: string): Prom
       // carries no status field -- a matched matchId + guestId pair is the
       // complete ownership proof.
       if (normalize(claim.matchId) === normalize(matchId) && normalize(claim.guestId) === normalize(candidate.guestId)) {
-        // A session token establishes platform ownership but cannot scope the
-        // match-service response on its own. Do not downgrade to a broad
-        // snapshot when the browser lacks the seat's player secret.
+        // Queue-matched seats hold server-generated secrets the browser was
+        // never given, so the browser's own session secret cannot scope the
+        // match-service snapshot. The claims route (having proven the
+        // browser's session) resolves the seat's real credential via the
+        // internal seat-secret path and returns it in the issued claim; use
+        // that server-side. It never leaves this process.
+        const claimSecret = trimValue(claim.playerSecret);
+        if (isUsableSeatSecret(claimSecret)) {
+          return { guestId: candidate.guestId, playerSecret: claimSecret };
+        }
+        // Private/direct matches: the browser does hold the seat secret
+        // (it created the match with it). A session token alone cannot scope
+        // the match-service response, so never downgrade to a broad snapshot.
         return playerSecret ? { guestId: candidate.guestId, playerSecret } : null;
       }
     } catch {

@@ -323,6 +323,62 @@ func (s *Service) GetMatchForViewer(matchID, playerID, playerSecret string) (con
 	}, nil
 }
 
+// ResolveSeatSecret returns the plaintext secret of the seat owned by guestID
+// on matchID. It exists for server-to-server credential delivery: queue-matched
+// rooms are created with server-generated seat secrets that never reach either
+// player, so the platform's match-claim pipeline needs a trusted way to hand
+// the seated player their real credential. The endpoint that exposes this is
+// gated on the shared internal service token, and every snapshot the match
+// service emits is still fully redacted -- only this call path, between
+// services that already trust each other, sees the plaintext.
+func (s *Service) ResolveSeatSecret(matchID, guestID string) (string, error) {
+	guestID = strings.TrimSpace(guestID)
+	if guestID == "" {
+		return "", errors.New("guestId is required")
+	}
+
+	s.mu.Lock()
+	c, ok := s.ensureMatchLoadedLocked(matchID)
+	s.mu.Unlock()
+	if !ok {
+		return "", ErrMatchNotFound
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.state == nil {
+		return "", ErrMatchNotFound
+	}
+
+	// Computer matches have no second human seat: the black "player" is the
+	// engine, whose secret must never be claimable.
+	if c.state.ModeID == contracts.MatchModeComputer {
+		return "", errors.New("computer match seats cannot be claimed")
+	}
+
+	seatColor := ""
+	switch {
+	case strings.EqualFold(guestID, strings.TrimSpace(c.state.WhiteGuestID)):
+		seatColor = "white"
+	case strings.EqualFold(guestID, strings.TrimSpace(c.state.BlackGuestID)):
+		seatColor = "black"
+	default:
+		return "", ErrUnauthorizedSeatClaim
+	}
+
+	secret := ""
+	if seatColor == "white" {
+		secret = strings.TrimSpace(c.state.WhitePlayerSecret)
+	} else {
+		secret = strings.TrimSpace(c.state.BlackPlayerSecret)
+	}
+	if secret == "" {
+		return "", errors.New("seat has no player secret configured")
+	}
+	return secret, nil
+}
+
 func (s *Service) HeartbeatPresence(matchID string, req contracts.MatchPresenceRequest, now time.Time) error {
 	s.mu.Lock()
 	c, ok := s.ensureMatchLoadedLocked(matchID)

@@ -58,6 +58,7 @@ export default function MatchEngineProvider(props: MatchEngineProviderProps) {
     fmtClock: engine.fmtClock,
     authoritativeMatchId: engine.authoritativeMatchId,
     authoritativeLive: engine.authoritativeLive,
+    matchLoadError: engine.matchLoadError,
     authoritativeStatus: engine.authoritativeStatus,
     topSeat: engine.topSeat,
     bottomSeat: engine.bottomSeat,

@@ -289,10 +289,15 @@ export function usePlatformState(props: UsePlatformStateProps) {
     const blackClaim = [matchClaims.white, matchClaims.black].find(claim => claim?.seatColor === 'black');
     const whiteIdentity = readStoredGuestIdentity('white');
     const blackIdentity = readStoredGuestIdentity('black');
+    // The queue assigns seats server-side: a player whose identity was stored
+    // in the white lane (the queue page's default) can be paired into the
+    // black seat. Match this browser's claim by guestId across BOTH identity
+    // lanes before falling back -- claiming the opponent's claim here made the
+    // client render the wrong seat and authenticate with the wrong credential.
     const ownedClaim =
-      (whiteClaim && whiteClaim.guestId === whiteIdentity.guestId ? whiteClaim : null) ??
-      (blackClaim && blackClaim.guestId === blackIdentity.guestId ? blackClaim : null) ??
-      whiteClaim ?? blackClaim ?? null;
+      [whiteClaim, blackClaim].find(claim =>
+        claim && (claim.guestId === whiteIdentity.guestId || claim.guestId === blackIdentity.guestId)
+      ) ?? null;
     const isCurrentMatch = authoritativeMatchIdRef.current === matchId;
     const currentBootstrapClaims = gatewayBootstrapClaimsRef.current.matchId === matchId
       ? gatewayBootstrapClaimsRef.current

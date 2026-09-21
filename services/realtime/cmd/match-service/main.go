@@ -281,6 +281,47 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			return
 		}
 
+		// Internal, service-token-gated credential delivery. Queue-matched
+		// rooms are created with server-generated seat secrets that no client
+		// ever receives, so the platform's match-claim pipeline asks for the
+		// seated guest's secret here (after proving the caller's guest session)
+		// and returns it inside the seat claim. Without this the claim carries
+		// an empty secret and the player can never authenticate to the room.
+		if len(parts) == 2 && parts[1] == "seat-secret" && r.Method == http.MethodPost {
+			expected := internalServiceToken()
+			if expected == "" {
+				httputil.WriteError(w, http.StatusServiceUnavailable, "internal service token not configured on server")
+				return
+			}
+			provided := strings.TrimSpace(r.Header.Get("X-Chess404-Service-Token"))
+			if provided == "" {
+				const prefix = "Bearer "
+				auth := strings.TrimSpace(r.Header.Get("Authorization"))
+				if strings.HasPrefix(auth, prefix) {
+					provided = strings.TrimSpace(strings.TrimPrefix(auth, prefix))
+				}
+			}
+			if provided == "" || provided != expected {
+				httputil.WriteError(w, http.StatusUnauthorized, "internal service token required")
+				return
+			}
+			var req struct {
+				GuestID string `json:"guestId"`
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			secret, err := service.ResolveSeatSecret(matchID, req.GuestID)
+			if err != nil {
+				writeMatchError(w, err)
+				return
+			}
+			httputil.WriteJSON(w, http.StatusOK, map[string]string{"secret": secret})
+			return
+		}
+
 		if len(parts) == 2 && parts[1] == "intents" && r.Method == http.MethodPost {
 			var req contracts.ApplyIntentRequest
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)

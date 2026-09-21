@@ -332,14 +332,15 @@ export function connectToMatchStream(
       return;
     }
     if (reconnectAttempt >= maxReconnectAttempts) {
+      // eslint-disable-next-line no-console
       console.warn('max reconnect attempts reached, falling back to polling');
       handlers.onStatusChange?.('connected');
       schedulePoll(0);
       return;
     }
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      console.log('offline — waiting for network before reconnecting');
-      handlers.onStatusChange?.('reconnecting');
+      // Offline: wait for the network to come back, then reconnect with a
+      // fresh attempt budget instead of burning retries while offline.
       const onOnline = () => {
         window.removeEventListener('online', onOnline);
         reconnectAttempt = 0;
@@ -384,7 +385,8 @@ export function connectToMatchStream(
     } else if (playerIdentity?.playerClaimToken?.trim()) {
       authPromise = Promise.resolve({ claimToken: playerIdentity.playerClaimToken!.trim() });
     } else {
-      console.log('Spectate mode: no player identity — using polling');
+      // Spectate has no player identity, so the WS stream is unavailable;
+      // polling fallback is the intended path.
       handlers.onStatusChange?.('connected');
       isWsConnected = true;
       schedulePoll(0);
@@ -423,7 +425,7 @@ export function connectToMatchStream(
           if (msg.type === 'match.snapshot' && msg.payload) {
             const snapshot = msg.payload;
             if (snapshot.seqNum && lastSeqNum > 0 && snapshot.seqNum > lastSeqNum + 1) {
-              console.warn(`seqNum gap detected: ${lastSeqNum} -> ${snapshot.seqNum}, refetching`);
+              // A seq gap means a dropped stream event; refetch is the recovery.
               fetchMatch(matchId).then(fullSnapshot => {
                 if (!disposed) handlers.onSnapshot(fullSnapshot);
               }).catch(() => {});

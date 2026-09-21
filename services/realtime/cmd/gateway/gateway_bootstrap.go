@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +14,64 @@ import (
 	"github.com/chess404/realtime/internal/matchmaking"
 	"github.com/chess404/realtime/internal/platform"
 )
+
+// resolveGatewaySeatSecret asks match-service for the plaintext seat secret of
+// the given guest on the given match, over the internal service-token-gated
+// seat-secret endpoint. This mirrors the platform-service's resolver: it is
+// server-to-server credential delivery for an already-proven identity, never a
+// client-reachable path.
+func resolveGatewaySeatSecret(matchID, guestID string) (string, error) {
+	matchID = strings.TrimSpace(matchID)
+	guestID = strings.TrimSpace(guestID)
+	if matchID == "" || guestID == "" {
+		return "", fmt.Errorf("matchId and guestId are required")
+	}
+	baseURL := strings.TrimSpace(resolveInternalServiceURL("MATCH_SERVICE_INTERNAL_URL", "http://match-service:8080"))
+	if baseURL == "" {
+		return "", fmt.Errorf("match service URL is not configured")
+	}
+	token := gatewayInternalServiceToken()
+	if token == "" {
+		return "", fmt.Errorf("internal service token is not configured")
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	body, err := json.Marshal(map[string]string{"guestId": guestID})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/matches/"+matchID+"/seat-secret", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Chess404-Service-Token", token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("match service returned status %d", resp.StatusCode)
+	}
+	var payload struct {
+		Secret string `json:"secret"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", err
+	}
+	secret := strings.TrimSpace(payload.Secret)
+	if secret == "" {
+		return "", fmt.Errorf("match service returned an empty seat secret")
+	}
+	return secret, nil
+}
+
+// seatSecretLooksRedacted reports whether a snapshot-carried seat secret is a
+// redaction placeholder (or empty) rather than a usable credential.
+func seatSecretLooksRedacted(secret string) bool {
+	trimmed := strings.TrimSpace(secret)
+	return trimmed == "" || trimmed == "<redacted>"
+}
 
 // Bootstrap payload assembly: guest sessions, match claims, account sessions, queue tickets, recovered matches.
 
@@ -237,6 +297,23 @@ func buildFallbackMatchClaims(snapshot *contracts.MatchSnapshotResponse, session
 	claims := &GatewayBootstrapMatchClaims{}
 	m := snapshot.Match
 
+	// Snapshot-carried seat secrets are redacted placeholders (or empty):
+	// match-service strips them from everything it emits. A claim built
+	// here would fail every later authenticated call, so resolve the real
+	// credential from match-service once per seat (this is the trusted
+	// internal path; the guest session's identity was already resumed).
+	resolveSecret := func(guestID, snapshotSecret string) string {
+		if !seatSecretLooksRedacted(snapshotSecret) {
+			return snapshotSecret
+		}
+		secret, err := resolveGatewaySeatSecret(m.MatchID, guestID)
+		if err != nil {
+			log.Printf("gw:bootstrap: fallback seat-secret resolve failed matchID=%s guest=%s: %v", m.MatchID, guestID, err)
+			return ""
+		}
+		return secret
+	}
+
 	buildClaim := func(session *platform.GuestSession) *GatewaySeatClaim {
 		if session == nil || session.Guest.GuestID == "" {
 			return nil
@@ -249,7 +326,7 @@ func buildFallbackMatchClaims(snapshot *contracts.MatchSnapshotResponse, session
 				GuestID:      gid,
 				SeatColor:    "white",
 				PlayerID:     gid,
-				PlayerSecret: m.WhitePlayerSecret,
+				PlayerSecret: resolveSecret(gid, m.WhitePlayerSecret),
 				Queue:        m.Queue,
 				ModeID:       m.ModeID,
 				WhiteGuestID: m.WhiteGuestID,
@@ -264,7 +341,7 @@ func buildFallbackMatchClaims(snapshot *contracts.MatchSnapshotResponse, session
 				GuestID:      gid,
 				SeatColor:    "black",
 				PlayerID:     gid,
-				PlayerSecret: m.BlackPlayerSecret,
+				PlayerSecret: resolveSecret(gid, m.BlackPlayerSecret),
 				Queue:        m.Queue,
 				ModeID:       m.ModeID,
 				WhiteGuestID: m.WhiteGuestID,
