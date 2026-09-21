@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -59,9 +60,9 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 				http.Error(w, `{"error":"unknown active match claim"}`, http.StatusNotFound)
 				return
 			}
-			if strings.TrimSpace(claim.PlayerSecret) == "" {
-				claim.PlayerSecret = session.SessionSecret
-			}
+			// No guest-secret substitution: an empty/redacted stored secret
+			// must stay unusable rather than be masked with a credential
+			// match-service rejects on the WS seat check.
 			if err := claims.Put(claim); err == nil {
 				if renewedClaim, renewed := claims.Get(payload.MatchID, session.Guest.GuestID); renewed {
 					claim = renewedClaim
@@ -108,10 +109,6 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 			http.Error(w, `{"error":"guest does not own a seat in this match"}`, http.StatusForbidden)
 			return
 		}
-		playerSecret := strings.TrimSpace(payload.PlayerSecret)
-		if playerSecret == "" {
-			playerSecret = session.SessionSecret
-		}
 		var ownerGuestID string
 		if seatColor == "white" {
 			ownerGuestID = payload.WhiteGuestID
@@ -121,6 +118,21 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 		if session.Guest.GuestID != ownerGuestID {
 			http.Error(w, `{"error":"guest does not own a seat in this match"}`, http.StatusForbidden)
 			return
+		}
+		// Prefer the authoritative seat secret from match-service; the
+		// client-supplied value is only a last-resort fallback for clients that
+		// already hold a live join secret (legacy private-room rows). It is
+		// accepted solely because ownership was proven by the guest-session
+		// resume above and match-service verifies every use of it anyway.
+		playerSecret := ""
+		if secret, err := resolveMatchSeatSecret(payload.MatchID, session.Guest.GuestID); err == nil {
+			playerSecret = secret
+		} else {
+			log.Printf("seat secret resolve failed for match=%s guest=%s: %v", payload.MatchID, session.Guest.GuestID, err)
+			playerSecret = strings.TrimSpace(payload.PlayerSecret)
+			if playerSecret == "" {
+				playerSecret = session.SessionSecret
+			}
 		}
 		claim := platform.MatchSeatClaim{
 			MatchID:      payload.MatchID,
@@ -229,9 +241,9 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 			if !ok {
 				continue
 			}
-			if strings.TrimSpace(claim.PlayerSecret) == "" {
-				claim.PlayerSecret = session.SessionSecret
-			}
+			// No guest-secret substitution: an empty/redacted stored secret
+			// must stay unusable rather than be masked with a credential
+			// match-service rejects on the WS seat check.
 			if err := claims.Put(claim); err == nil {
 				if renewedClaim, renewed := claims.Get(claim.MatchID, claim.GuestID); renewed {
 					claim = renewedClaim

@@ -195,18 +195,20 @@ func buildMatchSeatClaim(matchState contracts.MatchState, guestID, fallbackSecre
 	if !ok {
 		return platform.MatchSeatClaim{}, false
 	}
-	// Snapshot-carried secrets are redacted placeholders: match-service
-	// strips seat secrets from everything it emits or persists, so a queue
-	// seat's server-generated secret only ever exists inside match-service.
-	// Ask it for the real credential (identity was already proven by the
-	// caller's guest-session resume) so the claim authenticates the player
-	// instead of failing every subsequent call with 400/401.
-	if seatSecretIsRedacted(claim.PlayerSecret) {
-		if secret, err := resolveMatchSeatSecret(matchState.MatchID, guestID); err == nil {
-			claim.PlayerSecret = secret
-		} else {
-			log.Printf("seat secret resolve failed for match=%s guest=%s: %v", matchState.MatchID, guestID, err)
-		}
+	// The authoritative seat secret lives only inside match-service: it
+	// redacts seat secrets from every snapshot it emits or persists, so the
+	// archive row carries either a "<redacted>" placeholder or an empty seat
+	// secret. Resolving unconditionally (not only when the snapshot value is
+	// redacted) matters because buildMatchSeatClaimFromSnapshot substitutes
+	// the guest session secret when the archived seat secret is empty -- and
+	// a claim holding the guest secret authenticates to HTTP but fails the
+	// WS seat check with "unauthorized player secret". If the resolver is
+	// unreachable, keep whatever the snapshot/fallback produced (best
+	// effort) rather than failing the claim outright.
+	if secret, err := resolveMatchSeatSecret(matchState.MatchID, guestID); err == nil {
+		claim.PlayerSecret = secret
+	} else {
+		log.Printf("seat secret resolve failed for match=%s guest=%s: %v", matchState.MatchID, guestID, err)
 	}
 	return claim, true
 }
@@ -224,9 +226,11 @@ func buildMatchSeatClaimFromSnapshot(matchState contracts.MatchState, guestID, f
 	default:
 		return platform.MatchSeatClaim{}, false
 	}
-	if strings.TrimSpace(playerSecret) == "" {
-		playerSecret = strings.TrimSpace(fallbackSecret)
-	}
+	// NOTE: no fallback substitution here. An empty archived seat secret
+	// must stay empty so buildMatchSeatClaim can resolve the authoritative
+	// credential from match-service; masking it with the guest session
+	// secret produced claims that passed HTTP but failed the WS seat check.
+	_ = fallbackSecret
 	return platform.MatchSeatClaim{
 		MatchID:      matchState.MatchID,
 		GuestID:      guestID,
@@ -260,13 +264,12 @@ func refreshStoredMatchClaim(
 	}
 	refreshed.ClaimToken = claim.ClaimToken
 	refreshed.ExpiresAt = claim.ExpiresAt
-	// A claim first issued from a live join (session-secret secret) can be
-	// refreshed after match-service rotated or the archive only ever held the
-	// redacted placeholder. Prefer the real seat secret over the fallback so
-	// the refreshed claim still authenticates against match-service.
-	if seatSecretIsRedacted(refreshed.PlayerSecret) && !seatSecretIsRedacted(fallbackSecret) {
-		refreshed.PlayerSecret = strings.TrimSpace(fallbackSecret)
-	}
+	// The refresh is resolver-authoritative: a real seat secret (resolved
+	// above) or a legacy archived real secret wins; placeholder/empty values
+	// must NOT be patched with the guest session secret -- match-service
+	// rejects it on the WS seat check, which is exactly the failure this
+	// pipeline exists to prevent.
+	_ = fallbackSecret
 	return refreshed, true
 }
 
