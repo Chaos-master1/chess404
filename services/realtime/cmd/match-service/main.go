@@ -852,8 +852,24 @@ func resolveSocketClaim(matchID, claimToken string) (platform.MatchSeatClaim, er
 	return claim, nil
 }
 
+// platformServiceURL resolves the internal platform-service base URL for
+// server-to-server hops such as WebSocket claim resolution. Production
+// (Railway) has historically stored this variable with a trailing colon and no
+// port ("http://platform-service.railway.internal:"), which the HTTP client
+// resolves as port 80 -- a connection refused on every WS auth frame while the
+// HTTP intent path (resolved by the gateway) kept working. Normalize the same
+// misconfiguration classes the gateway already handles: unresolved Railway
+// templates fall back to the default, and a hostname-only URL gets the
+// service's default port appended.
 func platformServiceURL() string {
-	return httputil.EnvOrDefault("PLATFORM_SERVICE_INTERNAL_URL", "http://platform-service:8080")
+	u := strings.TrimSpace(os.Getenv("PLATFORM_SERVICE_INTERNAL_URL"))
+	if u == "" || strings.Contains(u, "${{") {
+		return "http://platform-service:8080"
+	}
+	if strings.HasSuffix(u, ":") {
+		u += "8080"
+	}
+	return u
 }
 
 func internalServiceToken() string {

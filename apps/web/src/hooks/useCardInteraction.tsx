@@ -146,13 +146,38 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     if (cardPending) pendingCardUseRef.current.delete(cardPending.card.id);
     const jp = jokerPickerRef.current;
     if (jp) pendingCardUseRef.current.delete(jp.card.id);
+    // The server keeps PendingCard armed until it is told otherwise -- a purely
+    // local dismiss used to leave it armed forever, so every later play_card
+    // was rejected with "resolve the pending card target first" for the rest
+    // of the match. Tell the authoritative server the pending card was
+    // abandoned; the hand is untouched because a pending card is only removed
+    // from the hand when its target RESOLVES.
+    if (hostedRuntime && authoritativeMatchIdRef.current && cardPending) {
+      const actor = authoritativeActorForColor(cardPending.playerColor);
+      if (actor.playerId && (actor.playerSecret || actor.playerClaimToken)) {
+        // Omit<Union> collapses union members, so Extract the cancel_card
+        // member first (the same pattern every other intent call site uses).
+        const cancelIntent: Omit<Extract<PlayerIntent, { type: 'cancel_card' }>, 'matchId'> = {
+          type: 'cancel_card',
+          ...actor,
+          cardId: cardPending.card.id,
+        };
+        void applyIntent(authoritativeMatchIdRef.current, cancelIntent).then(snapshot => {
+          applyAuthoritativeSnapshot(snapshot);
+        }).catch(() => {
+          // The pending state is already cleared locally; a failed sync leaves
+          // the server pending armed, but the next successful snapshot apply
+          // restores the client view from authoritative state.
+        });
+      }
+    }
     setJokerPicker(null);
     setCardPending(null);
     setCardMsg('');
     setPromoPicker(null);
     setCardPromo(null);
     setSelectedCard(null);
-  }, [cardPending, pendingCardUseRef, setCardMsg, setCardPending, setCardPromo, setJokerPicker, setPromoPicker, setSelectedCard]);
+  }, [cardPending, pendingCardUseRef, setCardMsg, setCardPending, setCardPromo, setJokerPicker, setPromoPicker, setSelectedCard, hostedRuntime, authoritativeMatchIdRef, authoritativeActorForColor, applyAuthoritativeSnapshot]);
 
   const getSafeTransforms = React.useCallback((
     b: Board,

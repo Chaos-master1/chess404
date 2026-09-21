@@ -602,6 +602,8 @@ func applyIntent(state *contracts.MatchState, intent contracts.PlayerIntent, now
 		return applyMove(state, intent, now)
 	case "play_card":
 		return applyPlayCard(state, intent, now)
+	case "cancel_card":
+		return applyCancelCard(state, intent, now)
 	case "select_target":
 		return applySelectTarget(state, intent, now)
 	case "send_chat":

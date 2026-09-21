@@ -5,6 +5,13 @@ import { clickSquare, collectErrors, dismissOnboarding, move } from './_helpers'
 // from a hand when the SERVER resolves it. So the assertion that matters is the
 // hand count after a reload -- reload re-reads the authoritative snapshot, which
 // a purely local UI change cannot fake.
+//
+// Locator note: both hands render `data-testid="hand-card-<mechanic>"` and the
+// opponent's (top) hand comes FIRST in the DOM. A naive `.nth(0)` therefore
+// clicks the opponent's cards, where "Use card" is correctly disabled ("Not
+// your card to use") -- which silently starved earlier versions of this test.
+// The viewer's hand is the bottom hand: anchor on the PARENT of the last
+// hand-card element to scope every probe to the viewer's own cards.
 test.describe('card play', () => {
   test('playing a card is applied server-side, not just in the UI', async ({ page }) => {
     test.setTimeout(600_000);
@@ -20,9 +27,14 @@ test.describe('card play', () => {
     }
     await expect(page.getByTestId('board-root')).toBeVisible({ timeout: 90_000 });
 
-    const cards = page.locator('[data-testid^="hand-card-"]');
-    await expect(cards.first()).toBeVisible({ timeout: 60_000 });
-    const before = await cards.count();
+    const anyHandCard = page.locator('[data-testid^="hand-card-"]');
+    await expect(anyHandCard.first()).toBeVisible({ timeout: 60_000 });
+    // The bottom (viewer) hand root is the parent of the last hand-card in the DOM.
+    const viewerHand = anyHandCard
+      .last()
+      .locator('xpath=ancestor::div[1]')
+      .locator('[data-testid^="hand-card-"]');
+    const before = await viewerHand.count();
     expect(before, 'no cards dealt').toBeGreaterThan(0);
 
     // No mana system exists: the server gates cards at one-per-turn (canUseCard),
@@ -40,15 +52,12 @@ test.describe('card play', () => {
     // not script, so skip it.
     const targets = ['b8', 'g8', 'a8', 'h8', 'e7', 'd7', 'd1', 'c1', 'd5', 'e5'];
 
-    // A card is only usable on the viewer's turn, so poll the hand instead of
-    // sleeping a fixed amount for the engine reply. A failed probe can leave a
-    // pending card open, which poisons later board clicks, so cancel it before
-    // moving on. When "Use" is disabled (engine's turn) the probe is a cheap
-    // no-op; the expensive target sweep only runs once it is actually our turn.
+    // A failed probe can leave a pending card open, which poisons later board
+    // clicks, so cancel it before moving on.
     async function cancelPendingCard() {
       await page.keyboard.press('Escape').catch(() => {});
-      await page.getByText('✕ cancel', { exact: false }).click({ timeout: 800 }).catch(() => {});
-      await page.getByRole('button', { name: '✕ Cancel' }).click({ timeout: 500 }).catch(() => {});
+      await page.getByText('✕ cancel', { exact: false }).click({ timeout: 600 }).catch(() => {});
+      await page.getByRole('button', { name: '✕ Cancel' }).click({ timeout: 400 }).catch(() => {});
     }
 
     // A stuck stream used to leave this test clicking a zombie page for its
@@ -63,25 +72,32 @@ test.describe('card play', () => {
       throw new Error('live match stream stuck on "Reconnecting..." for 60s (zombie-stream regression)');
     }
 
-    async function tryPlayOneCard(): Promise<boolean> {
-      const count = await cards.count();
-      for (let i = 0; i < count; i++) {
-        const card = cards.nth(i);
+    // Try to use ONE viewer card: returns true if the hand shrank (the server
+    // resolved a card). Iterates the viewer's cards first; when "Use" is
+    // disabled the turn belongs to the engine, so bail out cheaply instead of
+    // sweeping targets against a locked card.
+    async function tryUseOneCard(): Promise<boolean> {
+      const count = await viewerHand.count();
+      for (let i = count - 1; i >= 0; i--) {
+        const card = viewerHand.nth(i);
         if ((await card.getAttribute('data-testid'))?.includes('joker')) continue;
         await card.click();
         const use = page.getByRole('button', { name: /^use card$/i });
-        if (!(await use.isVisible({ timeout: 1_500 }).catch(() => false))) continue;
+        if (!(await use.isVisible({ timeout: 1_200 }).catch(() => false))) {
+          await cancelPendingCard();
+          continue;
+        }
         if (!(await use.isEnabled().catch(() => false))) {
           await cancelPendingCard();
-          return false;
+          return false; // engine's turn -- re-probe after it replies
         }
         await use.click();
         for (const target of targets) {
-          if ((await cards.count()) < count) return true;
+          if ((await viewerHand.count()) < count) return true;
           await clickSquare(page, target);
-          await page.waitForTimeout(700);
+          await page.waitForTimeout(600);
         }
-        if ((await cards.count()) < count) return true;
+        if ((await viewerHand.count()) < count) return true;
         await cancelPendingCard();
       }
       return false;
@@ -93,9 +109,9 @@ test.describe('card play', () => {
       await move(page, from, to);
       // Poll up to ~40s for the engine reply (turn flips back to white).
       for (let attempt = 0; attempt < 26 && !played; attempt++) {
-        await page.waitForTimeout(1_500);
+        await page.waitForTimeout(1_200);
         await failIfStreamZombie();
-        played = await tryPlayOneCard();
+        played = await tryUseOneCard();
       }
       if (played) break outer;
     }
@@ -107,7 +123,7 @@ test.describe('card play', () => {
     await dismissOnboarding(page);
     await expect(page.getByTestId('board-root')).toBeVisible({ timeout: 90_000 });
     await page.waitForTimeout(6_000);
-    const after = await page.locator('[data-testid^="hand-card-"]').count();
+    const after = await viewerHand.count();
     expect(after, 'card came back after reload -- it was never resolved server-side')
       .toBeLessThan(before);
 

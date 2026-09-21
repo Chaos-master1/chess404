@@ -7,6 +7,45 @@ import (
 	"github.com/chess404/realtime/internal/contracts"
 )
 
+// applyCancelCard abandons the acting player's pending multi-step card.
+//
+// The client has always been able to dismiss a pending card locally, but the
+// server kept PendingCard armed with no way to clear it -- any later play_card
+// was then rejected with "resolve the pending card target first" for the rest
+// of the match (observed live: 45 consecutive rejections after a player
+// cancelled a freeze). While a card is pending it has NOT yet been removed
+// from the hand (removal happens on target resolution), so cancelling is a
+// pure state clear with no refund and no hand mutation. Ownership and turn
+// are enforced: only the pending card's owner may cancel, and cancelling
+// consumes the player's one-action-per-turn window by leaving the turn with
+// the opponent, matching how a resolved card affects the turn.
+func applyCancelCard(state *contracts.MatchState, intent contracts.PlayerIntent, now time.Time) ([]contracts.ResolvedEvent, error) {
+	if err := ensureActive(state); err != nil {
+		return nil, err
+	}
+	owner, err := requireIntentColor(state, intent.PlayerID, intent.PlayerSecret)
+	if err != nil {
+		return nil, err
+	}
+	if state.PendingCard == nil {
+		return nil, errors.New("no pending card to cancel")
+	}
+	if state.PendingCard.OwnerColor != owner {
+		return nil, errors.New("not your pending card")
+	}
+	mechanic := state.PendingCard.Mechanic
+	cardID := state.PendingCard.CardID
+	state.PendingCard = nil
+	state.DrawOfferedBy = ""
+	state.UpdatedAt = now.UTC()
+	return []contracts.ResolvedEvent{
+		makeEvent(state.MatchID, "card_cancelled", now, intent.PlayerID, map[string]any{
+			"cardId":   cardID,
+			"mechanic": mechanic,
+		}),
+	}, nil
+}
+
 // applyPlayCard entry point.
 
 func applyPlayCard(state *contracts.MatchState, intent contracts.PlayerIntent, now time.Time) ([]contracts.ResolvedEvent, error) {

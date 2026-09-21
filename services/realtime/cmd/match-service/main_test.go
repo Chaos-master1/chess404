@@ -386,3 +386,31 @@ func TestWithCORSRejectsEmptyAllowlist(t *testing.T) {
 		t.Fatalf("empty allowlist should not set Allow-Origin (rejected for security), got Allow-Origin=%q", got)
 	}
 }
+
+// Regression test for a live production outage: the Railway variable
+// PLATFORM_SERVICE_INTERNAL_URL is stored as
+// "http://platform-service.railway.internal:" (trailing colon, no port). The
+// WS claim-resolution path dialed that URL on port 80 and failed on every
+// WebSocket auth frame ("auth.error unauthorized"), while the HTTP intent path
+// kept working because the gateway resolves the same variable correctly.
+func TestPlatformServiceURLNormalizesTrailingColon(t *testing.T) {
+	t.Setenv("PLATFORM_SERVICE_INTERNAL_URL", "http://platform-service.railway.internal:")
+	if got := platformServiceURL(); got != "http://platform-service.railway.internal:8080" {
+		t.Fatalf("expected trailing-colon URL to get the default port appended, got %q", got)
+	}
+
+	t.Setenv("PLATFORM_SERVICE_INTERNAL_URL", "http://platform-service.railway.internal:9090")
+	if got := platformServiceURL(); got != "http://platform-service.railway.internal:9090" {
+		t.Fatalf("expected an explicit port to be preserved, got %q", got)
+	}
+
+	t.Setenv("PLATFORM_SERVICE_INTERNAL_URL", "${{platform-service.RAILWAY_PRIVATE_DOMAIN}}")
+	if got := platformServiceURL(); got != "http://platform-service:8080" {
+		t.Fatalf("expected an unresolved Railway template to fall back to the default, got %q", got)
+	}
+
+	t.Setenv("PLATFORM_SERVICE_INTERNAL_URL", "")
+	if got := platformServiceURL(); got != "http://platform-service:8080" {
+		t.Fatalf("expected an unset variable to fall back to the default, got %q", got)
+	}
+}

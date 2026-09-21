@@ -275,6 +275,7 @@ export interface ReplayLog {
 export type PlayerIntent =
   | { type: 'make_move'; matchId: string; playerId: string; playerSecret?: string; playerClaimToken?: string; from: Sq; to: Sq; promotion?: PieceType; clientMoveId?: string; expectedSeqNum?: number }
   | { type: 'play_card'; matchId: string; playerId: string; playerSecret?: string; playerClaimToken?: string; cardId: string; clientMoveId?: string; expectedSeqNum?: number }
+  | { type: 'cancel_card'; matchId: string; playerId: string; playerSecret?: string; playerClaimToken?: string; cardId?: string; clientMoveId?: string; expectedSeqNum?: number }
   | { type: 'select_target'; matchId: string; playerId: string; playerSecret?: string; playerClaimToken?: string; target?: Sq; selectionId?: string; clientMoveId?: string; expectedSeqNum?: number }
   | { type: 'offer_draw'; matchId: string; playerId: string; playerSecret?: string; playerClaimToken?: string; clientMoveId?: string; expectedSeqNum?: number }
   | { type: 'respond_draw'; matchId: string; playerId: string; playerSecret?: string; playerClaimToken?: string; accept: boolean; clientMoveId?: string; expectedSeqNum?: number }

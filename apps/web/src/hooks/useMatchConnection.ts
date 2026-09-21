@@ -337,8 +337,13 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     let refreshInFlight = false;
 
     const claimNeedsRefresh = (token?: string | null, expiresAt?: string | null): boolean => {
+      // A side without a claim is not a refresh candidate: the computer seat,
+      // for instance, legitimately never has one. Treating "no claim" as
+      // "needs refresh" made this loop re-request the bootstrap every 30s for
+      // the whole match (observed as a 1/s /match-claims hammer under the
+      // previous 1s interval and a rate-limit budget drain in production).
       if (!token || !expiresAt) {
-        return true;
+        return false;
       }
       const expiryMs = Date.parse(expiresAt);
       if (Number.isNaN(expiryMs)) {

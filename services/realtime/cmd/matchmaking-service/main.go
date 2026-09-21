@@ -367,8 +367,13 @@ func resolveInternalServiceURL(explicit, fallback string) string {
 	if strings.Contains(value, "${{") {
 		return strings.TrimRight(strings.TrimSpace(fallback), "/")
 	}
+	// A bare "host:" gains the default port, and a scheme-only URL with no
+	// port at all ("http://host") must too -- otherwise net/http dials port 80,
+	// which nothing in this repo listens on.
 	if strings.HasSuffix(value, ":") {
 		value += "8080"
+	} else if u, err := url.Parse(value); err == nil && u.Port() == "" && u.Host != "" {
+		value += ":8080"
 	}
 	return value
 }
