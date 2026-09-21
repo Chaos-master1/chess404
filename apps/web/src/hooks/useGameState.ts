@@ -396,8 +396,9 @@ export function useGameState(
     gameSetters.setWinner(nextWinner);
     gameSetters.setReviewIdx(-1);
     gameSetters.setReviewBoard(null);
-    gameSetters.setTimeW(Math.max(0, Math.ceil(match.clock.whiteMs / 1000)));
-    gameSetters.setTimeB(Math.max(0, Math.ceil(match.clock.blackMs / 1000)));
+    // Clock state is milliseconds everywhere, matching the server's whiteMs/blackMs.
+    gameSetters.setTimeW(Math.max(0, match.clock.whiteMs));
+    gameSetters.setTimeB(Math.max(0, match.clock.blackMs));
     gameSetters.setClockActive(nextClockActive);
     gameSetters.setTicking(nextTicking);
     finalPositionRef.current = nextOver ? { fen: nextFen, turn: nextTurn } : null;

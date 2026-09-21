@@ -45,7 +45,11 @@ export function useMatchUIHelpers(props: UseMatchUIHelpersProps) {
     authoritativeMatchIdRef, jokerRef,
   } = props;
 
-  const fmtClock = React.useCallback((s: number): string => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`, []);
+  // timeW/timeB are milliseconds; clamp at zero and floor to whole seconds.
+  const fmtClock = React.useCallback((ms: number): string => {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
+  }, []);
 
   const evalStr = React.useCallback((score: number, m: number | null): string => {
     if (m !== null) return m > 0 ? `M${Math.abs(m)}` : `-M${Math.abs(m)}`;
@@ -74,7 +78,7 @@ export function useMatchUIHelpers(props: UseMatchUIHelpersProps) {
         seat={seat}
         playerName={seatName}
         rating={seatRating}
-        timeMs={seatTime * 1000}
+        timeMs={seatTime}
         isClockActive={seatTicking}
         seatBadge={seatBadge ?? undefined}
       />

@@ -251,7 +251,7 @@ export function MatchBoardView() {
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:'10px', marginTop:'5px' }}>
               <span style={{ color:'#b088f0', fontSize:'12px', fontWeight:600 }}>♟ {displayedBlackRating}</span>
-              <span style={{ color: timeB <= 30 ? '#ff5555' : '#f0a030', fontSize:'13px', fontFamily:'monospace', fontWeight:700, background: tickingState==='black'&&clockActive&&!over ? 'rgba(240,160,48,0.18)' : 'rgba(0,0,0,0.3)', padding:'2px 8px', borderRadius:'5px', border:'1px solid rgba(240,160,48,0.2)' }}>⏱ {fmtClock(timeB)}</span>
+              <span style={{ color: timeB <= 30000 ? '#ff5555' : '#f0a030', fontSize:'13px', fontFamily:'monospace', fontWeight:700, background: tickingState==='black'&&clockActive&&!over ? 'rgba(240,160,48,0.18)' : 'rgba(0,0,0,0.3)', padding:'2px 8px', borderRadius:'5px', border:'1px solid rgba(240,160,48,0.2)' }}>⏱ {fmtClock(timeB)}</span>
             </div>
           </div>
           <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:'#2ecc71', boxShadow:'0 0 12px #2ecc71', flexShrink:0 }} />
@@ -516,7 +516,7 @@ export function MatchBoardView() {
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:'10px', marginTop:'5px' }}>
               <span style={{ color:'#52c77a', fontSize:'12px', fontWeight:600 }}>♟ {displayedWhiteRating}</span>
-              <span style={{ color: timeW <= 30 ? '#ff5555' : '#f0a030', fontSize:'13px', fontFamily:'monospace', fontWeight:700, background: tickingState==='white'&&clockActive&&!over ? 'rgba(240,160,48,0.18)' : 'rgba(0,0,0,0.3)', padding:'2px 8px', borderRadius:'5px', border:'1px solid rgba(240,160,48,0.2)' }}>⏱ {fmtClock(timeW)}</span>
+              <span style={{ color: timeW <= 30000 ? '#ff5555' : '#f0a030', fontSize:'13px', fontFamily:'monospace', fontWeight:700, background: tickingState==='white'&&clockActive&&!over ? 'rgba(240,160,48,0.18)' : 'rgba(0,0,0,0.3)', padding:'2px 8px', borderRadius:'5px', border:'1px solid rgba(240,160,48,0.2)' }}>⏱ {fmtClock(timeW)}</span>
             </div>
           </div>
           <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:'#2ecc71', boxShadow:'0 0 12px #2ecc71', flexShrink:0 }} />

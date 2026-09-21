@@ -21,8 +21,10 @@ export function useMatchTimer({
   onTimeout = () => {},
   onAbort = () => {},
 }: UseMatchTimerProps = {}) {
-  const [timeW, setTimeW] = React.useState(initialClockStart);
-  const [timeB, setTimeB] = React.useState(initialClockStart);
+  // timeW/timeB are milliseconds, matching the server's clock.whiteMs/blackMs.
+  // initialClockStart (CLOCK_START) is in seconds.
+  const [timeW, setTimeW] = React.useState(initialClockStart * 1000);
+  const [timeB, setTimeB] = React.useState(initialClockStart * 1000);
   const [clockActive, setClockActive] = React.useState(false);
 
   const tickingRef = React.useRef<PieceColor | null>(null);
@@ -74,8 +76,8 @@ export function useMatchTimer({
   }, [initialAbortSecs]);
 
   const resetTimer = React.useCallback(() => {
-    setTimeW(initialClockStart);
-    setTimeB(initialClockStart);
+    setTimeW(initialClockStart * 1000);
+    setTimeB(initialClockStart * 1000);
     if (abortRef.current) clearInterval(abortRef.current);
     abortRef.current = null;
     setTicking(null);

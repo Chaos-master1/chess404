@@ -7,7 +7,7 @@ import { clickSquare, collectErrors, dismissOnboarding, move } from './_helpers'
 // a purely local UI change cannot fake.
 test.describe('card play', () => {
   test('playing a card is applied server-side, not just in the UI', async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const errors = collectErrors(page);
 
     await page.goto('/play');
@@ -25,41 +25,82 @@ test.describe('card play', () => {
     const before = await cards.count();
     expect(before, 'no cards dealt').toBeGreaterThan(0);
 
-    // Mana accrues one per turn and the cheapest spells cost 2, so nothing is
-    // playable on move one. Take quiet flank pawn moves -- legal whatever the
-    // engine replies -- and retry the hand after each one.
+    // No mana system exists: the server gates cards at one-per-turn (canUseCard),
+    // and the dealt hand is random. Take quiet flank pawn moves -- legal whatever
+    // the engine replies -- and probe the hand once it is white's turn again.
     const quietMoves: Array<[string, string]> = [
       ['a2', 'a3'], ['h2', 'h3'], ['b2', 'b3'], ['a3', 'a4'],
       ['h3', 'h4'], ['b3', 'b4'], ['c2', 'c3'], ['g2', 'g3'],
+      ['c3', 'c4'], ['g3', 'g4'], ['b4', 'b5'], ['h4', 'h5'],
     ];
-    // Most mechanics target an enemy piece; the black back rank and pawn line
-    // are the targets that stay occupied through the opening.
-    const enemyTargets = ['b8', 'g8', 'e7', 'd7', 'a8', 'h8'];
+    // Cards need wildly different targets (enemy pieces, own pieces, empty
+    // squares, multi-step sequences), and wrong targets are rejected with a
+    // visible message -- so probe a mixed candidate list and stop at the first
+    // hand reduction. The joker opens a transformation picker the driver does
+    // not script, so skip it.
+    const targets = ['b8', 'g8', 'a8', 'h8', 'e7', 'd7', 'd1', 'c1', 'd5', 'e5'];
 
-    let played = false;
-    for (const [from, to] of quietMoves) {
-      const count = await cards.count();
-      for (let i = 0; i < count && !played; i++) {
-        await cards.nth(i).click();
-        const use = page.getByRole('button', { name: /^use card$/i });
-        if (!(await use.isVisible({ timeout: 3_000 }).catch(() => false))) continue;
-        if (!(await use.isEnabled().catch(() => false))) continue;
-        await use.click();
-        await page.waitForTimeout(4_000);
-        // A card that needs a target sits in a pending state until it gets one.
-        for (const target of enemyTargets) {
-          if ((await cards.count()) < count) break;
-          await clickSquare(page, target);
-          await page.waitForTimeout(3_000);
-        }
-        if ((await cards.count()) < count) played = true;
-      }
-      if (played) break;
-      await move(page, from, to);
-      await page.waitForTimeout(9_000);
+    // A card is only usable on the viewer's turn, so poll the hand instead of
+    // sleeping a fixed amount for the engine reply. A failed probe can leave a
+    // pending card open, which poisons later board clicks, so cancel it before
+    // moving on. When "Use" is disabled (engine's turn) the probe is a cheap
+    // no-op; the expensive target sweep only runs once it is actually our turn.
+    async function cancelPendingCard() {
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.getByText('✕ cancel', { exact: false }).click({ timeout: 800 }).catch(() => {});
+      await page.getByRole('button', { name: '✕ Cancel' }).click({ timeout: 500 }).catch(() => {});
     }
 
-    expect(played, 'no card could be played in eight turns of accumulated mana').toBe(true);
+    // A stuck stream used to leave this test clicking a zombie page for its
+    // whole 10-minute budget. Fail loudly instead of spinning.
+    async function failIfStreamZombie() {
+      const banner = page.getByText('Reconnecting to live match stream');
+      if (!(await banner.isVisible().catch(() => false))) return;
+      for (let i = 0; i < 20; i++) {
+        await page.waitForTimeout(3_000);
+        if (!(await banner.isVisible().catch(() => false))) return;
+      }
+      throw new Error('live match stream stuck on "Reconnecting..." for 60s (zombie-stream regression)');
+    }
+
+    async function tryPlayOneCard(): Promise<boolean> {
+      const count = await cards.count();
+      for (let i = 0; i < count; i++) {
+        const card = cards.nth(i);
+        if ((await card.getAttribute('data-testid'))?.includes('joker')) continue;
+        await card.click();
+        const use = page.getByRole('button', { name: /^use card$/i });
+        if (!(await use.isVisible({ timeout: 1_500 }).catch(() => false))) continue;
+        if (!(await use.isEnabled().catch(() => false))) {
+          await cancelPendingCard();
+          return false;
+        }
+        await use.click();
+        for (const target of targets) {
+          if ((await cards.count()) < count) return true;
+          await clickSquare(page, target);
+          await page.waitForTimeout(700);
+        }
+        if ((await cards.count()) < count) return true;
+        await cancelPendingCard();
+      }
+      return false;
+    }
+
+    let played = false;
+    outer: for (const [from, to] of quietMoves) {
+      await failIfStreamZombie();
+      await move(page, from, to);
+      // Poll up to ~40s for the engine reply (turn flips back to white).
+      for (let attempt = 0; attempt < 26 && !played; attempt++) {
+        await page.waitForTimeout(1_500);
+        await failIfStreamZombie();
+        played = await tryPlayOneCard();
+      }
+      if (played) break outer;
+    }
+
+    expect(played, 'no card could be played in twelve turns').toBe(true);
 
     // Server truth: the reduced hand must survive a reload.
     await page.reload();

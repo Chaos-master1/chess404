@@ -280,6 +280,7 @@ export function connectToMatchStream(
   let reconnectAttempt = 0;
   let lastSeqNum = 0;
   let isWsConnected = false;
+  let pollFailures = 0;
 
   const clearReconnectTimer = () => {
     if (reconnectTimer !== null) {
@@ -309,19 +310,32 @@ export function connectToMatchStream(
       if (disposed) {
         return;
       }
+      let nextDelay = MATCH_POLL_INTERVAL_MS;
       try {
         const snapshot = await fetchMatch(matchId);
         if (!disposed) {
+          pollFailures = 0;
           if (snapshot.seqNum) recordMatchSeqNum(matchId, snapshot.seqNum);
           handlers.onSnapshot(snapshot);
           handlers.onStatusChange?.('connected');
         }
-      } catch {
+      } catch (error) {
         if (!disposed) {
-          handlers.onStatusChange?.('reconnecting');
+          // Back off exponentially so a rate-limited or unreachable gateway
+          // cannot turn the fallback into a hot loop (this exact loop used to
+          // spin at 750ms forever, leaving the match a zombie with a
+          // "Reconnecting..." banner and no way back).
+          pollFailures += 1;
+          nextDelay = Math.min(30_000, MATCH_POLL_RETRY_INTERVAL_MS * 2 ** Math.min(pollFailures - 1, 5));
+          const retryAfter = error instanceof Error ? /retry after (\d+)s/.exec(error.message) : null;
+          if (retryAfter) nextDelay = Math.max(nextDelay, (parseInt(retryAfter[1], 10) || 1) * 1000);
+          // After ten straight failures stop pretending to recover: surface
+          // the manual ↻ Reconnect affordance. The loop keeps trying slowly
+          // in the background so a transient outage still self-heals.
+          handlers.onStatusChange?.(pollFailures >= 10 ? 'disconnected' : 'reconnecting');
         }
       } finally {
-        schedulePoll();
+        if (!disposed) schedulePoll(nextDelay);
       }
     }, delay);
   };
@@ -463,6 +477,7 @@ export function connectToMatchStream(
   const manualRetry = () => {
     if (disposed) return;
     reconnectAttempt = 0;
+    pollFailures = 0;
     clearReconnectTimer();
     clearPollTimer();
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
