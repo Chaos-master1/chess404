@@ -226,6 +226,13 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			// The caller supplied the seat secrets in the request; echoing them
 			// back adds no value and puts them in proxy/CDN logs.
 			resp := service.CreateMatch(req, httputil.NowUTC())
+			// Flush the archive row synchronously: the create response hands the
+			// caller a claim token whose platform-side refresh reads the archive.
+			// The background writeLoop could lose that race, turning the first
+			// WS auth into a spurious auth.error.
+			if err := archive.Flush(); err != nil {
+				log.Printf("archive flush after create failed for match %s: %v", resp.Match.MatchID, err)
+			}
 			httputil.WriteJSON(w, http.StatusCreated, match.RedactSnapshotSecrets(resp))
 		default:
 			httputil.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -277,6 +284,12 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			// just joined before it leaves the process, exactly like the
 			// ongoing WS broadcast stream already scopes each subscriber's copy.
 			resp.Match = match.FilterSnapshotForColor(resp.Match, resp.SeatColor)
+			// Same create-race contract as POST /api/matches: the new seat's
+			// claim refresh reads the archive, so the row must be durable
+			// before the join response can trigger any client action.
+			if err := archive.Flush(); err != nil {
+				log.Printf("archive flush after join failed for match %s: %v", matchID, err)
+			}
 			httputil.WriteJSON(w, http.StatusOK, resp)
 			return
 		}
