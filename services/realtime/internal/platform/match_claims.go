@@ -144,6 +144,39 @@ func (s *MatchClaimStore) Get(matchID, guestID string) (MatchSeatClaim, bool) {
 	return claim, ok
 }
 
+// PeekByToken resolves a claim by token WITHOUT consuming it. Single-use
+// semantics still apply, but the caller owns the consume step: peek first,
+// do the fallible work (archive refresh, upstream auth), then DeleteToken
+// on success. A transient failure therefore cannot burn the token.
+func (s *MatchClaimStore) PeekByToken(matchID, claimToken string) (MatchSeatClaim, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	s.pruneExpiredLocked(now)
+	for _, claim := range s.claims {
+		if claim.MatchID == matchID && subtle.ConstantTimeCompare([]byte(claim.ClaimToken), []byte(claimToken)) == 1 {
+			return claim, true
+		}
+	}
+	return MatchSeatClaim{}, false
+}
+
+// DeleteToken consumes a previously peeked claim (single-use enforcement).
+func (s *MatchClaimStore) DeleteToken(matchID, claimToken string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, claim := range s.claims {
+		if claim.MatchID == matchID && subtle.ConstantTimeCompare([]byte(claim.ClaimToken), []byte(claimToken)) == 1 {
+			delete(s.claims, key)
+			_ = s.deleteManyLocked([]string{key})
+			return
+		}
+	}
+}
+
+// GetByToken resolves AND consumes the single-use claim: the entry is
+// deleted before the token is returned, so a caller whose next step fails
+// burns the token. Fallible callers should prefer PeekByToken + DeleteToken.
 func (s *MatchClaimStore) GetByToken(matchID, claimToken string) (MatchSeatClaim, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

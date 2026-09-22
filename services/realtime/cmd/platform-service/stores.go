@@ -246,6 +246,16 @@ func buildMatchSeatClaimFromSnapshot(matchState contracts.MatchState, guestID, f
 	}, true
 }
 
+// isLikelyArchiveOutage reports whether the archive backend is currently in
+// a state where LoadMatch's ok=false is plausibly TRANSIENT (backend closed
+// mid-shutdown, IO failure) rather than a genuine "no such match". The
+// signals available are process-wide and deliberately conservative: this
+// only gates whether refreshStoredMatchClaim deletes a claim on a miss, so
+// a false "outage" merely delays cleanup of a dead claim until TTL pruning;
+// a false "healthy" burns the claim exactly like the pre-fix code.
+// Tests in this package override this probe to simulate an outage.
+var isLikelyArchiveOutage = platform.ArchiveBackendDegraded
+
 func refreshStoredMatchClaim(
 	archive *platform.MatchArchiveStore,
 	claims *platform.MatchClaimStore,
@@ -253,7 +263,25 @@ func refreshStoredMatchClaim(
 	fallbackSecret string,
 ) (platform.MatchSeatClaim, bool) {
 	matchState, _, ok := archive.LoadMatch(claim.MatchID)
-	if !ok || !isRecoverableMatchStatus(matchState.Status) {
+	if !ok {
+		// Distinguish "the archive has no recoverable row for this match"
+		// (permanent -- the match finished or never existed, so the claim
+		// is dead and may be consumed) from "the archive backend is
+		// temporarily unreadable" (transient -- LoadMatch swallows backend
+		// errors into ok=false). A transient outage used to delete the
+		// claim, so the seat's single-use claim token burned on the first
+		// retry storm and the seat 404'd forever. Archive outages are
+		// bounded (see isLikelyArchiveOutage), so erring toward keeping
+		// the claim is safe: the next prune cycle reaps genuinely dead
+		// claims when their TTL expires.
+		if !isLikelyArchiveOutage() {
+			_ = claims.Delete(claim.MatchID, claim.GuestID)
+		}
+		return platform.MatchSeatClaim{}, false
+	}
+	if !isRecoverableMatchStatus(matchState.Status) {
+		// The row exists but says the match is finished: the claim is
+		// genuinely dead, consume it.
 		_ = claims.Delete(claim.MatchID, claim.GuestID)
 		return platform.MatchSeatClaim{}, false
 	}

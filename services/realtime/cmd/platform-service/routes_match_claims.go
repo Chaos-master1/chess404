@@ -180,7 +180,14 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 			return
 		}
 
-		claim, ok := claims.GetByToken(payload.MatchID, payload.ClaimToken)
+		// Peek first, then run the fallible archive refresh. The old order
+		// (GetByToken deletes, THEN refresh) burned the token whenever the
+		// archive read failed, turning one transient outage into a
+		// permanent 404 for that seat. The token is a TTL-bounded lease:
+		// a successful refresh re-stores it below (renewed), while a
+		// failure leaves it untouched for retry unless the claim is
+		// genuinely dead (refresh deletes those).
+		claim, ok := claims.PeekByToken(payload.MatchID, payload.ClaimToken)
 		if !ok {
 			http.Error(w, `{"error":"unknown room claim token"}`, http.StatusNotFound)
 			return

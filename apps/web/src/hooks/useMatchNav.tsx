@@ -254,10 +254,6 @@ export function useMatchNav(props: UseMatchNavProps) {
   const bottomPlayerName = bottomSeat === 'white' ? displayedWhiteName : displayedBlackName;
   const topPlayerRating = topSeat === 'white' ? displayedWhiteRating : displayedBlackRating;
   const bottomPlayerRating = bottomSeat === 'white' ? displayedWhiteRating : displayedBlackRating;
-  const topPlayerClock = topSeat === 'white' ? timeW : timeB;
-  const bottomPlayerClock = bottomSeat === 'white' ? timeW : timeB;
-  const topClockTicking = tickingState === topSeat && clockActive && !over;
-  const bottomClockTicking = tickingState === bottomSeat && clockActive && !over;
   const shellPageMeta: ShellPageMeta = (() => {
     switch (activePage) {
       case 'Match':
@@ -431,10 +427,6 @@ export function useMatchNav(props: UseMatchNavProps) {
     bottomPlayerName,
     topPlayerRating,
     bottomPlayerRating,
-    topPlayerClock,
-    bottomPlayerClock,
-    topClockTicking,
-    bottomClockTicking,
     shellPageMeta,
     actorSeatForHostedControls,
     actorSeatPlainLabel,

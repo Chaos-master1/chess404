@@ -6,10 +6,25 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
 )
+
+// archiveBackendDegraded is a process-wide, conservative health flag for
+// the archive backend: set when a query against the backing store fails,
+// cleared whenever a query succeeds. LoadMatch collapses backend errors
+// into ok=false, so callers that must distinguish "no such match" from
+// "backend temporarily unreadable" (claim refresh must not burn single-
+// use tokens during a transient outage) consult ArchiveBackendDegraded.
+var archiveBackendDegraded atomic.Bool
+
+// ArchiveBackendDegraded reports whether the most recent archive query
+// failed. It is advisory: false merely means "no failure observed yet".
+func ArchiveBackendDegraded() bool {
+	return archiveBackendDegraded.Load()
+}
 
 type MatchArchiveEntry struct {
 	MatchID            string                          `json:"matchId"`
@@ -53,6 +68,7 @@ type MatchArchiveStore struct {
 	dirty       map[string]struct{}
 	writeCh     chan struct{}
 	closeCh     chan struct{}
+	loopDone    chan struct{} // closed by writeLoop on exit; Close joins it
 	closed      bool
 	persistMu   sync.Mutex
 	useQueries  bool // when true, read ops query the DB instead of scanning in-memory maps
@@ -103,6 +119,7 @@ func newMatchArchiveStore(persistence archivePersistence) (*MatchArchiveStore, e
 		dirty:   make(map[string]struct{}),
 		writeCh: make(chan struct{}, 64),
 		closeCh: make(chan struct{}),
+		loopDone: make(chan struct{}),
 	}
 	// Postgres uses lazy-loaded DB queries; file/SQLite load everything.
 	if persistence != nil && persistence.backend() == "postgres" {
@@ -135,6 +152,7 @@ func (s *MatchArchiveStore) writeLoop() {
 			if s.closed {
 				s.mu.Unlock()
 				s.persistMu.Unlock()
+				close(s.loopDone)
 				return
 			}
 			_ = s.persistLocked()
@@ -146,6 +164,7 @@ func (s *MatchArchiveStore) writeLoop() {
 			_ = s.persistLocked()
 			s.mu.Unlock()
 			s.persistMu.Unlock()
+			close(s.loopDone)
 			return
 		}
 	}
@@ -188,6 +207,12 @@ func (s *MatchArchiveStore) Close() error {
 	s.closed = true
 	close(s.closeCh)
 	s.mu.Unlock()
+
+	// Join the writeLoop so no background persist can be in flight (or
+	// start) once Close returns. Without this, a deferred TempDir removal
+	// in tests races the loop's final SQLite/WAL work - the source of the
+	// sporadic cleanup failures on CI-style runs.
+	<-s.loopDone
 
 	s.persistMu.Lock()
 	s.mu.Lock()
@@ -280,6 +305,7 @@ func (s *MatchArchiveStore) Get(matchID string) (MatchArchiveEntry, bool) {
 	// query errors.
 	if s.useQueries && s.store != nil {
 		queried, found, err := s.store.queryGet(matchID)
+		archiveBackendDegraded.Store(err != nil && !found)
 		if err == nil && found {
 			s.entries[matchID] = queried
 			return cloneArchiveEntry(queried), true
@@ -308,6 +334,7 @@ func (s *MatchArchiveStore) LoadMatch(matchID string) (contracts.MatchState, []c
 	// over the possibly stale overlay.
 	if s.useQueries && s.store != nil {
 		queried, found, err := s.store.queryGet(matchID)
+		archiveBackendDegraded.Store(err != nil && !found)
 		if err == nil && found {
 			privateQ, _, _ := s.store.queryPrivate(matchID)
 			if s.entries == nil {
