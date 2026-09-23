@@ -183,7 +183,8 @@ export default function CommunityPage({
             <button
               onClick={() => void loadGuests()}
               style={{
-                padding: '8px 12px',
+                minHeight: '40px',
+                padding: '9px 16px',
                 borderRadius: '8px',
                 border: '1px solid rgba(255,180,60,0.35)',
                 background: 'linear-gradient(180deg, rgba(200,134,10,0.32) 0%, rgba(122,79,8,0.4) 100%)',
@@ -215,9 +216,45 @@ export default function CommunityPage({
           )}
 
           {loading ? (
-            <div style={{ color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>Loading community profiles...</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} aria-busy="true" aria-label="Loading community profiles">
+              {[1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: '110px',
+                    borderRadius: '14px',
+                    background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%)',
+                    backgroundSize: '200% 100%',
+                    animation: 'shimmer 1.8s infinite',
+                    border: '1px solid rgba(255,165,40,0.1)',
+                  }}
+                />
+              ))}
+            </div>
           ) : guests.length === 0 ? (
-            <div style={{ color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>No guest profiles yet. Create guest sessions or finish a queued match to populate this page.</div>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                padding: '36px 20px',
+                borderRadius: '16px',
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
+                border: '1px solid rgba(255,165,40,0.15)',
+                color: 'rgba(255,232,180,0.72)',
+                fontSize: '13px',
+                lineHeight: 1.65,
+                gap: '8px',
+              }}
+            >
+              <div style={{ fontSize: '32px', marginBottom: '4px' }}>👥</div>
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#ffd487' }}>No Guest Profiles Yet</div>
+              <div style={{ maxWidth: '380px', color: 'rgba(255,232,180,0.65)' }}>
+                Create guest sessions or finish a queued match to populate the community directory.
+              </div>
+            </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {guests.map(player => (
@@ -319,7 +356,28 @@ export default function CommunityPage({
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px' }}>
           {loadingDetail && !featuredGuest ? (
-            <div style={{ color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>Loading guest profile...</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }} aria-busy="true" aria-label="Loading guest profile">
+              <div
+                style={{
+                  height: '140px',
+                  borderRadius: '16px',
+                  background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%)',
+                  backgroundSize: '200% 100%',
+                  animation: 'shimmer 1.8s infinite',
+                  border: '1px solid rgba(255,185,70,0.15)',
+                }}
+              />
+              <div
+                style={{
+                  height: '80px',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 100%)',
+                  backgroundSize: '200% 100%',
+                  animation: 'shimmer 1.8s infinite',
+                  border: '1px solid rgba(255,165,40,0.08)',
+                }}
+              />
+            </div>
           ) : !featuredGuest ? (
             <div style={{ color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>Select a guest from the directory to inspect their profile.</div>
           ) : (

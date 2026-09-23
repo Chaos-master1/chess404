@@ -273,6 +273,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
         utilityGroups={utilityGroups}
         accountLabel={hasPrimaryAccountSession ? 'Account' : 'Sign In'}
         activeKey={activePage}
+        hideBottomNav={pathname?.startsWith('/match/')}
         onNavigate={(key) => {
           const k = key as string;
           if (k === 'Play') router.push('/play');

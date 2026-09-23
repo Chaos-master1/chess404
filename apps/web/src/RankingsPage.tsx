@@ -109,13 +109,15 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                 value={selectedModeId}
                 onChange={(event) => setSelectedModeId(parseModeFilterValue(event.target.value))}
                 style={{
-                  padding: '8px 10px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,180,60,0.24)',
-                  background: 'rgba(255,255,255,0.04)',
+                  minHeight: '40px',
+                  padding: '9px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255,180,60,0.3)',
+                  background: 'rgba(255,255,255,0.05)',
                   color: '#fff2c8',
                   fontSize: '12px',
                   fontWeight: 700,
+                  outline: 'none',
                 }}
               >
                 <option value="">All official modes</option>
@@ -130,13 +132,15 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                 value={selectedSeasonId}
                 onChange={(event) => setSelectedSeasonId(event.target.value)}
                 style={{
-                  padding: '8px 10px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,180,60,0.24)',
-                  background: 'rgba(255,255,255,0.04)',
+                  minHeight: '40px',
+                  padding: '9px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255,180,60,0.3)',
+                  background: 'rgba(255,255,255,0.05)',
                   color: '#fff2c8',
                   fontSize: '12px',
                   fontWeight: 700,
+                  outline: 'none',
                 }}
               >
                 <option value="">All seasons</option>
@@ -149,7 +153,7 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
               <button
                 className="btn-primary"
                 onClick={() => void loadRankings(selectedSeasonId || undefined, selectedModeId || undefined)}
-                style={{ padding: '8px 12px' }}
+                style={{ minHeight: '40px', padding: '9px 16px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 Refresh
               </button>
@@ -233,20 +237,44 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
           )}
 
           {loading ? (
-            <div style={{ color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>Loading rankings...</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }} aria-busy="true" aria-label="Loading rankings">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: '58px',
+                    borderRadius: '12px',
+                    background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%)',
+                    backgroundSize: '200% 100%',
+                    animation: 'shimmer 1.8s infinite',
+                    border: '1px solid rgba(255,180,60,0.1)',
+                  }}
+                />
+              ))}
+            </div>
           ) : accounts.length === 0 ? (
             <div
               style={{
-                padding: '18px',
-                borderRadius: '14px',
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,165,40,0.1)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                padding: '36px 20px',
+                borderRadius: '16px',
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
+                border: '1px solid rgba(255,165,40,0.15)',
                 color: 'rgba(255,232,180,0.72)',
                 fontSize: '13px',
                 lineHeight: 1.65,
+                gap: '8px',
               }}
             >
-              {describeSparseLane(selectedModeId, selectedSeasonId)}
+              <div style={{ fontSize: '32px', marginBottom: '4px' }}>🏆</div>
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#ffd487' }}>No Ranked Players Yet</div>
+              <div style={{ maxWidth: '420px', color: 'rgba(255,232,180,0.65)' }}>
+                {describeSparseLane(selectedModeId, selectedSeasonId)}
+              </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

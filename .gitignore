@@ -33,6 +33,9 @@ Chess404Mobile/android/.gradle/
 *.exe
 *.exe~
 services/realtime/platform-service
+services/realtime/match-service
+services/realtime/matchmaking-service
+services/realtime/nnue-gauntlet
 services/realtime/cmd/gateway/gateway
 
 # Test / report artifacts
@@ -49,6 +52,8 @@ graphify-out/
 .freebuff/
 .claude/
 .zcode/
+.agents/
+.v2c/
 
 # Python
 __pycache__/

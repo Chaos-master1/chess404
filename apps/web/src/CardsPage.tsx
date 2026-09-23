@@ -435,7 +435,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
         </div>
         <div style={{width:1,height:28,background:'rgba(255,255,255,0.1)',margin:'0 4px'}}/>
         {(['All','Spell','Trap'] as const).map(t=>(
-          <button key={t} onClick={()=>setFilterType(t)} style={{padding:'7px 16px',borderRadius:8,fontSize:13,fontWeight:600,background:filterType===t?(t==='Spell'?'rgba(125,211,252,0.15)':t==='Trap'?'rgba(251,146,60,0.15)':'rgba(255,165,40,0.15)'):'rgba(255,255,255,0.06)',backdropFilter:'blur(10px)',color:filterType===t?(t==='Spell'?'#7dd3fc':t==='Trap'?'#fb923c':'#ffb830'):'rgba(200,185,140,0.6)',border:filterType===t?`1px solid ${t==='Spell'?'rgba(125,211,252,0.35)':t==='Trap'?'rgba(251,146,60,0.35)':'rgba(255,165,40,0.35)'}`:'1px solid rgba(255,255,255,0.1)',cursor:'pointer',fontFamily:'inherit'}}>
+          <button key={t} onClick={()=>setFilterType(t)} style={{padding:'9px 16px',minHeight:'40px',borderRadius:8,fontSize:13,fontWeight:600,background:filterType===t?(t==='Spell'?'rgba(125,211,252,0.15)':t==='Trap'?'rgba(251,146,60,0.15)':'rgba(255,165,40,0.15)'):'rgba(255,255,255,0.06)',backdropFilter:'blur(10px)',color:filterType===t?(t==='Spell'?'#7dd3fc':t==='Trap'?'#fb923c':'#ffb830'):'rgba(200,185,140,0.6)',border:filterType===t?`1px solid ${t==='Spell'?'rgba(125,211,252,0.35)':t==='Trap'?'rgba(251,146,60,0.35)':'rgba(255,165,40,0.35)'}`:'1px solid rgba(255,255,255,0.1)',cursor:'pointer',fontFamily:'inherit',display:'inline-flex',alignItems:'center'}}>
             {t==='All'?`All (${CARDS.length})`:t==='Spell'?`⚡ Spell (${CARDS.filter(c=>c.type==='spell').length})`:`🪤 Trap (${CARDS.filter(c=>c.type==='trap').length})`}
           </button>
         ))}
@@ -443,7 +443,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
         {(['All',...RARITY_ORDER] as (Rarity|'All')[]).map(r=>{
           const active=filterRarity===r; const rs2=r!=='All'?RS[r as Rarity]:null;
           const count=r==='All'?CARDS.length:CARDS.filter(c=>c.rarity===r).length;
-          return <button key={r} onClick={()=>setFilterRarity(r)} style={{padding:'5px 14px',borderRadius:20,fontSize:11,fontWeight:700,letterSpacing:'0.4px',background:active?(rs2?`${rs2.accent}22`:'rgba(255,165,40,0.18)'):'rgba(255,255,255,0.06)',backdropFilter:'blur(10px)',color:active?(rs2?rs2.accent:'#ffb830'):'rgba(180,165,130,0.55)',border:active?`1px solid ${rs2?rs2.accent+'55':'rgba(255,165,40,0.4)'}`:'1px solid rgba(255,255,255,0.1)',cursor:'pointer',textTransform:'uppercase',boxShadow:active&&rs2?`0 0 10px ${rs2.glow}40`:'none',fontFamily:'inherit'}}>{r==='All'?'All':RS[r as Rarity].label} <span style={{opacity:0.6,marginLeft:3}}>({count})</span></button>;
+          return <button key={r} onClick={()=>setFilterRarity(r)} style={{padding:'8px 14px',minHeight:'38px',borderRadius:20,fontSize:11,fontWeight:700,letterSpacing:'0.4px',background:active?(rs2?`${rs2.accent}22`:'rgba(255,165,40,0.18)'):'rgba(255,255,255,0.06)',backdropFilter:'blur(10px)',color:active?(rs2?rs2.accent:'#ffb830'):'rgba(180,165,130,0.55)',border:active?`1px solid ${rs2?rs2.accent+'55':'rgba(255,165,40,0.4)'}`:'1px solid rgba(255,255,255,0.1)',cursor:'pointer',textTransform:'uppercase',boxShadow:active&&rs2?`0 0 10px ${rs2.glow}40`:'none',fontFamily:'inherit',display:'inline-flex',alignItems:'center'}}>{r==='All'?'All':RS[r as Rarity].label} <span style={{opacity:0.6,marginLeft:3}}>({count})</span></button>;
         })}
         <div style={{flex:1}}/>
         <div style={{position:'relative'}}>

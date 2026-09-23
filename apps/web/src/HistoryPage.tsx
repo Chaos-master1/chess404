@@ -345,14 +345,18 @@ export default function HistoryPage({
               <button
                 onClick={() => void loadMatches(true)}
                 style={{
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,180,60,0.35)',
+                  minHeight: '40px',
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255,180,60,0.4)',
                   background: 'linear-gradient(180deg, rgba(200,134,10,0.32) 0%, rgba(122,79,8,0.4) 100%)',
                   color: '#fff2c8',
                   fontSize: '12px',
                   fontWeight: 700,
                   cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
                 Refresh
@@ -363,12 +367,41 @@ export default function HistoryPage({
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px' }}>
           {loadingList ? (
-            <div style={{ padding: '16px', color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>Loading archived matches...</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '6px' }} aria-busy="true" aria-label="Loading archived matches">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: '74px',
+                    borderRadius: '12px',
+                    background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%)',
+                    backgroundSize: '200% 100%',
+                    animation: 'shimmer 1.8s infinite',
+                    border: '1px solid rgba(255,180,60,0.1)',
+                  }}
+                />
+              ))}
+            </div>
           ) : matches.length === 0 ? (
-            <div style={{ padding: '16px', color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>
-              {focusGuestId
-                ? 'No archived matches exist for this player seat in the selected mode yet.'
-                : 'No archived matches yet for the selected mode. Start a game and make a move to populate history.'}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              padding: '36px 16px',
+              borderRadius: '14px',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.015) 100%)',
+              border: '1px solid rgba(255,180,60,0.12)',
+              gap: '8px',
+            }}>
+              <div style={{ fontSize: '32px', marginBottom: '4px' }}>📜</div>
+              <div style={{ fontSize: '15px', fontWeight: 800, color: '#ffd487' }}>No Matches Recorded Yet</div>
+              <div style={{ fontSize: '13px', color: 'rgba(255,232,180,0.65)', maxWidth: '340px', lineHeight: 1.5 }}>
+                {focusGuestId
+                  ? 'No archived matches exist for this player seat in the selected mode yet.'
+                  : 'Start a game from the Play Hub and make a move to populate your match history.'}
+              </div>
             </div>
           ) : (
             matches.map(match => {

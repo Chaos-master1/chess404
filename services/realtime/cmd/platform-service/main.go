@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -189,6 +191,23 @@ func (w *jsonContentTypeWriter) WriteHeader(code int) {
 		w.Header().Set("Content-Type", "application/json")
 	}
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *jsonContentTypeWriter) Flush() {
+	if fl, ok := w.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
+}
+
+func (w *jsonContentTypeWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+func (w *jsonContentTypeWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func respondError(w http.ResponseWriter, code int, msg string) {

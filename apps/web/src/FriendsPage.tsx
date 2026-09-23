@@ -456,7 +456,8 @@ export default function FriendsPage({
                 onClick={() => void submitFriendRequest()}
                 disabled={busyRequestId === 'send'}
                 style={{
-                  padding: '10px 12px',
+                  minHeight: '42px',
+                  padding: '10px 16px',
                   borderRadius: '10px',
                   border: '1px solid rgba(255,180,60,0.3)',
                   background: 'linear-gradient(180deg, rgba(200,134,10,0.28) 0%, rgba(122,79,8,0.38) 100%)',
@@ -474,7 +475,8 @@ export default function FriendsPage({
               onClick={() => void loadOverview()}
               style={{
                 justifySelf: 'start',
-                padding: '8px 12px',
+                minHeight: '40px',
+                padding: '9px 16px',
                 borderRadius: '8px',
                 border: '1px solid rgba(255,180,60,0.2)',
                 background: 'rgba(255,255,255,0.04)',
@@ -495,6 +497,7 @@ export default function FriendsPage({
                   value={challengeModeId}
                   onChange={(event) => setChallengeModeId(event.target.value as MatchModeId)}
                   style={{
+                    minHeight: '42px',
                     padding: '10px 12px',
                     borderRadius: '10px',
                     border: '1px solid rgba(255,180,60,0.22)',
@@ -518,7 +521,8 @@ export default function FriendsPage({
                       key={color}
                       onClick={() => setChallengeSeat(color)}
                       style={{
-                        padding: '8px 10px',
+                        minHeight: '38px',
+                        padding: '8px 14px',
                         borderRadius: '999px',
                         border: challengeSeat === color ? '1px solid rgba(255,215,0,0.34)' : '1px solid rgba(255,180,60,0.16)',
                         background: challengeSeat === color ? 'rgba(255,180,60,0.16)' : 'rgba(255,255,255,0.03)',
@@ -624,7 +628,21 @@ export default function FriendsPage({
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '22px 24px 26px' }}>
           {loading && !overview ? (
-            <div style={{ color: 'rgba(255,232,180,0.72)', fontSize: '13px' }}>Loading friends...</div>
+            <div style={{ display: 'grid', gap: '14px', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }} aria-busy="true" aria-label="Loading friends">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: '140px',
+                    borderRadius: '14px',
+                    background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%)',
+                    backgroundSize: '200% 100%',
+                    animation: 'shimmer 1.8s infinite',
+                    border: '1px solid rgba(255,180,60,0.1)',
+                  }}
+                />
+              ))}
+            </div>
           ) : overview?.friends.length ? (
             <div style={{ display: 'grid', gap: '14px', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
               {overview.friends.map((friendship) => (
@@ -651,7 +669,8 @@ export default function FriendsPage({
                         onClick={() => void handleRemoveFriend(friendship)}
                         disabled={busyRequestId === friendship.friendshipId}
                         style={{
-                          padding: '8px 10px',
+                          minHeight: '36px',
+                          padding: '8px 12px',
                           borderRadius: '9px',
                           border: '1px solid rgba(231,76,60,0.32)',
                           background: 'rgba(120,20,20,0.18)',
@@ -668,12 +687,13 @@ export default function FriendsPage({
                         onClick={() => void handleBlockFriend(friendship)}
                         disabled={busyRequestId === `block:${friendship.friendshipId}`}
                         style={{
-                          fontSize: '10px',
-                          padding: '2px 6px',
-                          background: '#4a2030',
-                          color: '#e0a0a0',
-                          border: 'none',
-                          borderRadius: '2px',
+                          minHeight: '36px',
+                          fontSize: '11px',
+                          padding: '8px 10px',
+                          background: 'rgba(120,20,20,0.28)',
+                          color: '#ffd3ce',
+                          border: '1px solid rgba(231,76,60,0.25)',
+                          borderRadius: '8px',
                           cursor: 'pointer',
                           opacity: busyRequestId === `block:${friendship.friendshipId}` ? 0.6 : 1,
                         }}
@@ -695,7 +715,8 @@ export default function FriendsPage({
                       onClick={() => void handleSendChallenge(friendship)}
                       disabled={busyRequestId === `challenge:${friendship.friendshipId}`}
                       style={{
-                        padding: '7px 10px',
+                        minHeight: '36px',
+                        padding: '8px 14px',
                         borderRadius: '8px',
                         border: '1px solid rgba(86,204,120,0.3)',
                         background: 'rgba(30,110,60,0.2)',

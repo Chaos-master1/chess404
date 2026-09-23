@@ -29,12 +29,16 @@ a {
   position: absolute;
   left: -9999px;
   z-index: 9999;
-  padding: 8px 16px;
+  min-height: 44px;
+  padding: 10px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: #ffbe5a;
   color: #000;
   font-size: 14px;
   font-weight: 700;
-  border-radius: 0 0 4px 0;
+  border-radius: 0 0 6px 0;
   text-decoration: none;
 }
 

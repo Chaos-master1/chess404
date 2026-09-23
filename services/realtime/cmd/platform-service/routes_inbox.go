@@ -115,6 +115,8 @@ func registerInboxRoutes(mux *http.ServeMux, guests platform.GuestDirectory, acc
 			http.Error(w, `{"error":"streaming unsupported"}`, http.StatusInternalServerError)
 			return
 		}
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Time{})
 		events, cancel := notifications.Subscribe(session.Account.AccountID, 32)
 		defer cancel()
 

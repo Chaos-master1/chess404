@@ -40,6 +40,7 @@ interface AppShellProps {
   onReturnToMatch?: () => void;
   topNotice?: React.ReactNode;
   children: React.ReactNode;
+  hideBottomNav?: boolean;
 }
 
 function SidebarItem({
@@ -76,6 +77,7 @@ export default function AppShell({
   onReturnToMatch,
   topNotice = null,
   children,
+  hideBottomNav = false,
 }: AppShellProps): React.ReactElement {
   const [mobileToolsOpen, setMobileToolsOpen] = React.useState(false);
 
@@ -163,29 +165,31 @@ export default function AppShell({
           </div>
         ) : null}
 
-        <nav className="app-shell__bottom-nav">
-          {bottomNavItems.map((item) => {
-            const isAccount = item.key === '__account__';
-            const active = isAccount ? activeKey === 'Account' : activeKey === item.key;
-            return (
-              <button
-                key={item.key}
-                className={active ? 'is-active' : ''}
-                aria-current={active ? 'page' : undefined}
-                onClick={() => {
-                  if (isAccount) {
-                    onOpenAccount();
-                    return;
-                  }
-                  onNavigate(item.key);
-                }}
-              >
-                <span className="app-shell__nav-icon">{item.icon}</span>
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        {!hideBottomNav && (
+          <nav className="app-shell__bottom-nav">
+            {bottomNavItems.map((item) => {
+              const isAccount = item.key === '__account__';
+              const active = isAccount ? activeKey === 'Account' : activeKey === item.key;
+              return (
+                <button
+                  key={item.key}
+                  className={active ? 'is-active' : ''}
+                  aria-current={active ? 'page' : undefined}
+                  onClick={() => {
+                    if (isAccount) {
+                      onOpenAccount();
+                      return;
+                    }
+                    onNavigate(item.key);
+                  }}
+                >
+                  <span className="app-shell__nav-icon">{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
       </div>
     </div>
   );

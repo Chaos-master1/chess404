@@ -186,6 +186,17 @@ export function MatchBoardView() {
   const [mobilePanel, setMobilePanel] = React.useState<'left' | 'right' | null>(null);
   const lastDrawOfferTime = React.useRef(0);
 
+  React.useEffect(() => {
+    if (!mobilePanel) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobilePanel(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mobilePanel]);
+
   useFocusTrap(promoRef, promoPicker !== null);
   useFocusTrap(promoFullRef, promo !== null);
   useFocusTrap(cardPromoRef, cardPromo !== null);
@@ -205,28 +216,28 @@ export function MatchBoardView() {
 
   return (
     <div className="match-layout">
-      {/* Mobile panel toggle buttons */}
-      <button
-        type="button"
-        className="match-layout__panel-toggle"
-        style={{ right: mobilePanel === 'right' ? '16px' : '72px' }}
-        onClick={() => setMobilePanel(mobilePanel === 'left' ? null : 'left')}
-        aria-label="Toggle left panel"
-      >
-        {mobilePanel === 'left' ? '✕' : '☰'}
-      </button>
-      <button
-        type="button"
-        className="match-layout__panel-toggle"
-        style={{ right: '16px' }}
-        onClick={() => setMobilePanel(mobilePanel === 'right' ? null : 'right')}
-        aria-label="Toggle right panel"
-      >
-        {mobilePanel === 'right' ? '✕' : '☰'}
-      </button>
+      {/* Mobile drawer backdrop */}
+      {mobilePanel && (
+        <div
+          className="match-drawer__backdrop"
+          onClick={() => setMobilePanel(null)}
+          aria-hidden="true"
+        />
+      )}
 
       {/* ── Left column ── */}
       <div className={`match-layout__left${mobilePanel === 'left' ? ' is-open' : ''}`}>
+        <div className="match-drawer__header">
+          <div className="match-drawer__title">🃏 Card Details & Effects</div>
+          <button
+            type="button"
+            className="match-drawer__close"
+            onClick={() => setMobilePanel(null)}
+            aria-label="Back to board"
+          >
+            ← Back to Board
+          </button>
+        </div>
         <PlayerCardInfo seat={topSeat} />
         {false && (
         <div style={{
@@ -573,6 +584,11 @@ export function MatchBoardView() {
           </div>
         )}
 
+        {/* Mobile top seat bar */}
+        <div className="match-mobile-seat-bar match-mobile-seat-bar--top">
+          <PlayerCardInfo seat={topSeat} />
+        </div>
+
         <CardHand hand={topHand} playerColor={topSeat} position="top" />
 
         <div
@@ -757,6 +773,136 @@ export function MatchBoardView() {
         </div>
 
         <CardHand hand={bottomHand} playerColor={bottomSeat} position="bottom" />
+
+        {/* Mobile bottom seat bar */}
+        <div className="match-mobile-seat-bar match-mobile-seat-bar--bottom">
+          <PlayerCardInfo seat={bottomSeat} />
+        </div>
+
+        {/* Mobile action bar */}
+        <div className="match-mobile-action-bar">
+          <div className="match-mobile-action-bar__status">
+            {over ? (
+              <span style={{ fontWeight: 800 }}>
+                {winner === 'aborted' ? '🚫 Game Aborted' : winner === 'draw' ? '🤝 Draw Game' : `${winner === 'white' ? '⚪ White' : '⚫ Black'} Won!`}
+                {activeFinishReasonLabel ? ` (${activeFinishReasonLabel})` : ''}
+              </span>
+            ) : (
+              <span>
+                {check
+                  ? <span style={{ color: '#ffaa00' }}>⚠️ CHECK! {turn === 'white' ? '⚪ White' : '⚫ Black'}</span>
+                  : `Turn: ${turn === 'white' ? '⚪ White' : '⚫ Black'}`}
+              </span>
+            )}
+          </div>
+          <div className="match-mobile-action-bar__buttons">
+            {over ? (
+              <>
+                {winner !== 'aborted' && (
+                  <button
+                    disabled={authoritativeRematchBusy}
+                    className="match-mobile-btn match-mobile-btn--primary"
+                    onClick={() => {
+                      if (canCreateDirectRematch) { void createAuthoritativeRematchRoom(); return; }
+                      if (canQueueSameLane) { returnToSameQueueLane(); return; }
+                      if (hostedRuntime) { returnToQueueHome(); return; }
+                      newGame();
+                    }}
+                  >
+                    {finishedPrimaryActionLabel}
+                  </button>
+                )}
+                <button
+                  className="match-mobile-btn"
+                  onClick={() => {
+                    if (hostedRuntime) { returnToQueueHome(); return; }
+                    newGame();
+                  }}
+                >
+                  {finishedSecondaryActionLabel}
+                </button>
+              </>
+            ) : (
+              <>
+                {movHist.length <= 1 ? (
+                  <button
+                    disabled={hostedActionLocked}
+                    className="match-mobile-btn"
+                    onClick={() => {
+                      if (hostedActionLocked) return;
+                      if (authoritativeMatchIdRef.current) {
+                        stopAbortCountdown();
+                        void submitAuthoritativeIntent({ type: 'abort', ...authoritativeActorForColor(controlSender) });
+                        return;
+                      }
+                      stopAbortCountdown();
+                      setWinner('aborted');
+                      setOver(true);
+                    }}
+                  >
+                    ✕ Abort
+                  </button>
+                ) : (
+                  <button
+                    className="match-mobile-btn match-mobile-btn--danger"
+                    onClick={() => {
+                      if (confirmResign === 'idle') {
+                        setConfirmResign('prompting');
+                        setTimeout(() => setConfirmResign('idle'), 4000);
+                        return;
+                      }
+                      if (authoritativeMatchIdRef.current) {
+                        void submitAuthoritativeIntent({ type: 'resign', ...authoritativeActorForColor(controlSender) });
+                        return;
+                      }
+                      setWinner(turn === 'white' ? 'black' : 'white');
+                      setOver(true);
+                    }}
+                  >
+                    {confirmResign === 'prompting' ? 'Resign?' : '🏳 Resign'}
+                  </button>
+                )}
+                <button
+                  className="match-mobile-btn"
+                  onClick={() => {
+                    if (authoritativeMatchIdRef.current) {
+                      void submitAuthoritativeIntent({ type: 'offer_draw', ...authoritativeActorForColor(controlSender) });
+                      return;
+                    }
+                    setDrawOffer(turn);
+                  }}
+                >
+                  🤝 Draw
+                </button>
+                <button
+                  type="button"
+                  className="match-mobile-btn match-mobile-btn--icon"
+                  onClick={toggleSound}
+                  aria-label={soundEnabled ? 'Mute sound' : 'Unmute sound'}
+                  title={soundEnabled ? 'Sound On' : 'Sound Off'}
+                >
+                  {soundEnabled ? '🔊' : '🔇'}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="match-mobile-action-bar__tools">
+            <button
+              type="button"
+              className={`match-mobile-tool-btn ${mobilePanel === 'right' ? 'is-active' : ''}`}
+              onClick={() => setMobilePanel(mobilePanel === 'right' ? null : 'right')}
+            >
+              💬 Chat & Moves {chatMessages.length > 0 && <span className="match-mobile-badge">{chatMessages.length}</span>}
+            </button>
+            <button
+              type="button"
+              className={`match-mobile-tool-btn ${mobilePanel === 'left' ? 'is-active' : ''}`}
+              onClick={() => setMobilePanel(mobilePanel === 'left' ? null : 'left')}
+            >
+              🃏 Card Info {cardPending && <span className="match-mobile-badge">!</span>}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ── Right panel ── */}
@@ -770,6 +916,17 @@ export function MatchBoardView() {
         boxShadow:'0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,165,40,0.12), 0 0 40px rgba(200,80,10,0.12)',
         overflow:'auto', margin:'10px 0',
       }}>
+        <div className="match-drawer__header">
+          <div className="match-drawer__title">💬 Chat & Move History</div>
+          <button
+            type="button"
+            className="match-drawer__close"
+            onClick={() => setMobilePanel(null)}
+            aria-label="Back to board"
+          >
+            ← Back to Board
+          </button>
+        </div>
 
         {/* Round + rarity panel */}
         <div style={{
@@ -1014,9 +1171,9 @@ export function MatchBoardView() {
                     setWinner('aborted');
                     setOver(true);
                   }}
-                    style={{ flex:1, padding:'9px', fontSize:'12px', background:'linear-gradient(180deg,#3a4055,#222638)', color:'#ccc', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold' }}>✕ Abort</button>
+                    style={{ flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px', background:'linear-gradient(180deg,#3a4055,#222638)', color:'#ccc', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold' }}>✕ Abort</button>
                 ) : (
-                  <button onClick={newGame} style={{ flex:1, padding:'9px', fontSize:'12px', background:'linear-gradient(180deg,#1a8a40,#0f5a28)', color:'#fff', border:'1px solid rgba(46,204,113,0.4)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold', boxShadow:'0 2px 12px rgba(30,140,70,0.4)' }}>♟ New Game</button>
+                  <button onClick={newGame} style={{ flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px', background:'linear-gradient(180deg,#1a8a40,#0f5a28)', color:'#fff', border:'1px solid rgba(46,204,113,0.4)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold', boxShadow:'0 2px 12px rgba(30,140,70,0.4)' }}>♟ New Game</button>
                 )}
           <button data-testid="btn-resign" disabled={hostedActionLocked} onClick={() => {
             if (hostedActionLocked) {
@@ -1033,7 +1190,7 @@ export function MatchBoardView() {
             }
           }}
           style={{
-            flex:1, padding:'9px', fontSize:'12px',
+            flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px',
             background: 'linear-gradient(180deg,#8a1a1a,#5a0f0f)',
             color:'#fff',
             border: '1px solid rgba(220,60,60,0.4)',
@@ -1051,8 +1208,8 @@ export function MatchBoardView() {
                 return;
               }
               setDrawOffer(turn);
-            }} style={{ flex:1, padding:'9px', fontSize:'12px', background:'linear-gradient(180deg,#8a6010,#5a3e08)', color:'#fff', border:'1px solid rgba(240,160,30,0.4)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold', boxShadow:'0 2px 12px rgba(180,120,20,0.4)' }}>🤝 Draw</button>
-            : <button disabled style={{ flex:1, padding:'9px', fontSize:'12px', background:'rgba(60,60,80,0.35)', color:'rgba(255,255,255,0.3)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'7px', fontWeight:'bold', cursor:'not-allowed' }}>Draw sent…</button>
+            }} style={{ flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px', background:'linear-gradient(180deg,#8a6010,#5a3e08)', color:'#fff', border:'1px solid rgba(240,160,30,0.4)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold', boxShadow:'0 2px 12px rgba(180,120,20,0.4)' }}>🤝 Draw</button>
+            : <button disabled style={{ flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px', background:'rgba(60,60,80,0.35)', color:'rgba(255,255,255,0.3)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'7px', fontWeight:'bold', cursor:'not-allowed' }}>Draw sent…</button>
           }
               </>
             )}
@@ -1061,20 +1218,26 @@ export function MatchBoardView() {
 
         <div style={{ display:'flex', justifyContent:'center', gap:'6px', flexShrink:0, marginTop:'4px', flexWrap:'wrap' }}>
           <button onClick={toggleSound} style={{
-            padding:'5px 10px', fontSize:'10px', fontWeight:700, cursor:'pointer',
+            padding:'8px 14px', minHeight:'40px', fontSize:'12px', fontWeight:700, cursor:'pointer',
             background: soundEnabled ? 'rgba(74,222,128,0.12)' : 'rgba(100,100,120,0.15)',
             color: soundEnabled ? '#86efac' : 'rgba(200,200,220,0.5)',
             border: soundEnabled ? '1px solid rgba(74,222,128,0.3)' : '1px solid rgba(200,200,220,0.08)',
             borderRadius:'6px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
           }}>
             {soundEnabled ? '🔊 Sound On' : '🔇 Sound Off'}
           </button>
           <button onClick={toggleColorBlind} style={{
-            padding:'5px 10px', fontSize:'10px', fontWeight:700, cursor:'pointer',
+            padding:'8px 14px', minHeight:'40px', fontSize:'12px', fontWeight:700, cursor:'pointer',
             background: colorBlindMode ? 'rgba(96,165,250,0.12)' : 'rgba(100,100,120,0.15)',
             color: colorBlindMode ? '#93c5fd' : 'rgba(200,200,220,0.5)',
             border: colorBlindMode ? '1px solid rgba(96,165,250,0.3)' : '1px solid rgba(200,200,220,0.08)',
             borderRadius:'6px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
           }}>
             {colorBlindMode ? '🎨 CB On' : '🏳 CB Off'}
           </button>

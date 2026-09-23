@@ -811,18 +811,22 @@ export default function QueuePage({
                 disabled={restoringTickets || (name === 'rated' && !ratedAllowed)}
                 style={{
                   flex: 1,
-                  padding: '9px 12px',
-                  borderRadius: '9px',
-                  border: queue === name ? '1px solid rgba(255,180,60,0.3)' : '1px solid rgba(255,255,255,0.08)',
+                  minHeight: '44px',
+                  padding: '11px 14px',
+                  borderRadius: '10px',
+                  border: queue === name ? '1px solid rgba(255,180,60,0.45)' : '1px solid rgba(255,255,255,0.08)',
                   background: queue === name
-                    ? 'linear-gradient(180deg, rgba(200,134,10,0.22) 0%, rgba(70,42,8,0.34) 100%)'
+                    ? 'linear-gradient(180deg, rgba(200,134,10,0.28) 0%, rgba(70,42,8,0.42) 100%)'
                     : 'rgba(255,255,255,0.03)',
                   color: queue === name ? '#fff1c7' : 'rgba(255,232,180,0.75)',
                   textTransform: 'uppercase',
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 800,
                   cursor: restoringTickets ? 'not-allowed' : 'pointer',
                   opacity: restoringTickets ? 0.7 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
                 {hostedRuntime && name === 'rated' && !hostedRatedReady ? 'rated (sign in)' : name}
@@ -837,17 +841,21 @@ export default function QueuePage({
                 disabled={restoringTickets}
                 style={{
                   flex: 1,
-                  padding: '9px 12px',
-                  borderRadius: '9px',
-                  border: modeId === mode.id ? '1px solid rgba(120,190,255,0.34)' : '1px solid rgba(255,255,255,0.08)',
+                  minHeight: '44px',
+                  padding: '11px 14px',
+                  borderRadius: '10px',
+                  border: modeId === mode.id ? '1px solid rgba(120,190,255,0.45)' : '1px solid rgba(255,255,255,0.08)',
                   background: modeId === mode.id
-                    ? 'linear-gradient(180deg, rgba(54,102,184,0.24) 0%, rgba(24,40,82,0.34) 100%)'
+                    ? 'linear-gradient(180deg, rgba(54,102,184,0.3) 0%, rgba(24,40,82,0.42) 100%)'
                     : 'rgba(255,255,255,0.03)',
                   color: modeId === mode.id ? '#e5f0ff' : 'rgba(210,225,255,0.75)',
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 800,
                   cursor: restoringTickets ? 'not-allowed' : 'pointer',
                   opacity: restoringTickets ? 0.7 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
                 title={mode.rulesSummary}
               >

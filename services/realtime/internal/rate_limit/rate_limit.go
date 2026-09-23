@@ -525,6 +525,16 @@ func (w *headerStrippingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, e
 	return nil, nil, http.ErrNotSupported
 }
 
+func (w *headerStrippingResponseWriter) Flush() {
+	if fl, ok := w.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
+}
+
+func (w *headerStrippingResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 func NewHeaderStrippingMiddleware(headers ...string) func(http.Handler) http.Handler {
 	stripped := make(map[string]struct{}, len(headers))
 	for _, h := range headers {
