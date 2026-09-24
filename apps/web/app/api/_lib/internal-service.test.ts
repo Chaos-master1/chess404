@@ -1,6 +1,17 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
-import { buildUpstreamHeaders } from "./internal-service";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildUpstreamHeaders, proxyInternalServiceStream } from "./internal-service";
+
+const streamConfig = {
+  fallbackUrl: "http://platform-service.railway.internal:8080",
+  envName: "PLATFORM_SERVICE_INTERNAL_URL",
+  serviceName: "platform-service",
+} as const;
+
+afterEach(() => {
+  // Node's global fetch has no default mock; every stream test installs its own.
+  vi.unstubAllGlobals();
+});
 
 function makeRequest(headers: Record<string, string>, url = "https://web-production-9a697.up.railway.app/api/gateway/bootstrap"): Request {
   return new Request(url, { method: "POST", headers });
@@ -77,4 +88,82 @@ describe("buildUpstreamHeaders", () => {
       }
     }
   });
+});
+
+describe("proxyInternalServiceStream", () => {
+  function makeStreamRequest(): Request {
+    return new Request("https://web.test/api/platform/inbox/stream", {
+      method: "POST",
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  function stubFetchWithSlowBody(chunks: string[]): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            let i = 0;
+            const push = () => {
+              if (i < chunks.length) {
+                controller.enqueue(encoder.encode(chunks[i++]));
+                setTimeout(push, 50);
+              } else {
+                controller.close();
+              }
+            };
+            push();
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+  }
+
+  it("keeps streaming the body after the establishment budget elapses (long-poll survival)", async () => {
+    stubFetchWithSlowBody(["data: a\n\n", "data: b\n\n", "data: c\n\n"]);
+    const response = await proxyInternalServiceStream(makeStreamRequest(), "/inbox/stream", streamConfig, 30);
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    expect(text).toContain("data: a");
+    expect(text).toContain("data: c");
+  }, 10_000);
+
+  it("aborts upstream when headers never arrive within the establishment budget", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted.", "AbortError")),
+            );
+          }),
+      ),
+    );
+    const response = await proxyInternalServiceStream(makeStreamRequest(), "/inbox/stream", streamConfig, 30);
+    expect(response.status).toBe(502);
+    const payload = (await response.json()) as { error?: string };
+    expect(payload.error).toContain("unreachable");
+  }, 10_000);
+
+  it("propagates the client method to the upstream request", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await proxyInternalServiceStream(makeStreamRequest(), "/inbox/stream", streamConfig, 5_000);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+  }, 10_000);
 });

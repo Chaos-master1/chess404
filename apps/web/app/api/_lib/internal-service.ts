@@ -3,6 +3,9 @@
 // internal hop and long enough for a wedged upstream to exhaust the Next.js
 // event loop.
 const UPSTREAM_TIMEOUT_MS = 8000;
+// Must stay >= the upstream long-poll window (platform-service holds
+// /inbox/stream for ~15s per request). This budget covers response
+// establishment only -- see proxyInternalServiceStream.
 const UPSTREAM_STREAM_TIMEOUT_MS = 15000;
 
 // The Fetch spec forbids a body on these statuses -- the Response
@@ -58,16 +61,27 @@ export async function proxyInternalService(request: Request, path: string, confi
   }
 }
 
-export async function proxyInternalServiceStream(request: Request, path: string, config: InternalServiceProxyConfig): Promise<Response> {
+export async function proxyInternalServiceStream(
+  request: Request,
+  path: string,
+  config: InternalServiceProxyConfig,
+  streamTimeoutMs: number = UPSTREAM_STREAM_TIMEOUT_MS,
+): Promise<Response> {
   const resolved = resolveInternalServiceBaseUrl(config);
   const url = `${resolved.baseUrl}${path}`;
+  // The budget must only cover establishing the upstream response (headers),
+  // never the stream lifetime: platform-service long-polls /inbox/stream for
+  // ~15s per request, so an AbortSignal.timeout(15s) here killed the body of
+  // every healthy stream at exactly 15s and surfaced as "failed to pipe
+  // response" TimeoutErrors in the web logs. Clear the timer the moment
+  // fetch() resolves with headers, then hand the body through untouched.
+  const upstreamAbort = new AbortController();
+  const establishTimer = setTimeout(() => upstreamAbort.abort(), streamTimeoutMs);
   const init: RequestInit = {
     method: request.method,
     headers: buildUpstreamHeaders(request),
     cache: 'no-store',
-    // Longer than the unary path: this is a long-lived SSE stream, so the
-    // budget only needs to cover establishing it, not the stream lifetime.
-    signal: AbortSignal.timeout(UPSTREAM_STREAM_TIMEOUT_MS),
+    signal: upstreamAbort.signal,
   };
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -86,6 +100,8 @@ export async function proxyInternalServiceStream(request: Request, path: string,
     });
   } catch (error) {
     return buildProxyFailureResponse(config, resolved, error);
+  } finally {
+    clearTimeout(establishTimer);
   }
 }
 
