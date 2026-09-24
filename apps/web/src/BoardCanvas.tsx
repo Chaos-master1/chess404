@@ -1674,6 +1674,17 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
 
   const touchLongPressTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Latest-ref indirection for the native (non-passive) touch listeners below:
+  // the handlers close over frequently-changing state (cardPending, localDrag,
+  // displayBoard, ...), so the once-registered native listeners must always
+  // call the freshest render's implementations.
+  const touchHandlersRef = React.useRef<{
+    start: (e: TouchEvent) => void;
+    move: (e: TouchEvent) => void;
+    end: (e: TouchEvent) => void;
+    cancel: (e: TouchEvent) => void;
+  }>({ start: () => {}, move: () => {}, end: () => {}, cancel: () => {} });
+
   const handleTouchStart = (e: TouchEvent) => {
     if (e.cancelable) e.preventDefault();
     touchMoved.current = false;
@@ -1760,6 +1771,40 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     touchStartSq.current = null;
     touchMoved.current = false;
   };
+
+  // Board touch input must go through NATIVE listeners registered with
+  // { passive: false }. React attaches synthetic touchstart/touchmove at the
+  // root as PASSIVE listeners, so the preventDefault() calls inside these
+  // handlers were silent no-ops -- every piece drag on a phone also scrolled
+  // the page (and Chrome logged "Unable to preventDefault inside passive
+  // event listener" for each attempt). Registered once; dispatch through the
+  // latest-ref so handlers always see current props/state.
+  touchHandlersRef.current = {
+    start: handleTouchStart,
+    move: handleTouchMove,
+    end: handleTouchEnd,
+    cancel: handleTouchCancel,
+  };
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const opts: AddEventListenerOptions = { passive: false };
+    const onStart = (e: TouchEvent) => touchHandlersRef.current.start(e);
+    const onMove = (e: TouchEvent) => touchHandlersRef.current.move(e);
+    const onEnd = (e: TouchEvent) => touchHandlersRef.current.end(e);
+    const onCancel = (e: TouchEvent) => touchHandlersRef.current.cancel(e);
+    canvas.addEventListener('touchstart', onStart, opts);
+    canvas.addEventListener('touchmove', onMove, opts);
+    canvas.addEventListener('touchend', onEnd, opts);
+    canvas.addEventListener('touchcancel', onCancel, opts);
+    return () => {
+      canvas.removeEventListener('touchstart', onStart);
+      canvas.removeEventListener('touchmove', onMove);
+      canvas.removeEventListener('touchend', onEnd);
+      canvas.removeEventListener('touchcancel', onCancel);
+    };
+  }, []);
 
 
 
@@ -1929,10 +1974,6 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
         onMouseUp={handleMouseUp}
         onClick={handleClick}
         onMouseLeave={handleMouseLeave}
-        onTouchStart={handleTouchStart as any}
-        onTouchMove={handleTouchMove as any}
-        onTouchEnd={handleTouchEnd as any}
-        onTouchCancel={handleTouchCancel as any}
         onKeyDown={handleKeyDown}
       />
       <div aria-live="polite" className="sr-only">

@@ -7,7 +7,7 @@ import { test, expect, request as pwRequest } from '@playwright/test';
 // read is exercised against match-service's own public origin -- which is the
 // surface a stranger can actually reach.
 const MATCH_SERVICE =
-  process.env.E2E_MATCH_SERVICE_URL ?? 'https://match-service-production.up.railway.app';
+  process.env.E2E_MATCH_SERVICE_URL ?? 'https://match-service-production-c56b.up.railway.app';
 
 test.describe('spectator privacy', () => {
   test('anonymous match reads leak neither secrets nor hands', async ({ baseURL }) => {
