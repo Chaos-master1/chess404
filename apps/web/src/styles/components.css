@@ -166,19 +166,27 @@
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 190, 90, 0.18);
-  background: rgba(255, 255, 255, 0.04);
+  background: #121824;
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 14px;
   font-weight: 600;
   outline: none;
   box-sizing: border-box;
+  color-scheme: dark;
 }
 
 .input:focus,
 .select:focus {
   border-color: rgba(255, 190, 90, 0.35);
   box-shadow: 0 0 0 3px rgba(200, 134, 10, 0.14);
+}
+
+.select option,
+select option {
+  background-color: #121824 !important;
+  color: #fff4d6 !important;
+  padding: 8px 12px;
 }
 
 .section-grid {

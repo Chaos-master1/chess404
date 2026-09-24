@@ -146,12 +146,14 @@ export default function AdminModerationPage({
                   padding: '10px 12px',
                   borderRadius: '10px',
                   border: '1px solid rgba(255,180,60,0.22)',
-                  background: 'rgba(12,8,24,0.8)',
-                  color: '#fff3d3',
+                  background: '#121824',
+                  color: '#fff4d6',
+                  colorScheme: 'dark',
+                  cursor: 'pointer',
                 }}
               >
                 {STATUS_OPTIONS.map((option) => (
-                  <option key={option.value || 'all'} value={option.value}>
+                  <option key={option.value || 'all'} value={option.value} style={{ background: '#121824', color: '#fff4d6' }}>
                     {option.label}
                   </option>
                 ))}

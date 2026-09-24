@@ -106,7 +106,7 @@ export default function LobbiesPage({ identity, displayName, hostedRuntime, embe
               <span style={{ color: '#dbe8ff', fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Mode</span>
               <select className="input input-glow" value={modeId} onChange={event => setModeId(event.target.value as MatchModeId)} style={selectStyle}>
                 {OFFICIAL_MATCH_MODES.map(mode => (
-                  <option key={mode.id} value={mode.id}>{mode.label}</option>
+                  <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#eef4ff' }}>{mode.label}</option>
                 ))}
               </select>
             </label>
@@ -262,10 +262,12 @@ const selectStyle: React.CSSProperties = {
   padding: '12px 14px',
   borderRadius: '12px',
   border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.05)',
+  background: '#121824',
   color: '#eef4ff',
+  colorScheme: 'dark',
   fontSize: '13px',
   outline: 'none',
+  cursor: 'pointer',
 };
 
 const primaryButtonStyle: React.CSSProperties = {

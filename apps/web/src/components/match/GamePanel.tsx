@@ -77,11 +77,11 @@ export function GamePanel({
                             <span style={{ color:'#8f8' }}>Report submitted</span>
                           ) : (
                             <>
-                              <select value={reportCategory} onChange={e=>setReportCategory(e.target.value)} style={{ fontSize:'11px', padding:'2px', background:'#1a1f2e', color:'#d0d8e8', border:'1px solid #2a3040', borderRadius:'2px' }}>
-                                <option value="abuse">Abuse</option>
-                                <option value="harassment">Harassment</option>
-                                <option value="spam">Spam</option>
-                                <option value="other">Other</option>
+                              <select value={reportCategory} onChange={e=>setReportCategory(e.target.value)} style={{ fontSize:'11px', padding:'2px', background:'#1a1f2e', color:'#d0d8e8', colorScheme:'dark', border:'1px solid #2a3040', borderRadius:'2px', cursor:'pointer' }}>
+                                <option value="abuse" style={{ background:'#1a1f2e', color:'#d0d8e8' }}>Abuse</option>
+                                <option value="harassment" style={{ background:'#1a1f2e', color:'#d0d8e8' }}>Harassment</option>
+                                <option value="spam" style={{ background:'#1a1f2e', color:'#d0d8e8' }}>Spam</option>
+                                <option value="other" style={{ background:'#1a1f2e', color:'#d0d8e8' }}>Other</option>
                               </select>
                               <textarea value={reportDetails} onChange={e=>setReportDetails(e.target.value)} placeholder="Details (optional)" rows={2} style={{ fontSize:'11px', padding:'2px', background:'#1a1f2e', color:'#d0d8e8', border:'1px solid #2a3040', borderRadius:'2px', resize:'none' }}/>
                               <div style={{ display:'flex', gap:'4px' }}>

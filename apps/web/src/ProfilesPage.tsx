@@ -495,15 +495,17 @@ export default function ProfilesPage({
                 padding: '9px 10px',
                 borderRadius: '10px',
                 border: '1px solid rgba(255,180,60,0.24)',
-                background: 'rgba(255,255,255,0.04)',
-                color: '#fff2c8',
+                background: '#121824',
+                color: '#fff4d6',
+                colorScheme: 'dark',
                 fontSize: '12px',
                 fontWeight: 700,
+                cursor: 'pointer',
               }}
             >
-              <option value="">All official modes</option>
+              <option value="" style={{ background: '#121824', color: '#fff4d6' }}>All official modes</option>
               {OFFICIAL_MATCH_MODES.map((mode) => (
-                <option key={mode.id} value={mode.id}>
+                <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#fff4d6' }}>
                   {mode.label}
                 </option>
               ))}
@@ -871,14 +873,16 @@ export default function ProfilesPage({
                             padding: '9px 10px',
                             borderRadius: '10px',
                             border: '1px solid rgba(255,180,60,0.24)',
-                            background: 'rgba(255,255,255,0.04)',
-                            color: '#fff2c8',
+                            background: '#121824',
+                            color: '#fff4d6',
+                            colorScheme: 'dark',
                             fontSize: '12px',
                             fontWeight: 700,
+                            cursor: 'pointer',
                           }}
                         >
                           {['abuse', 'harassment', 'spam', 'impersonation', 'cheating', 'other'].map((category) => (
-                            <option key={category} value={category}>
+                            <option key={category} value={category} style={{ background: '#121824', color: '#fff4d6' }}>
                               {category}
                             </option>
                           ))}

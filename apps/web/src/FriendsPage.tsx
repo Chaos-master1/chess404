@@ -501,15 +501,17 @@ export default function FriendsPage({
                     padding: '10px 12px',
                     borderRadius: '10px',
                     border: '1px solid rgba(255,180,60,0.22)',
-                    background: 'rgba(255,255,255,0.04)',
-                    color: '#fff2c8',
+                    background: '#121824',
+                    color: '#fff4d6',
+                    colorScheme: 'dark',
                     fontSize: '12px',
                     fontWeight: 700,
                     outline: 'none',
+                    cursor: 'pointer',
                   }}
                 >
                   {OFFICIAL_MATCH_MODES.map((mode) => (
-                    <option key={mode.id} value={mode.id}>{mode.label}</option>
+                    <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#fff4d6' }}>{mode.label}</option>
                   ))}
                 </select>
               </label>

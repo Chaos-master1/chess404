@@ -2,6 +2,11 @@
 @import '../src/styles/components.css';
 @import '../src/styles/layout.css';
 
+:root,
+html {
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -10,6 +15,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  color-scheme: dark;
 }
 
 body {
@@ -52,6 +58,42 @@ input,
 select,
 textarea {
   font: inherit;
+  color-scheme: dark;
+}
+
+select {
+  background-color: #121824;
+  color: #fff4d6;
+}
+
+select option,
+select optgroup,
+option,
+optgroup {
+  background-color: #121824 !important;
+  color: #fff4d6 !important;
+}
+
+select option:checked,
+select option:hover,
+select option:focus {
+  background-color: #242f45 !important;
+  color: #ffffff !important;
+}
+
+/* Autofill dark mode override to prevent light browser popups and white flashes */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff4d6;
+  -webkit-box-shadow: 0 0 0px 1000px #121824 inset;
+  transition: background-color 5000s ease-in-out 0s;
 }
 
 img,

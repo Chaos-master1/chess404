@@ -156,16 +156,18 @@ export default function WatchPage({ onWatchMatch, onOpenReplay }: WatchPageProps
                 minWidth: '180px',
                 padding: '9px 12px',
                 borderRadius: '9px',
-                border: '1px solid rgba(255,255,255,0.10)',
-                background: 'rgba(255,255,255,0.04)',
-                color: '#fff2c8',
+                border: '1px solid rgba(255,180,60,0.25)',
+                background: '#121824',
+                color: '#fff4d6',
+                colorScheme: 'dark',
                 fontSize: '12px',
                 fontWeight: 700,
+                cursor: 'pointer',
               }}
             >
-              <option value="">All official modes</option>
+              <option value="" style={{ background: '#121824', color: '#fff4d6' }}>All official modes</option>
               {OFFICIAL_MATCH_MODES.filter((mode) => mode.id !== 'computer').map((mode) => (
-                <option key={mode.id} value={mode.id}>
+                <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#fff4d6' }}>
                   {mode.label}
                 </option>
               ))}
