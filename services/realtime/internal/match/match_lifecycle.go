@@ -565,9 +565,31 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 
 	from, to, ok := firstLegalMoveForColorConstrained(c.state)
 	if !ok {
-		// No legal move at all -- genuine checkmate/stalemate, not a bug;
-		// the normal automatic-finish path (evaluated on the human's next
-		// intent) will resolve it.
+		inCheck, isMate, isStale := gameStatusWithFusion(c.state.Board, c.state.Turn, c.state.LastMove, sliceToSet(c.state.Moved), c.state.FortressZones)
+		finishReason := "stalemate"
+		winner := "draw"
+		if isMate || inCheck {
+			finishReason = "checkmate"
+			winner = opposite(c.state.Turn)
+		} else if isStale {
+			finishReason = "stalemate"
+			winner = "draw"
+		}
+		c.state.Status = "finished"
+		c.state.Winner = winner
+		c.state.FinishReason = finishReason
+		finishEvents := []contracts.MatchEvent{
+			makeEvent(c.state.MatchID, "match_finished", now, "system", map[string]any{
+				"result": finishReason,
+				"winner": winner,
+			}),
+		}
+		c.events = append(c.events, finishEvents...)
+		snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), finishEvents, now)
+		persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
+		s.persistSnapshot(persistSnap)
+		s.saveToRedis(persistSnap, c.presence)
+		s.broadcastLocked(c, snapshot)
 		return
 	}
 

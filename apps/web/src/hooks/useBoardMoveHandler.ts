@@ -311,6 +311,27 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
         setSelectedCard?.(null);
       }
       if (matchId) {
+        // Optimistic board update for instant, responsive feel
+        if (livePiece) {
+          const nextBoard: Board = liveBoard.map(row => row.map(cell => cell ? { ...cell } : null));
+          if (livePiece.type === 'king' && Math.abs(fc - tc) === 2) {
+            if (tc > fc) {
+              nextBoard[fr][5] = nextBoard[fr][7];
+              nextBoard[fr][7] = null;
+            } else {
+              nextBoard[fr][3] = nextBoard[fr][0];
+              nextBoard[fr][0] = null;
+            }
+          }
+          if (livePiece.type === 'pawn' && fc !== tc && !liveBoard[tr]?.[tc]) {
+            nextBoard[fr][tc] = null;
+          }
+          nextBoard[tr][tc] = forcePromo ? { ...livePiece, type: forcePromo } : { ...livePiece };
+          nextBoard[fr][fc] = null;
+          setBoard(nextBoard);
+          setLm({ from: { row: fr, col: fc }, to: { row: tr, col: tc } });
+        }
+
         const backendMoveIntent: Omit<Extract<PlayerIntent, { type: 'make_move' }>, 'matchId'> = {
           type: 'make_move',
           ...authoritativeActorForColor(turnRef.current),
@@ -780,6 +801,10 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     const isGhostSq = ghost && canActWithColor(ghost.ownerColor) && ghost.row === r && ghost.col === c;
     const myColor = hostedRuntime ? viewerSeatRef.current : turnRef.current;
     const isMyTurn = turnRef.current === myColor;
+    if (isMyTurn && premoveRef.current) {
+      setPremove(null);
+      premoveRef.current = null;
+    }
     const canPremove = hostedRuntime && authoritativeMatchIdRef.current && myColor && !isMyTurn && !overRef.current;
 
     if (canPremove && !sel) {

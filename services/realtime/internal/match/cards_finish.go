@@ -90,7 +90,7 @@ func evaluateAutomaticMatchFinish(state *contracts.MatchState) (string, string) 
 		if state.Turn == "black" {
 			hand = state.BlackHand
 		}
-		if len(hand) > 0 {
+		if len(hand) > 0 && state.ModeID != "computer" {
 			return "", ""
 		}
 	}

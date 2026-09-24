@@ -21,6 +21,7 @@ import type {
   FogZone,
   FortressZone,
   Snapshot,
+  CardMechanic,
 } from '../types';
 import {
   makeBoard,
@@ -58,6 +59,14 @@ import {
 import { useMatchTimer } from './useMatchTimer';
 import { useMatchReplay } from './useMatchReplay';
 import { usePlatformState } from './usePlatformState';
+
+function buildMoveRows(history: string[]): { n: string; w?: string; b?: string }[] {
+  const rows: { n: string; w?: string; b?: string }[] = [];
+  for (let i = 0; i < history.length; i += 2) {
+    rows.push({ n: `${Math.floor(i / 2) + 1}.`, w: history[i], b: history[i + 1] });
+  }
+  return rows;
+}
 import { useMatchConnection } from './useMatchConnection';
 import { useBoardInteraction } from './useBoardInteraction';
 import { useMatchNav } from './useMatchNav';
@@ -484,6 +493,40 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     setLm(match.lastMove);
     setHmc(match.halfMoveClock);
     setFmn(match.fullMoveNumber);
+    if (match.moveHistory) {
+      setMovHist(buildMoveRows(match.moveHistory));
+    }
+
+    if (snapshot.events && snapshot.events.length > 0) {
+      const mySeat = viewerSeatRef.current;
+      const myActor = mySeat ? authoritativeActorForColor(mySeat) : null;
+      for (const ev of snapshot.events) {
+        if (ev.type === 'card_played') {
+          const cardPayload = ev.payload?.card as GameCard | undefined;
+          const mechanic = (ev.payload?.mechanic || cardPayload?.mechanic || '') as CardMechanic;
+          const cardName = cardPayload?.name || ev.payload?.name || mechanic;
+          const isOpponent = !myActor?.playerId || (ev.actorId ? ev.actorId !== myActor.playerId : true);
+          if (isOpponent) {
+            playCardSound();
+            if (mechanic) {
+              fireCardAnim(mechanic as any, `Opponent: ${cardName}`);
+            }
+            setCardMsg(`⚠️ Opponent played ${cardName}!`);
+          }
+        } else if (ev.type === 'target_selected') {
+          const mechanic = ev.payload?.mechanic as string;
+          const target = ev.payload?.target as { row: number; col: number } | undefined;
+          const piece = ev.payload?.piece as { type: PieceType; color: PieceColor } | undefined;
+          const isOpponent = myActor?.playerId && ev.actorId ? ev.actorId !== myActor.playerId : true;
+          if (isOpponent && target) {
+            if ((mechanic === 'sniper' || mechanic === 'badsniper') && piece) {
+              triggerSniperAnim(target, piece.type, piece.color, mechanic as any);
+              fireCardAnim('sniper', `${piece.type} eliminated`);
+            }
+          }
+        }
+      }
+    }
     
     const isGameOver = match.status === 'finished';
     setOver(isGameOver);
@@ -523,7 +566,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setClockActive(true);
       setTicking(match.turn);
     }
-  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, playCardSound, setCardMsg, authoritativeActorForColor]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;
@@ -579,6 +622,21 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     handleLavaLanding, finalPositionRef, blackMovedRef, setCardMsg, handleCardClick,
     isReviewing, getFusedMoves
   });
+
+  React.useEffect(() => {
+    if (over) {
+      setPremove(null);
+      premoveRef.current = null;
+      return;
+    }
+    const myColor = hostedRuntime ? viewerSeatRef.current : turn;
+    if (turn === myColor && premoveRef.current) {
+      const pm = premoveRef.current;
+      setPremove(null);
+      premoveRef.current = null;
+      doMove(pm.from.row, pm.from.col, pm.to.row, pm.to.col);
+    }
+  }, [turn, over, hostedRuntime, doMove, setPremove, premoveRef, viewerSeatRef]);
 
   const bootstrapAuthoritativeMatch = React.useCallback(async () => {
     if (!hostedRuntime) return;

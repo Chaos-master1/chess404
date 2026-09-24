@@ -1741,12 +1741,19 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     if (!sq || sq.row < 0 || sq.row > 7 || sq.col < 0 || sq.col > 7) return;
     if (e.button === 2) {
       e.preventDefault();
+      if (premove) {
+        onPremove?.();
+        return;
+      }
       setAnnotationStart(sq);
       setAnnotationTarget(sq);
       return;
     }
     if (e.button !== 0) return;
     if (cardPending || isReviewing) return;
+    if (premove) {
+      onPremove?.();
+    }
     onClearAnalysisArrows();
     const p = displayBoard[sq.row]?.[sq.col];
     if (viewerColor && p?.color === viewerColor) {

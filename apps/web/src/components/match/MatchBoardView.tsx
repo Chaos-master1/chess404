@@ -185,6 +185,7 @@ export function MatchBoardView() {
   const [confirmResign, setConfirmResign] = React.useState<'idle' | 'prompting'>('idle');
   const [mobilePanel, setMobilePanel] = React.useState<'left' | 'right' | null>(null);
   const lastDrawOfferTime = React.useRef(0);
+  const canAbortMatch = fmn === 1 && (movHist.length === 0 || (movHist.length === 1 && !movHist[0].b));
 
   React.useEffect(() => {
     if (!mobilePanel) return;
@@ -824,7 +825,7 @@ export function MatchBoardView() {
               </>
             ) : (
               <>
-                {movHist.length <= 1 ? (
+                {canAbortMatch ? (
                   <button
                     disabled={hostedActionLocked}
                     className="match-mobile-btn"
@@ -1157,7 +1158,7 @@ export function MatchBoardView() {
               </>
             ) : (
               <>
-                {movHist.length === 0 || (movHist.length === 1 && !movHist[0].b) ? (
+                {canAbortMatch ? (
                   <button disabled={hostedActionLocked} onClick={() => {
                     if (hostedActionLocked) {
                       return;
