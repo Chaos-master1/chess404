@@ -55,11 +55,14 @@ type searchOpponent struct {
 	rng   *rand.Rand
 }
 
-// newSearchOpponent builds a search-backed opponent at the given difficulty.
-func newSearchOpponent(difficulty v1.Difficulty) *searchOpponent {
+// newSearchOpponent builds a search-backed opponent at the given difficulty and color.
+func newSearchOpponent(difficulty v1.Difficulty, color string) *searchOpponent {
+	if color == "" {
+		color = "black"
+	}
 	seed := time.Now().UnixNano()
 	return &searchOpponent{
-		inner: v1.NewComputerOpponent(difficulty, "black"),
+		inner: v1.NewComputerOpponent(difficulty, color),
 		rng:   rand.New(rand.NewSource(seed)),
 	}
 }
@@ -109,8 +112,8 @@ func (o *searchOpponent) searchMoveIntent(state *contracts.MatchState) (intent *
 	if err != nil {
 		return nil, err
 	}
-	mover := core.Black // the computer seat is always black today
-	if state.Turn == "white" {
+	mover := core.Black
+	if o.inner.Color == "white" || state.Turn == "white" {
 		mover = core.White
 	}
 

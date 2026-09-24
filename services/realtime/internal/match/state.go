@@ -431,16 +431,13 @@ func (s *Service) MarkDisconnected(matchID string, playerID string, playerSecret
 
 	presence := s.ensurePresenceStateLocked(c, now)
 	if color == "white" {
-		if !presence.WhiteConnected {
+		if c.state.WhiteGuestID == "computer" || !presence.WhiteConnected {
 			return nil
 		}
 		presence.WhiteLastSeenAt = time.Time{}
 		presence.WhiteConnected = false
 	} else {
-		if c.state.ModeID == contracts.MatchModeComputer {
-			return nil
-		}
-		if !presence.BlackConnected {
+		if c.state.BlackGuestID == "computer" || !presence.BlackConnected {
 			return nil
 		}
 		presence.BlackLastSeenAt = time.Time{}

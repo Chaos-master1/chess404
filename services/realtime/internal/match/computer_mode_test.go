@@ -119,3 +119,41 @@ func TestComputerRepliesToOpeningMove(t *testing.T) {
 	}
 	t.Fatal("computer never replied to the opening move within 5s")
 }
+
+func TestComputerMatchAsBlack(t *testing.T) {
+	service := NewService()
+	now := time.Now()
+
+	created := service.CreateMatch(contracts.CreateMatchRequest{
+		MatchID:           "computer_as_black",
+		ModeID:            contracts.MatchModeComputer,
+		Difficulty:        "medium",
+		BlackGuestID:      "guest_black",
+		BlackPlayerSecret: "black-secret",
+	}, now)
+
+	if created.Match.Status != "active" {
+		t.Fatalf("expected computer match as black to start active, got status=%q", created.Match.Status)
+	}
+	if created.Match.WhiteGuestID != "computer" {
+		t.Fatalf("expected white seat to be assigned to computer, got %q", created.Match.WhiteGuestID)
+	}
+	if created.Match.BlackGuestID != "guest_black" {
+		t.Fatalf("expected black seat to be assigned to human, got %q", created.Match.BlackGuestID)
+	}
+
+	// Because computer is White, the computer must execute the opening move.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		snap, err := service.GetMatchForViewer("computer_as_black", "guest_black", "black-secret")
+		if err != nil {
+			t.Fatalf("GetMatchForViewer error: %v", err)
+		}
+		if snap.Match.Turn == "black" {
+			// Computer has moved and now it's Black's turn!
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("computer as white never made the opening move within 5s")
+}

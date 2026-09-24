@@ -44,7 +44,7 @@ func TestSearchOpponentIntentsAlwaysLegal(t *testing.T) {
 		c := newSearchTestMatch(t, service, matchID)
 
 		c.mu.Lock()
-		opp := newSearchOpponent(v1.DifficultyMedium)
+		opp := newSearchOpponent(v1.DifficultyMedium, "black")
 		moves := 0
 		// Drive a FULL game: black (the search opponent) answers every black
 		// turn; white is driven by the package's own guaranteed-legal fallback
@@ -173,7 +173,7 @@ func TestSearchOpponentTakesHangingQueen(t *testing.T) {
 	state.HalfMoveClock = 0
 	state.FullMoveNum = 20
 
-	opp := newSearchOpponent(v1.DifficultyExpert)
+	opp := newSearchOpponent(v1.DifficultyExpert, "black")
 	// Call the chess search directly: the composite would be entitled to play
 	// a card here (the test match deals the full catalog), which would make
 	// this assertion flap on the card brain rather than test the search.
@@ -201,7 +201,7 @@ func TestSearchBudgetsAreMonotonic(t *testing.T) {
 	}
 	scores := make([]int, 0, len(order))
 	for _, d := range order {
-		opp := newSearchOpponent(d)
+		opp := newSearchOpponent(d, "black")
 		limit, samples := searchBudgetFor(opp.inner)
 		scores = append(scores, int(limit)*samples)
 		_ = opp // construction must succeed for every tier

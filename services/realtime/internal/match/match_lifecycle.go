@@ -96,42 +96,35 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 
 	if string(req.ModeID) == "computer" {
 		diff := v1.ParseDifficulty(req.Difficulty)
-		if computerOpponentImpl == "search" {
-			c.computer = newSearchOpponent(diff)
-		} else {
-			c.computer = v1.NewComputerOpponent(diff, "black")
+		compColor := "black"
+		if strings.TrimSpace(req.BlackGuestID) != "" || strings.TrimSpace(req.WhiteGuestID) == "" {
+			compColor = "white"
 		}
-		state.BlackGuestID = "computer"
-		state.BlackName = computerDisplayName(req.Difficulty)
-		// requireIntentColor demands a matching secret before it will
-		// authorize any intent for the black seat. The computer has no HTTP
-		// request to source one from, so it needs its own server-only
-		// secret here, exactly like a real player's -- never sent to any
-		// client, only ever compared against the intents this service
-		// manufactures for the computer itself in autoPlayComputerDepthLimited.
-		state.BlackPlayerSecret = generateComputerSeatSecret()
+		if computerOpponentImpl == "search" {
+			c.computer = newSearchOpponent(diff, compColor)
+		} else {
+			c.computer = v1.NewComputerOpponent(diff, compColor)
+		}
+		if compColor == "white" {
+			state.WhiteGuestID = "computer"
+			state.WhiteName = computerDisplayName(req.Difficulty)
+			state.WhitePlayerSecret = generateComputerSeatSecret()
+		} else {
+			state.BlackGuestID = "computer"
+			state.BlackName = computerDisplayName(req.Difficulty)
+			state.BlackPlayerSecret = generateComputerSeatSecret()
+		}
 		state.Clock.RunningFor = "white"
 		state.Clock.StartedAt = &startedAt
-		// status was computed above from the CreateMatchRequest, which never
-		// carries a blackGuestId for a computer match (the computer seat is
-		// assigned here, not by the client) -- so hasPartialSeats was true
-		// and status landed on "waiting". Every intent handler (applyMove,
-		// applyPlayCard, applyResign, ...) calls ensureActive and rejects
-		// anything but "active", so without this line no move, card, draw,
-		// resign, or abort could ever be applied to a computer match: the
-		// very first move attempt fails with "match is not active".
 		state.Status = "active"
-		s.Log.Info("match:create: computer opponent initialized", "matchID", matchID, "difficulty", diff, "color", "black")
+		s.Log.Info("match:create: computer opponent initialized", "matchID", matchID, "difficulty", diff, "color", compColor)
 	}
 
 	s.matches.Store(matchID, c)
-	// Subscribe this instance to the match's Redis channel too, not only
-	// instances that hydrate it later. Without this, an instance that mutates
-	// a match it created would never learn about a mutation another instance
-	// makes for the same matchID -- the relay would be one-directional. The
-	// origin-instance check in relayRedisBroadcasts is what stops this from
-	// causing this instance to double-deliver its own broadcasts.
 	s.ensureRedisRelay(matchID)
+	if string(req.ModeID) == "computer" && state.WhiteGuestID == "computer" {
+		s.autoPlayComputer(c, now)
+	}
 	c.mu.Lock()
 
 	broadcastSnap := buildSnapshotWithPresence(c.state, c.presence, len(c.events), []contracts.ResolvedEvent{startEvent}, now)
@@ -424,8 +417,29 @@ func (s *Service) ApplyIntent(intent contracts.PlayerIntent, now time.Time) (con
 	return snapshot, nil
 }
 
+func computerColor(state *contracts.MatchState) string {
+	if state == nil || state.ModeID != contracts.MatchModeComputer {
+		return ""
+	}
+	if state.WhiteGuestID == "computer" {
+		return "white"
+	}
+	return "black"
+}
+
+func computerSeatCreds(state *contracts.MatchState) (guestID string, secret string) {
+	if state == nil {
+		return "", ""
+	}
+	if state.WhiteGuestID == "computer" {
+		return state.WhiteGuestID, state.WhitePlayerSecret
+	}
+	return state.BlackGuestID, state.BlackPlayerSecret
+}
+
 func (s *Service) autoPlayComputer(c *matchContainer, now time.Time) {
-	if c.computer == nil || c.state.Status != "active" || c.state.Turn != "black" {
+	compColor := computerColor(c.state)
+	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
 		return
 	}
 	select {
@@ -440,7 +454,8 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 		s.Log.Info("match:autoPlay: max recursion depth reached", "matchID", c.state.MatchID)
 		return
 	}
-	if c.computer == nil || c.state.Status != "active" || c.state.Turn != "black" {
+	compColor := computerColor(c.state)
+	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
 		return
 	}
 
@@ -455,8 +470,9 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 	// touching state, so without this the computer's own move is rejected
 	// as "unrecognized player id" on every single attempt: the match starts
 	// active (fixed above) but the computer can then never move again.
-	computerIntent.PlayerID = c.state.BlackGuestID
-	computerIntent.PlayerSecret = c.state.BlackPlayerSecret
+	compGuestID, compPlayerSecret := computerSeatCreds(c.state)
+	computerIntent.PlayerID = compGuestID
+	computerIntent.PlayerSecret = compPlayerSecret
 
 	// Re-stamp the clock now that the search is finished.
 	//
@@ -511,8 +527,8 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 	if c.state.PendingCard != nil && c.computer != nil {
 		targetIntent := c.computer.HandleSelectTarget(c.state)
 		if targetIntent != nil {
-			targetIntent.PlayerID = c.state.BlackGuestID
-			targetIntent.PlayerSecret = c.state.BlackPlayerSecret
+			targetIntent.PlayerID = compGuestID
+			targetIntent.PlayerSecret = compPlayerSecret
 			targetEvents, targetErr := applyIntent(c.state, *targetIntent, now)
 			if targetErr == nil {
 				events = append(events, targetEvents...)
@@ -544,7 +560,7 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 	s.saveToRedis(persistSnap, c.presence)
 	s.broadcastLocked(c, snapshot)
 
-	if c.state.Turn == "black" && c.state.Status == "active" {
+	if c.state.Turn == compColor && c.state.Status == "active" {
 		s.autoPlayComputerDepthLimited(c, now, depth+1)
 	}
 }
@@ -552,13 +568,14 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 // ensureComputerMadeProgressLocked runs once, after autoPlayComputerDepthLimited
 // has fully unwound. That function is best-effort: it can give up (MakeMove
 // returns nil, an intent is rejected, recursion hits its depth cap) while
-// leaving it black's turn. Whatever the reason, retrying the same card/search
+// leaving it the computer's turn. Whatever the reason, retrying the same card/search
 // decision tends to fail the same way again, so this does not retry it --
 // it falls back to any single legal move via firstLegalMoveForColor, which
 // depends only on this package's own board rules, so the match can never
 // deadlock waiting on a computer opponent that has nothing left to try.
 func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.Time) {
-	if c.computer == nil || c.state.Status != "active" || c.state.Turn != "black" {
+	compColor := computerColor(c.state)
+	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
 		return
 	}
 	c.state.PendingCard = nil
@@ -578,7 +595,7 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 		c.state.Status = "finished"
 		c.state.Winner = winner
 		c.state.FinishReason = finishReason
-		finishEvents := []contracts.MatchEvent{
+		finishEvents := []contracts.ResolvedEvent{
 			makeEvent(c.state.MatchID, "match_finished", now, "system", map[string]any{
 				"result": finishReason,
 				"winner": winner,
@@ -593,11 +610,12 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 		return
 	}
 
+	compGuestID, compPlayerSecret := computerSeatCreds(c.state)
 	intent := contracts.PlayerIntent{
 		Type:         "make_move",
 		MatchID:      c.state.MatchID,
-		PlayerID:     c.state.BlackGuestID,
-		PlayerSecret: c.state.BlackPlayerSecret,
+		PlayerID:     compGuestID,
+		PlayerSecret: compPlayerSecret,
 		From:         &from,
 		To:           &to,
 	}
@@ -970,8 +988,13 @@ func newMatchPresenceState(state *contracts.MatchState, now time.Time) *matchPre
 		presence.BlackConnected = true
 	}
 	if state.ModeID == contracts.MatchModeComputer {
-		presence.BlackLastSeenAt = now
-		presence.BlackConnected = true
+		if state.WhiteGuestID == "computer" {
+			presence.WhiteLastSeenAt = now
+			presence.WhiteConnected = true
+		} else {
+			presence.BlackLastSeenAt = now
+			presence.BlackConnected = true
+		}
 	}
 	return presence
 }
@@ -988,8 +1011,13 @@ func newRecoveredMatchPresenceState(state *contracts.MatchState) *matchPresenceS
 		presence.BlackConnected = false
 	}
 	if state.ModeID == contracts.MatchModeComputer {
-		presence.BlackLastSeenAt = lastSeen
-		presence.BlackConnected = true
+		if state.WhiteGuestID == "computer" {
+			presence.WhiteLastSeenAt = lastSeen
+			presence.WhiteConnected = true
+		} else {
+			presence.BlackLastSeenAt = lastSeen
+			presence.BlackConnected = true
+		}
 	}
 	return presence
 }
@@ -1056,20 +1084,22 @@ func evaluatePresenceRuntime(state *contracts.MatchState, presence *matchPresenc
 	}
 
 	whiteOccupied := strings.TrimSpace(state.WhiteGuestID) != ""
-	blackOccupied := strings.TrimSpace(state.BlackGuestID) != "" || state.ModeID == contracts.MatchModeComputer
+	blackOccupied := strings.TrimSpace(state.BlackGuestID) != ""
 
-	if whiteOccupied {
+	if state.WhiteGuestID == "computer" {
+		presence.WhiteConnected = true
+		presence.WhiteLastSeenAt = now
+	} else if whiteOccupied {
 		presence.WhiteConnected = now.Sub(presence.WhiteLastSeenAt) <= presenceHeartbeatTimeout
 	} else {
 		presence.WhiteConnected = false
 	}
-	if blackOccupied {
-		if state.ModeID == contracts.MatchModeComputer {
-			presence.BlackConnected = true
-			presence.BlackLastSeenAt = now
-		} else {
-			presence.BlackConnected = now.Sub(presence.BlackLastSeenAt) <= presenceHeartbeatTimeout
-		}
+
+	if state.BlackGuestID == "computer" {
+		presence.BlackConnected = true
+		presence.BlackLastSeenAt = now
+	} else if blackOccupied {
+		presence.BlackConnected = now.Sub(presence.BlackLastSeenAt) <= presenceHeartbeatTimeout
 	} else {
 		presence.BlackConnected = false
 	}
