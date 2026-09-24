@@ -118,6 +118,29 @@ func (s *MemoryMatchStore) SavePresence(matchID string, presence []byte) error {
 	return nil
 }
 
+// SaveSnapshotAtomic mirrors the Redis store's batched write in-process.
+// There is no network here, so batching is only about keeping one lock
+// acquisition and one consistent visibility point for the whole snapshot.
+func (s *MemoryMatchStore) SaveSnapshotAtomic(matchID string, state []byte, secretWhite, secretBlack string, history, events, presence, seenIDs []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.states[matchID] = state
+	s.secrets[matchID] = map[string]string{"white": secretWhite, "black": secretBlack}
+	if len(history) > 0 {
+		s.history[matchID] = history
+	}
+	if len(events) > 0 {
+		s.events[matchID] = events
+	}
+	if len(presence) > 0 {
+		s.presence[matchID] = presence
+	}
+	if len(seenIDs) > 0 {
+		s.seenIDs[matchID] = seenIDs
+	}
+	return nil
+}
+
 func (s *MemoryMatchStore) LoadPresence(matchID string) ([]byte, error) {
 	s.mu.RLock()
 	data, ok := s.presence[matchID]

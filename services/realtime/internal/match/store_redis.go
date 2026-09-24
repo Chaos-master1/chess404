@@ -21,6 +21,11 @@ type MatchStore interface {
 	LoadEvents(matchID string) ([]byte, error)
 	SavePresence(matchID string, presence []byte) error
 	LoadPresence(matchID string) ([]byte, error)
+	// SaveSnapshotAtomic persists all per-mutation snapshot components in a
+	// single pipelined round trip. Optional components (history, events,
+	// presence, seenIDs) are skipped when nil/empty. Implementations that
+	// do not batch may fall back to the individual Save* calls in order.
+	SaveSnapshotAtomic(matchID string, state []byte, secretWhite, secretBlack string, history, events, presence, seenIDs []byte) error
 	IncSeq(matchID string) (int64, error)
 	LoadSeq(matchID string) (int64, error)
 	DeleteMatch(matchID string) error
@@ -154,6 +159,45 @@ func (s *RedisMatchStore) LoadEvents(matchID string) ([]byte, error) {
 func (s *RedisMatchStore) SavePresence(matchID string, presence []byte) error {
 	ctx := context.Background()
 	return s.client.Set(ctx, s.presenceKey(matchID), presence, presenceTTL).Err()
+}
+
+// SaveSnapshotAtomic persists every per-mutation component of a match
+// snapshot (full state, hashed seat secrets, history, events, presence,
+// seen client move IDs) as ONE pipelined round trip.
+//
+// Why it exists: the service's saveToRedis used to issue these writes as
+// six sequential Save* calls. Against a same-host Redis that is invisible,
+// but the hosted deployment talks to Upstash across the WAN (~70-90ms per
+// round trip), which put a hard ~0.5s network floor on every player move
+// (and again on the computer opponent's reply, doubling the perceived
+// input-to-response delay). A pipeline sends all writes in one round trip;
+// correctness is unchanged -- the keys are independent, execution order
+// within a pipeline is preserved, and per-command errors still surface
+// through Exec. The individual Save* methods remain for the narrower
+// callers (create-race Flush paths, token stores, tests).
+func (s *RedisMatchStore) SaveSnapshotAtomic(matchID string, state []byte, secretWhite, secretBlack string, history, events, presence, seenIDs []byte) error {
+	secrets, err := json.Marshal(map[string]string{"white": secretWhite, "black": secretBlack})
+	if err != nil {
+		return fmt.Errorf("marshal secrets: %w", err)
+	}
+	ctx := context.Background()
+	pipe := s.client.Pipeline()
+	pipe.Set(ctx, s.stateKey(matchID), state, matchTTL)
+	pipe.Set(ctx, s.secretsKey(matchID), secrets, matchTTL)
+	if len(history) > 0 {
+		pipe.Set(ctx, s.historyKey(matchID), history, matchTTL)
+	}
+	if len(events) > 0 {
+		pipe.Set(ctx, s.eventsKey(matchID), events, matchTTL)
+	}
+	if len(presence) > 0 {
+		pipe.Set(ctx, s.presenceKey(matchID), presence, presenceTTL)
+	}
+	if len(seenIDs) > 0 {
+		pipe.Set(ctx, s.seenIDsKey(matchID), seenIDs, matchTTL)
+	}
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 func (s *RedisMatchStore) LoadPresence(matchID string) ([]byte, error) {

@@ -765,39 +765,60 @@ func (s *Service) saveToRedis(snapshot contracts.MatchSnapshotResponse, presence
 	// This is a direct point-to-point Redis read/write, not a broadcast: the
 	// same trust tier as the archive, which has always retained secrets for
 	// the same restart-recovery reason.
-	if err := s.store.SaveState(matchID, snapshot); err != nil {
-		s.Log.Error("failed to save state to redis", "matchId", matchID, "error", err)
-	}
-
-	// Kept for existing SaveSecrets/LoadSecrets callers and tests. Hydration
-	// does not use this: it stores an HMAC, not the plaintext, so it cannot
-	// authenticate a caller-supplied secret.
-	if err := s.store.SaveSecrets(matchID, hashSecret(snapshot.Match.WhitePlayerSecret), hashSecret(snapshot.Match.BlackPlayerSecret)); err != nil {
-		s.Log.Error("failed to save secrets to redis", "matchId", matchID, "error", err)
-	}
-
+	//
+	// All components go out as ONE pipelined round trip (SaveSnapshotAtomic).
+	// The previous six sequential Save* calls put a ~6xWAN-RTT floor on every
+	// move -- against Upstash from Railway that was ~0.5s of pure network
+	// time per mutation, paid again on the computer's reply (visible as a
+	// ~1.2s intent latency in production after MATCH_STATE_BACKEND=redis).
 	historyData, err := json.Marshal(snapshot.Match.History)
-	if err == nil {
-		_ = s.store.SaveHistory(matchID, historyData)
+	if err != nil {
+		s.Log.Error("failed to marshal history for redis", "matchId", matchID, "error", err)
+		historyData = nil
 	}
-
 	eventsData, err := json.Marshal(snapshot.Events)
-	if err == nil {
-		_ = s.store.SaveEvents(matchID, eventsData)
+	if err != nil {
+		s.Log.Error("failed to marshal events for redis", "matchId", matchID, "error", err)
+		eventsData = nil
 	}
-
+	var presenceData []byte
 	if presence != nil {
-		presenceData, err := json.Marshal(presence)
-		if err == nil {
-			_ = s.store.SavePresence(matchID, presenceData)
+		presenceData, err = json.Marshal(presence)
+		if err != nil {
+			s.Log.Error("failed to marshal presence for redis", "matchId", matchID, "error", err)
+			presenceData = nil
 		}
 	}
-
+	var seenIDsData []byte
 	if len(snapshot.Match.SeenClientMoveIDs) > 0 {
-		seenIDsData, err := json.Marshal(snapshot.Match.SeenClientMoveIDs)
-		if err == nil {
-			_ = s.store.SaveSeenClientMoveIDs(matchID, seenIDsData)
+		seenIDsData, err = json.Marshal(snapshot.Match.SeenClientMoveIDs)
+		if err != nil {
+			s.Log.Error("failed to marshal seen client move ids for redis", "matchId", matchID, "error", err)
+			seenIDsData = nil
 		}
+	}
+	stateData, err := json.Marshal(snapshot)
+	if err != nil {
+		// The state payload is the one component hydration cannot rebuild
+		// from the others; if it will not marshal, log and keep the old
+		// per-component path so at least history/events still land.
+		s.Log.Error("failed to marshal state for redis", "matchId", matchID, "error", err)
+		if err := s.store.SaveState(matchID, snapshot); err != nil {
+			s.Log.Error("failed to save state to redis", "matchId", matchID, "error", err)
+		}
+		return
+	}
+	if err := s.store.SaveSnapshotAtomic(
+		matchID,
+		stateData,
+		hashSecret(snapshot.Match.WhitePlayerSecret),
+		hashSecret(snapshot.Match.BlackPlayerSecret),
+		historyData,
+		eventsData,
+		presenceData,
+		seenIDsData,
+	); err != nil {
+		s.Log.Error("failed to save snapshot to redis", "matchId", matchID, "error", err)
 	}
 }
 
@@ -840,6 +861,9 @@ func (s *Service) publishToRedis(matchID string, snapshot contracts.MatchSnapsho
 // keeps a single instance from receiving and re-delivering its own
 // broadcasts a second time.
 func (s *Service) ensureRedisRelay(matchID string) {
+	if s.broadcaster == nil {
+		return
+	}
 	if _, ok := s.broadcaster.(NoopBroadcaster); ok {
 		return
 	}
