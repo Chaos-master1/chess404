@@ -109,7 +109,7 @@ function CardTile({card,selected,onClick}:{card:Card;selected:boolean;onClick:()
       onMouseEnter={()=>setHov(true)}
       onMouseLeave={()=>setHov(false)}
       style={{
-        width:170, flexShrink:0,
+        width:'100%', maxWidth:190, minWidth:0, flexShrink:0,
         cursor:'pointer',
         position:'relative',
         borderRadius:14,
@@ -357,7 +357,7 @@ function RaritySection({rarity,cards,selectedId,onSelect,filterType}:{rarity:Rar
         <div style={{flex:1,height:1,background:`linear-gradient(90deg,${rs.accent}44,transparent)`}}/>
         <span style={{color:`${rs.accent}77`,fontSize:11,fontWeight:600}}>{visible.length} cards · {DROP_RATES[rarity]}% drop</span>
       </div>
-      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:18}}>
+      <div className="cards-rarity-grid" style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(150px, 1fr))', gap:14}}>
         {visible.map(card=><CardTile key={card.mechanic} card={card} selected={selectedId===card.mechanic} onClick={()=>onSelect(card)}/>)}
       </div>
     </div>
@@ -369,6 +369,12 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
   const [filterType,setFilterType]=useState<'All'|'Spell'|'Trap'>('All');
   const [filterRarity,setFilterRarity]=useState<Rarity|'All'>('All');
   const [search,setSearch]=useState('');
+  const [showPreview,setShowPreview]=useState(false);
+
+  const handleSelectCard = (card: Card) => {
+    setSelected(card);
+    setShowPreview(true);
+  };
 
   const filtered=useMemo(()=>{
     let c=[...CARDS];
@@ -379,16 +385,52 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
   },[filterType,filterRarity,search]);
 
   return (
-    <div style={{height:embedded?'100%':'100vh',minHeight:0,flex:embedded?1:undefined,display:'flex',flexDirection:'column',fontFamily:"var(--font-sans),'Segoe UI',sans-serif",backgroundImage:embedded?undefined:'url(/background.png)',backgroundSize:'cover',backgroundPosition:'center',backgroundAttachment:'fixed',overflow:'hidden'}}>
+    <div className="cards-page-root" style={{height:embedded?'100%':'100vh',minHeight:0,flex:embedded?1:undefined,display:'flex',flexDirection:'column',fontFamily:"var(--font-sans),'Segoe UI',sans-serif",backgroundImage:embedded?undefined:'url(/background.png)',backgroundSize:'cover',backgroundPosition:'center',backgroundAttachment:'fixed',overflow:'hidden'}}>
       <style>{`
         @keyframes float   {0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)}}
         @keyframes sparkle {0%,100%{opacity:0.2;transform:scale(1) rotate(0deg)} 50%{opacity:1;transform:scale(1.5) rotate(20deg)}}
         @keyframes fadeUp  {from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)}}
         @keyframes stars   {from{transform:translateY(0);opacity:0.7} to{transform:translateY(-200px);opacity:0}}
         @keyframes shimmer {0%{background-position:-200% center} 100%{background-position:200% center}}
+        @keyframes slideUpPreview { from{transform:translateY(100%)} to{transform:translateY(0)} }
         ::-webkit-scrollbar{width:5px;height:5px}
         ::-webkit-scrollbar-track{background:rgba(0,0,0,0.2)}
         ::-webkit-scrollbar-thumb{background:rgba(255,165,40,0.35);border-radius:3px}
+
+        .cards-filter-bar-inner { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; }
+        .cards-sidebar-desktop {
+          width:340px; flex-shrink:0; display:flex; flex-direction:column;
+          background:linear-gradient(180deg,#16163a 0%,#10102e 100%);
+          backdrop-filter:blur(20px); border-right:1px solid rgba(255,165,40,0.15);
+          overflow-y:hidden; border-radius:16px; box-shadow:4px 0 32px rgba(0,0,0,0.4);
+        }
+        .cards-mobile-preview-backdrop { display:none; }
+        .cards-mobile-preview-sheet { display:none; }
+
+        @media (max-width: 900px) {
+          .cards-sidebar-desktop { display:none !important; }
+          .cards-filter-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:10px 12px !important; flex-wrap:nowrap !important; }
+          .cards-filter-wrap::-webkit-scrollbar { display:none; }
+          .cards-filter-bar-inner { flex-shrink:0; flex-wrap:nowrap; }
+          .cards-grid-wrap { padding:16px 12px !important; }
+          .cards-mobile-preview-backdrop {
+            display:block; position:fixed; inset:0; z-index:200;
+            background:rgba(0,0,0,0.7); backdrop-filter:blur(4px);
+          }
+          .cards-mobile-preview-sheet {
+            display:flex; flex-direction:column;
+            position:fixed; bottom:0; left:0; right:0; z-index:201;
+            max-height:80vh; overflow-y:auto;
+            background:linear-gradient(180deg,#1a1a42 0%,#10102e 100%);
+            border-top:1px solid rgba(255,165,40,0.25);
+            border-radius:20px 20px 0 0;
+            animation:slideUpPreview 0.25s ease-out;
+            box-shadow:0 -8px 40px rgba(0,0,0,0.6);
+          }
+        }
+        @media (max-width: 480px) {
+          .cards-grid-wrap { padding:10px 6px !important; }
+        }
       `}</style>
 
       {/* Background overlay */}
@@ -425,7 +467,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
       </nav>}
 
       {/* FILTER BAR */}
-      <div style={{position:'relative',zIndex:99,flexShrink:0,display:'flex',alignItems:'center',gap:10,padding:embedded?'12px 24px':'12px 48px',background:'linear-gradient(180deg,#16163a 0%,#10102e 100%)',backdropFilter:'blur(16px)',borderBottom:'1px solid rgba(255,165,40,0.15)',flexWrap:'wrap'}}>
+      <div className="cards-filter-wrap" style={{position:'relative',zIndex:99,flexShrink:0,display:'flex',alignItems:'center',gap:10,padding:embedded?'12px 24px':'12px 48px',background:'linear-gradient(180deg,#16163a 0%,#10102e 100%)',backdropFilter:'blur(16px)',borderBottom:'1px solid rgba(255,165,40,0.15)',flexWrap:'wrap'}}>
         <div style={{display:'flex',alignItems:'center',gap:10,marginRight:16}}>
           <span style={{fontSize:20,filter:'drop-shadow(0 0 8px rgba(255,165,40,0.5))'}}>🃏</span>
           <div>
@@ -456,16 +498,9 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
       <div style={{flex:1,display:'flex',overflow:'hidden',position:'relative',zIndex:1}}>
         <div style={{maxWidth:1600,margin:'0 auto',width:'100%',display:'flex',flex:1}}>
 
-          {/* LEFT SIDEBAR */}
-          <div style={{
-            width:340, flexShrink:0, display:'flex', flexDirection:'column',
-            background:'linear-gradient(180deg,#16163a 0%,#10102e 100%)',
-            backdropFilter:'blur(20px)',
-            borderRight:'1px solid rgba(255,165,40,0.15)',
-            overflowY:'hidden',
+          {/* LEFT SIDEBAR — hidden on mobile via CSS */}
+          <div className="cards-sidebar-desktop" style={{
             margin:embedded?'16px':'16px 20px 16px 16px',
-            borderRadius:16,
-            boxShadow:'4px 0 32px rgba(0,0,0,0.4)',
           }}>
             <BigPreview card={selected}/>
             <div style={{padding:'14px 18px',borderTop:'1px solid rgba(255,165,40,0.15)',flexShrink:0,background:'rgba(0,0,0,0.2)',borderRadius:'0 0 0 16px'}}>
@@ -491,16 +526,37 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
           </div>
 
           {/* CARD GRID */}
-          <div style={{flex:1, overflowY:'auto', padding:embedded?'28px 24px':'36px 48px'}}>
+          {/* CARD GRID */}
+          <div className="cards-grid-wrap" style={{flex:1, overflowY:'auto', padding:embedded?'28px 24px':'36px 48px'}}>
             <div style={{maxWidth:1400, margin:'0 auto'}}>
               {filterRarity!=='All'
-                ? <RaritySection rarity={filterRarity} cards={filtered} selectedId={selected?.mechanic??null} onSelect={setSelected} filterType={filterType}/>
-                : RARITY_ORDER.map(r=><RaritySection key={r} rarity={r} cards={CARDS} selectedId={selected?.mechanic??null} onSelect={setSelected} filterType={filterType}/>)
+                ? <RaritySection rarity={filterRarity} cards={filtered} selectedId={selected?.mechanic??null} onSelect={handleSelectCard} filterType={filterType}/>
+                : RARITY_ORDER.map(r=><RaritySection key={r} rarity={r} cards={CARDS} selectedId={selected?.mechanic??null} onSelect={handleSelectCard} filterType={filterType}/>)
               }
             </div>
           </div>
         </div>
       </div>
+
+      {/* Mobile preview bottom sheet */}
+      {showPreview && selected && (
+        <>
+          <div className="cards-mobile-preview-backdrop" onClick={()=>setShowPreview(false)}/>
+          <div className="cards-mobile-preview-sheet">
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 18px',borderBottom:'1px solid rgba(255,165,40,0.15)',flexShrink:0}}>
+              <div style={{color:'#ffcf72',fontSize:13,fontWeight:800,letterSpacing:'1px',textTransform:'uppercase'}}>Card Details</div>
+              <button onClick={()=>setShowPreview(false)} style={{
+                background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.15)',
+                borderRadius:8,padding:'8px 16px',color:'#fff',fontSize:12,fontWeight:700,
+                cursor:'pointer',fontFamily:'inherit'
+              }}>✕ Close</button>
+            </div>
+            <div style={{padding:'0 8px 16px'}}>
+              <BigPreview card={selected}/>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

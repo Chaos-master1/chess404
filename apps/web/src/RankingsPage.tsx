@@ -82,45 +82,94 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
   }, [loadRankings, selectedModeId, selectedSeasonId]);
 
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0, padding: '22px 28px 26px', gap: '18px' }}>
-      <div
-        className="stat-card"
-        style={{
-          flex: 1,
-          minWidth: 0,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          padding: 0, // Reset padding for full bleed
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid rgba(255,165,40,0.12)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+    <div className="rankings-page">
+      <style>{`
+        .rankings-page {
+          display: flex; flex: 1; min-height: 0; padding: 22px 28px 26px; gap: 18px;
+        }
+        .rankings-card {
+          flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+          padding: 0; overflow: hidden;
+        }
+        .rankings-header {
+          padding: 18px 20px 14px; border-bottom: 1px solid rgba(255,165,40,0.12);
+        }
+        .rankings-header-inner {
+          display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap;
+        }
+        .rankings-filters {
+          display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+        }
+        .rankings-filter-select {
+          min-height: 40px; padding: 9px 12px; border-radius: 10px;
+          border: 1px solid rgba(255,180,60,0.3); background: #121824;
+          color: #fff4d6; color-scheme: dark; font-size: 12px; font-weight: 700;
+          outline: none; cursor: pointer;
+        }
+        .rankings-body {
+          flex: 1; min-height: 0; overflow-y: auto; padding: 20px;
+        }
+        .rankings-spotlight-grid {
+          display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;
+        }
+        .rankings-row {
+          display: grid;
+          grid-template-columns: 52px minmax(0, 1fr) 100px 180px 90px;
+          gap: 12px; align-items: center; padding: 14px 16px; border-radius: 12px;
+        }
+        .rankings-row__rank { font-size: 18px; font-weight: 900; }
+        .rankings-row__name { min-width: 0; }
+        .rankings-row__elo { font-size: 15px; font-weight: 800; text-align: right; color: #7ce3aa; }
+        .rankings-row__season { font-size: 11px; text-align: right; color: rgba(255,232,180,0.62); }
+        .rankings-row__action { display: flex; justify-content: flex-end; }
+
+        @media (max-width: 900px) {
+          .rankings-page { padding: 14px 12px 18px; }
+          .rankings-header { padding: 14px 14px 12px; }
+          .rankings-filters { width: 100%; }
+          .rankings-filter-select { flex: 1; min-width: 0; }
+          .rankings-spotlight-grid {
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+          }
+          .rankings-row {
+            grid-template-columns: 40px 1fr auto;
+            grid-template-rows: auto auto;
+            gap: 6px 10px; padding: 12px 14px;
+          }
+          .rankings-row__rank { grid-row: 1 / 3; align-self: center; font-size: 16px; }
+          .rankings-row__name { grid-column: 2; grid-row: 1; }
+          .rankings-row__elo { grid-column: 3; grid-row: 1; text-align: right; font-size: 14px; }
+          .rankings-row__season { grid-column: 2 / 4; grid-row: 2; text-align: left; }
+          .rankings-row__action { display: none; }
+        }
+
+        @media (max-width: 480px) {
+          .rankings-page { padding: 8px 6px 12px; }
+          .rankings-header { padding: 12px 10px 10px; }
+          .rankings-body { padding: 12px 8px; }
+          .rankings-spotlight-grid {
+            grid-template-columns: 1fr 1fr; gap: 8px;
+          }
+          .rankings-row { padding: 10px 10px; gap: 4px 8px; }
+          .rankings-row__rank { font-size: 14px; }
+        }
+      `}</style>
+
+      <div className="stat-card rankings-card">
+        <div className="rankings-header">
+          <div className="rankings-header-inner">
             <div>
               <div style={{ color: '#ffcf72', fontSize: '13px', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase' }}>Account Rankings</div>
               <div style={{ color: 'rgba(255,232,180,0.72)', fontSize: '12px', marginTop: '4px' }}>
                 Track the strongest claimed accounts by official mode, season, and rated form.
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="rankings-filters">
               <select
                 aria-label="Filter by mode"
+                className="rankings-filter-select"
                 value={selectedModeId}
                 onChange={(event) => setSelectedModeId(parseModeFilterValue(event.target.value))}
-                style={{
-                  minHeight: '40px',
-                  padding: '9px 12px',
-                  borderRadius: '10px',
-                  border: '1px solid rgba(255,180,60,0.3)',
-                  background: '#121824',
-                  color: '#fff4d6',
-                  colorScheme: 'dark',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  outline: 'none',
-                  cursor: 'pointer',
-                }}
               >
                 <option value="" style={{ background: '#121824', color: '#fff4d6' }}>All official modes</option>
                 {OFFICIAL_MATCH_MODES.filter((mode) => mode.id !== 'computer').map((mode) => (
@@ -131,21 +180,9 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
               </select>
               <select
                 aria-label="Filter by season"
+                className="rankings-filter-select"
                 value={selectedSeasonId}
                 onChange={(event) => setSelectedSeasonId(event.target.value)}
-                style={{
-                  minHeight: '40px',
-                  padding: '9px 12px',
-                  borderRadius: '10px',
-                  border: '1px solid rgba(255,180,60,0.3)',
-                  background: '#121824',
-                  color: '#fff4d6',
-                  colorScheme: 'dark',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  outline: 'none',
-                  cursor: 'pointer',
-                }}
               >
                 <option value="" style={{ background: '#121824', color: '#fff4d6' }}>All seasons</option>
                 {seasons.map((season) => (
@@ -165,16 +202,10 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
           </div>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px' }}>
+        <div className="rankings-body">
           {!loading && summary && accounts.length > 1 && (
             <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                  gap: '10px',
-                }}
-              >
+              <div className="rankings-spotlight-grid">
                 <div style={{ padding: '14px 16px', borderRadius: '12px', background: 'rgba(255,180,60,0.08)', border: '1px solid rgba(255,180,60,0.16)' }}>
                   <div style={{ color: '#ffcf72', fontSize: '11px', fontWeight: 800, letterSpacing: '0.9px', textTransform: 'uppercase' }}>{renderSpotlightLabel(summary, selectedModeId)}</div>
                   <div style={{ color: '#fff4d2', fontSize: '20px', fontWeight: 900, marginTop: '8px' }}>{summary.playerCount}</div>
@@ -287,26 +318,28 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                 return (
                   <div
                     key={account.accountId}
-                    className="table-row"
+                    className="table-row rankings-row"
+                    onClick={() => {
+                      if (onViewAccount) {
+                        onViewAccount(account.handle);
+                        return;
+                      }
+                      onViewGuest?.(account.primaryGuestId);
+                    }}
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: '72px minmax(0, 1fr) 120px 220px 110px',
-                      gap: '12px',
-                      alignItems: 'center',
-                      padding: '14px 16px',
-                      borderRadius: '12px',
                       background: index < 3
                         ? 'linear-gradient(180deg, rgba(200,134,10,0.18) 0%, rgba(70,42,8,0.22) 100%)'
                         : 'rgba(255,255,255,0.03)',
                       border: index < 3
                         ? '1px solid rgba(255,180,60,0.18)'
                         : '1px solid rgba(255,165,40,0.08)',
+                      cursor: 'pointer',
                     }}
                   >
-                    <div style={{ color: index === 0 ? '#ffd76e' : index === 1 ? '#d9e0ef' : index === 2 ? '#d79d72' : 'rgba(255,232,180,0.7)', fontSize: '18px', fontWeight: 900 }}>
+                    <div className="rankings-row__rank" style={{ color: index === 0 ? '#ffd76e' : index === 1 ? '#d9e0ef' : index === 2 ? '#d79d72' : 'rgba(255,232,180,0.7)' }}>
                       #{index + 1}
                     </div>
-                    <div style={{ minWidth: 0 }}>
+                    <div className="rankings-row__name">
                       <div style={{ color: '#fff2c8', fontSize: '14px', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {account.displayName ?? account.handle}
                       </div>
@@ -318,18 +351,19 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                         {describeSeason(season)}
                       </div>
                     </div>
-                    <div style={{ color: '#7ce3aa', fontSize: '15px', fontWeight: 800, textAlign: 'right' }}>
+                    <div className="rankings-row__elo">
                       {selectedSeasonId && season ? season.ratingEnd : (account.rating ?? 1200)} Elo
                     </div>
-                    <div style={{ color: 'rgba(255,232,180,0.62)', fontSize: '11px', textAlign: 'right' }}>
+                    <div className="rankings-row__season">
                       {season
                         ? `${season.label} peak ${season.peakRating}`
                         : formatLastSeenLabel(account.lastSeenAt)}
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div className="rankings-row__action">
                       <button
                         className="btn-secondary"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           if (onViewAccount) {
                             onViewAccount(account.handle);
                             return;
