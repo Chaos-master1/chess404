@@ -702,7 +702,7 @@ export function MatchBoardView() {
                   : null
               }
               fogZones={fogZones}
-              viewerColor={hostedRuntime ? viewerSeat : turn}
+              viewerColor={viewerSeat ?? ((hostedRuntime || authoritativeMatchId) ? 'white' : turn)}
               invisibleUnder={ghostPiece}
               analysisArrows={analysisArrows}
               onToggleAnalysisArrow={toggleAnalysisArrow}
@@ -715,9 +715,12 @@ export function MatchBoardView() {
               const order: PieceType[] = promo.color === 'white'
                 ? ['queen','knight','rook','bishop']
                 : ['bishop','rook','knight','queen'];
+              const isFlipped = (viewerSeat ?? ((hostedRuntime || authoritativeMatchId) ? 'white' : turn)) === 'black';
               const vSQ = boardWrapperPx / 8;
-              const left = promo.col * vSQ + 4;
-              const top  = promo.color === 'white' ? 4 : 4 * vSQ + 4;
+              const colPos = isFlipped ? 7 - promo.col : promo.col;
+              const left = colPos * vSQ + 4;
+              const promoRi = isFlipped ? promo.row : 7 - promo.row;
+              const top  = promoRi === 0 ? 4 : 4 * vSQ + 4;
               return (
                 <div ref={promoFullRef}>
                   <div role="dialog" aria-modal="true" aria-label="Choose promotion piece" style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.45)', zIndex:50 }} />
@@ -741,9 +744,12 @@ export function MatchBoardView() {
               const order: PieceType[] = cardPromo.color === 'white'
                 ? ['queen','knight','rook','bishop']
                 : ['bishop','rook','knight','queen'];
+              const isFlipped = (viewerSeat ?? ((hostedRuntime || authoritativeMatchId) ? 'white' : turn)) === 'black';
               const vSQ = boardWrapperPx / 8;
-              const left = cardPromo.sq.col * vSQ + 4;
-              const top  = cardPromo.color === 'white' ? 4 : 4 * vSQ + 4;
+              const colPos = isFlipped ? 7 - cardPromo.sq.col : cardPromo.sq.col;
+              const left = colPos * vSQ + 4;
+              const promoRi = isFlipped ? cardPromo.sq.row : 7 - cardPromo.sq.row;
+              const top  = promoRi === 0 ? 4 : 4 * vSQ + 4;
               return (
                 <div ref={cardPromoRef}>
                   <div role="dialog" aria-modal="true" aria-label="Choose promotion piece" style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.45)', zIndex:50 }} />
@@ -970,7 +976,7 @@ export function MatchBoardView() {
               <div style={{ color:'#a0b8d8', fontSize:'9px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.8px' }}>Round</div>
               <div style={{ color: roundNumber >= 7 ? '#f39c12' : '#fff', fontSize:'20px', fontWeight:800, lineHeight:1.1 }}>{roundNumber}</div>
               <div style={{ color:'#4a6080', fontSize:'9px', marginTop:'1px' }}>
-                {(!hostedRuntime && !authoritativeMatchId && roundNumber < INITIAL_DEAL_ROUND)
+                {(!hostedRuntime && !authoritativeMatchId && roundNumber < INITIAL_DEAL_ROUND && bottomHand.length === 0)
                 ? `cards dealt at r${INITIAL_DEAL_ROUND}`
                 : roundNumber < DRAW_FROM        ? `next draw at r${DRAW_FROM}`
                 : (roundNumber - DRAW_FROM) % DRAW_EVERY === 0 ? '🃏 draw now!'

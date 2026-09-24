@@ -747,11 +747,11 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
   );
 
   const canControlColor = React.useCallback((color: PieceColor): boolean => {
-    if (!hostedRuntime) {
+    if (!hostedRuntime && !authoritativeMatchIdRef.current) {
       return true;
     }
     return viewerSeatRef.current === color;
-  }, [hostedRuntime, viewerSeatRef]);
+  }, [hostedRuntime, authoritativeMatchIdRef, viewerSeatRef]);
 
   const canActWithColor = React.useCallback((color: PieceColor): boolean => (
     canControlColor(color) && turnRef.current === color
@@ -799,13 +799,13 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     const p = board[r][c];
     const ghost = ghostRef.current;
     const isGhostSq = ghost && canActWithColor(ghost.ownerColor) && ghost.row === r && ghost.col === c;
-    const myColor = hostedRuntime ? viewerSeatRef.current : turnRef.current;
+    const myColor = viewerSeatRef.current ?? (hostedRuntime ? 'white' : turnRef.current);
     const isMyTurn = turnRef.current === myColor;
     if (isMyTurn && premoveRef.current) {
       setPremove(null);
       premoveRef.current = null;
     }
-    const canPremove = hostedRuntime && authoritativeMatchIdRef.current && myColor && !isMyTurn && !overRef.current;
+    const canPremove = (hostedRuntime || authoritativeMatchIdRef.current) && myColor && !isMyTurn && !overRef.current;
 
     if (canPremove) {
       if (p && p.color === myColor) {

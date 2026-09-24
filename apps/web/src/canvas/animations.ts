@@ -100,12 +100,13 @@ export function drawBoardArrow(
   to: Sq,
   color = ANALYSIS_ARROW_COLOR,
   options: { alpha?: number; preview?: boolean; lineWidth?: number } = {},
+  isFlipped = false,
 ) {
   const alpha = options.alpha ?? 0.88;
-  const fromX = from.col * SQ + SQ / 2;
-  const fromY = (7 - from.row) * SQ + SQ / 2;
-  const toX = to.col * SQ + SQ / 2;
-  const toY = (7 - to.row) * SQ + SQ / 2;
+  const fromX = (isFlipped ? 7 - from.col : from.col) * SQ + SQ / 2;
+  const fromY = (isFlipped ? from.row : 7 - from.row) * SQ + SQ / 2;
+  const toX = (isFlipped ? 7 - to.col : to.col) * SQ + SQ / 2;
+  const toY = (isFlipped ? to.row : 7 - to.row) * SQ + SQ / 2;
 
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -169,6 +170,7 @@ export function paintTeleportAnim(
   ctx: CanvasRenderingContext2D,
   anim: TeleportAnim,
   now: number,
+  isFlipped = false,
 ) {
   const elapsed = now - anim.startTime;
   const t = Math.min(elapsed / TELEPORT_DURATION, 1);
@@ -176,8 +178,10 @@ export function paintTeleportAnim(
 
   const img = PIECE_IMAGES[`${anim.pieceColor}_${anim.pieceType}`];
 
-  const fx = anim.fromSq.col * SQ, fy = (7 - anim.fromSq.row) * SQ;
-  const tx = anim.toSq.col   * SQ, ty = (7 - anim.toSq.row)   * SQ;
+  const fx = (isFlipped ? 7 - anim.fromSq.col : anim.fromSq.col) * SQ;
+  const fy = (isFlipped ? anim.fromSq.row : 7 - anim.fromSq.row) * SQ;
+  const tx = (isFlipped ? 7 - anim.toSq.col : anim.toSq.col) * SQ;
+  const ty = (isFlipped ? anim.toSq.row : 7 - anim.toSq.row) * SQ;
   const fcx = fx + SQ / 2,        fcy = fy + SQ / 2;
   const tcx = tx + SQ / 2,        tcy = ty + SQ / 2;
 
@@ -313,6 +317,7 @@ export function paintJumpAnim(
   ctx: CanvasRenderingContext2D,
   anim: JumpAnim,
   now: number,
+  isFlipped = false,
 ) {
   const elapsed = now - anim.startTime;
   const t = Math.min(elapsed / JUMP_DURATION, 1);
@@ -320,8 +325,10 @@ export function paintJumpAnim(
 
   const img = PIECE_IMAGES[`${anim.pieceColor}_${anim.pieceType}`];
 
-  const fx = anim.fromSq.col * SQ, fy = (7 - anim.fromSq.row) * SQ;
-  const tx = anim.toSq.col   * SQ, ty = (7 - anim.toSq.row)   * SQ;
+  const fx = (isFlipped ? 7 - anim.fromSq.col : anim.fromSq.col) * SQ;
+  const fy = (isFlipped ? anim.fromSq.row : 7 - anim.fromSq.row) * SQ;
+  const tx = (isFlipped ? 7 - anim.toSq.col : anim.toSq.col) * SQ;
+  const ty = (isFlipped ? anim.toSq.row : 7 - anim.toSq.row) * SQ;
   const fcx = fx + SQ / 2,         fcy = fy + SQ / 2;
   const tcx = tx + SQ / 2,         tcy = ty + SQ / 2;
 
@@ -529,13 +536,14 @@ export function paintMindControlAnim(
   ctx: CanvasRenderingContext2D,
   anim: MindControlAnim,
   now: number,
+  isFlipped = false,
 ) {
   const elapsed = now - anim.startTime;
   const t = Math.min(elapsed / MINDCONTROL_DURATION, 1);
   if (t >= 1) return;
 
-  const tx = anim.targetSq.col * SQ;
-  const ty = (7 - anim.targetSq.row) * SQ;
+  const tx = (isFlipped ? 7 - anim.targetSq.col : anim.targetSq.col) * SQ;
+  const ty = (isFlipped ? anim.targetSq.row : 7 - anim.targetSq.row) * SQ;
   const cx = tx + SQ / 2;
   const cy = ty + SQ / 2;
 
@@ -775,16 +783,17 @@ export function paintFuseAnim(
   ctx: CanvasRenderingContext2D,
   anim: FuseAnim,
   now: number,
+  isFlipped = false,
 ) {
   const elapsed = now - anim.startTime;
   const t = Math.min(elapsed / FUSE_DURATION, 1);
   if (t >= 1) return;
 
   // Pixel centers
-  const x1 = anim.sq1.col * SQ + SQ / 2;
-  const y1 = (7 - anim.sq1.row) * SQ + SQ / 2;
-  const x2 = anim.sq2.col * SQ + SQ / 2;
-  const y2 = (7 - anim.sq2.row) * SQ + SQ / 2;
+  const x1 = (isFlipped ? 7 - anim.sq1.col : anim.sq1.col) * SQ + SQ / 2;
+  const y1 = (isFlipped ? anim.sq1.row : 7 - anim.sq1.row) * SQ + SQ / 2;
+  const x2 = (isFlipped ? 7 - anim.sq2.col : anim.sq2.col) * SQ + SQ / 2;
+  const y2 = (isFlipped ? anim.sq2.row : 7 - anim.sq2.row) * SQ + SQ / 2;
 
   const img1 = PIECE_IMAGES[`${anim.color}_${anim.type1}`];
   const img2 = PIECE_IMAGES[`${anim.color}_${anim.type2}`];
@@ -1001,6 +1010,7 @@ export function paintSacrificeAnim(
   ctx: CanvasRenderingContext2D,
   anim: SacrificeAnim,
   now: number,
+  isFlipped = false,
 ) {
   const elapsed = now - anim.startTime;
   const t = Math.min(elapsed / SACRIFICE_DURATION, 1);
@@ -1015,15 +1025,15 @@ export function paintSacrificeAnim(
   const count = anim.squares.length;
   let sumCx = 0, sumCy = 0;
   for (const sq of anim.squares) {
-    sumCx += sq.col * SQ + SQ / 2;
-    sumCy += (7 - sq.row) * SQ + SQ / 2;
+    sumCx += (isFlipped ? 7 - sq.col : sq.col) * SQ + SQ / 2;
+    sumCy += (isFlipped ? sq.row : 7 - sq.row) * SQ + SQ / 2;
   }
   const cX = sumCx / count;
   const cY = sumCy / count;
 
   for (const sq of anim.squares) {
-    const px = sq.col * SQ + SQ / 2;
-    const py = (7 - sq.row) * SQ + SQ / 2;
+    const px = (isFlipped ? 7 - sq.col : sq.col) * SQ + SQ / 2;
+    const py = (isFlipped ? sq.row : 7 - sq.row) * SQ + SQ / 2;
 
     // ── Phase 0–0.40: Piece dissolves, crimson fire erupts ──────────────────
     if (t < 0.50) {
@@ -1037,7 +1047,7 @@ export function paintSacrificeAnim(
       sqGrad.addColorStop(0.5, `rgba(${r1},${g1 / 2 | 0},${b1 / 3 | 0},${fillA * 0.7})`);
       sqGrad.addColorStop(1, `rgba(100,0,0,0)`);
       ctx.fillStyle = sqGrad;
-      ctx.fillRect(sq.col * SQ, (7 - sq.row) * SQ, SQ, SQ);
+      ctx.fillRect((isFlipped ? 7 - sq.col : sq.col) * SQ, (isFlipped ? sq.row : 7 - sq.row) * SQ, SQ, SQ);
       ctx.restore();
 
       // Fire ring expanding outward
@@ -1404,13 +1414,14 @@ export function paintSniperAnim(
   ctx: CanvasRenderingContext2D,
   anim: SniperAnim,
   now: number,
+  isFlipped = false,
 ) {
   const elapsed = now - anim.startTime;
   const t = Math.min(elapsed / SNIPER_DURATION, 1);
   if (t >= 1) return;
 
-  const x  = anim.sq.col * SQ;
-  const y  = (7 - anim.sq.row) * SQ;
+  const x  = (isFlipped ? 7 - anim.sq.col : anim.sq.col) * SQ;
+  const y  = (isFlipped ? anim.sq.row : 7 - anim.sq.row) * SQ;
   const cx = x + SQ / 2;
   const cy = y + SQ / 2;
 
@@ -1634,14 +1645,15 @@ export function paintTransformAnim(
   ctx: CanvasRenderingContext2D,
   anim: TransformAnim,
   now: number,
+  isFlipped = false,
 ) {
   const elapsed = now - anim.startTime;
   const t = clamp(elapsed / TRANSFORM_DURATION, 0, 1);
   if (t >= 1) return;
 
   const isUp = anim.direction === 'up';
-  const px = anim.sq.col * SQ;
-  const py = (7 - anim.sq.row) * SQ;
+  const px = (isFlipped ? 7 - anim.sq.col : anim.sq.col) * SQ;
+  const py = (isFlipped ? anim.sq.row : 7 - anim.sq.row) * SQ;
   const cx = px + SQ / 2;
   const cy = py + SQ / 2;
 

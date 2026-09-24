@@ -158,14 +158,20 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
   setSQ(boardPx / 8);
   const W = boardPx, H = boardPx;
   const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+  const isFlipped = viewerColor === 'black';
+
+  const sqToX = (col: number) => (isFlipped ? 7 - col : col) * SQ;
+  const sqToY = (row: number) => (isFlipped ? row : 7 - row) * SQ;
+  const sqToCenterX = (col: number) => (isFlipped ? 7 - col : col) * SQ + SQ / 2;
+  const sqToCenterY = (row: number) => (isFlipped ? row : 7 - row) * SQ + SQ / 2;
 
   React.useEffect(() => {
     if (swapAnim && swapAnim !== swapRef.current) {
       swapRef.current  = swapAnim;
       swapStartT.current = tRef.current;
       const spawn = (sq: Sq, col: string) => {
-        const cx = sq.col * SQ + SQ / 2;
-        const cy = (7 - sq.row) * SQ + SQ / 2;
+        const cx = sqToCenterX(sq.col);
+        const cy = sqToCenterY(sq.row);
         for (let i = 0; i < 20; i++) {
           const a = Math.random() * Math.PI * 2;
           const spd = 1.5 + Math.random() * 3;
@@ -192,8 +198,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     let last = performance.now();
 
     const spawnBombParticles = (sq: Sq) => {
-      const cx = sq.col * SQ + SQ / 2;
-      const cy = (7 - sq.row) * SQ + SQ / 2;
+      const cx = sqToCenterX(sq.col);
+      const cy = sqToCenterY(sq.row);
       for (let i = 0; i < 40; i++) {
         const a = Math.random() * Math.PI * 2;
         const spd = 2 + Math.random() * 6;
@@ -218,8 +224,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     };
 
     const spawnLavaParticles = (sq: Sq) => {
-      const cx = sq.col * SQ + SQ / 2;
-      const cy = (7 - sq.row) * SQ + SQ / 2;
+      const cx = sqToCenterX(sq.col);
+      const cy = sqToCenterY(sq.row);
       for (let i = 0; i < 18; i++) {
         const a = Math.random() * Math.PI * 2;
         const spd = 1.5 + Math.random() * 4;
@@ -233,8 +239,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     };
 
     const spawnTransformParticles = (anim: TransformAnim) => {
-      const cx = anim.sq.col * SQ + SQ / 2;
-      const cy = (7 - anim.sq.row) * SQ + SQ / 2;
+      const cx = sqToCenterX(anim.sq.col);
+      const cy = sqToCenterY(anim.sq.row);
       const isUp = anim.direction === 'up';
       const colors = isUp
         ? ['#ffd700', '#ffffff', '#ffa500', '#fffacd']
@@ -268,13 +274,12 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       ctx.clearRect(0, 0, W, H);
 
       // ── Draw squares ──────────────────────────────────────────────────────
-      const isFlipped = viewerColor === 'black';
       for (let ri = 0; ri < 8; ri++) {
         for (let ci = 0; ci < 8; ci++) {
           const row = isFlipped ? ri : 7 - ri;
           const col = isFlipped ? 7 - ci : ci;
           const light = (row + col) % 2 !== 0;
-          const x = col * SQ, y = ri * SQ;
+          const x = ci * SQ, y = ri * SQ;
 
           const isSel = !isReviewing && sel?.row === row && sel?.col === col;
           const isLM  = lm && ((lm.from.row === row && lm.from.col === col) || (lm.to.row === row && lm.to.col === col));
@@ -323,10 +328,18 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
 
             // Only draw a border on sides where the neighbor is NOT also highlighted.
             // This prevents double-borders on shared edges that make them look thinner.
-            const noTop    = row < 7 && !!(cardHighlight(row + 1, col) || doubleMoveHighlight(row + 1, col));
-            const noBottom = row > 0 && !!(cardHighlight(row - 1, col) || doubleMoveHighlight(row - 1, col));
-            const noLeft   = col > 0 && !!(cardHighlight(row, col - 1) || doubleMoveHighlight(row, col - 1));
-            const noRight  = col < 7 && !!(cardHighlight(row, col + 1) || doubleMoveHighlight(row, col + 1));
+            const noTop    = isFlipped
+              ? (row > 0 && !!(cardHighlight(row - 1, col) || doubleMoveHighlight(row - 1, col)))
+              : (row < 7 && !!(cardHighlight(row + 1, col) || doubleMoveHighlight(row + 1, col)));
+            const noBottom = isFlipped
+              ? (row < 7 && !!(cardHighlight(row + 1, col) || doubleMoveHighlight(row + 1, col)))
+              : (row > 0 && !!(cardHighlight(row - 1, col) || doubleMoveHighlight(row - 1, col)));
+            const noLeft   = isFlipped
+              ? (col < 7 && !!(cardHighlight(row, col + 1) || doubleMoveHighlight(row, col + 1)))
+              : (col > 0 && !!(cardHighlight(row, col - 1) || doubleMoveHighlight(row, col - 1)));
+            const noRight  = isFlipped
+              ? (col > 0 && !!(cardHighlight(row, col - 1) || doubleMoveHighlight(row, col - 1)))
+              : (col < 7 && !!(cardHighlight(row, col + 1) || doubleMoveHighlight(row, col + 1)));
 
             const bw = 3;
             const borderAlpha = Math.min(1, a2 * 1.8);
@@ -483,46 +496,49 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       ctx.textBaseline = 'top';
       for (let ri = 0; ri < 8; ri++) {
         const displayRank = isFlipped ? ri + 1 : 8 - ri;
-        const lightAtCol0 = ((isFlipped ? 7 - ri : 7 - ri) + 0) % 2 !== 0;
+        const row = isFlipped ? ri : 7 - ri;
+        const col = isFlipped ? 7 : 0;
+        const lightAtCol0 = (row + col) % 2 !== 0;
         ctx.fillStyle = lightAtCol0 ? '#B58863' : '#F0D9B5';
         ctx.fillText(String(displayRank), 3, ri * SQ + 3);
       }
       ctx.textBaseline = 'bottom';
       for (let ci = 0; ci < 8; ci++) {
         const displayFile = isFlipped ? FILES[7 - ci] : FILES[ci];
-        const lightAtRow0 = (0 + (isFlipped ? 7 - ci : ci)) % 2 !== 0;
+        const row = isFlipped ? 7 : 0;
+        const col = isFlipped ? 7 - ci : ci;
+        const lightAtRow0 = (row + col) % 2 !== 0;
         ctx.fillStyle = lightAtRow0 ? '#B58863' : '#F0D9B5';
         ctx.fillText(displayFile, ci * SQ + SQ - 10, H - 2);
       }
       ctx.textBaseline = 'alphabetic';
 
       for (const arrow of analysisArrows) {
-        drawBoardArrow(ctx, arrow.from, arrow.to, arrow.color);
+        drawBoardArrow(ctx, arrow.from, arrow.to, arrow.color, undefined, isFlipped);
       }
       if (annotationStartRef.current && annotationTargetRef.current) {
-        drawBoardArrow(ctx, annotationStartRef.current, annotationTargetRef.current, ANALYSIS_ARROW_COLOR, { alpha: 0.6, preview: true });
+        drawBoardArrow(ctx, annotationStartRef.current, annotationTargetRef.current, ANALYSIS_ARROW_COLOR, { alpha: 0.6, preview: true }, isFlipped);
       }
 
       if (premove) {
         ctx.save();
         ctx.setLineDash([6, 4]);
-        drawBoardArrow(ctx, premove.from, premove.to, 'rgba(96,165,250,0.8)', { lineWidth: 3 });
+        drawBoardArrow(ctx, premove.from, premove.to, 'rgba(96,165,250,0.8)', { lineWidth: 3 }, isFlipped);
         ctx.setLineDash([]);
-        const pmFrom = { row: 7 - premove.from.row, col: premove.from.col };
-        const pmTo = { row: 7 - premove.to.row, col: premove.to.col };
+        const pmFromX = sqToX(premove.from.col);
+        const pmFromY = sqToY(premove.from.row);
         ctx.fillStyle = 'rgba(96,165,250,0.85)';
         ctx.font = `bold ${SQ * 0.2}px sans-serif`;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'top';
-        ctx.fillText('P➜', pmFrom.col * SQ + SQ - 3, pmFrom.row * SQ + 3);
+        ctx.fillText('P➜', pmFromX + SQ - 3, pmFromY + 3);
         ctx.restore();
       }
 
       // ── Draw ghost (invisible) piece and any piece on same square ────────
       if (invisibleUnder) {
         const { row: ur, col: uc, piece: up } = invisibleUnder;
-        const uri = 7 - ur;
-        const ux = uc * SQ, uy = uri * SQ;
+        const ux = sqToX(uc), uy = sqToY(ur);
 
         // Draw any real piece occupying the same square at full opacity underneath
         const boardPiece = displayBoard[ur][uc];
@@ -593,8 +609,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       const transformSq = transformRef.current?.sq;
       for (let ri = 0; ri < 8; ri++) {
         for (let ci = 0; ci < 8; ci++) {
-          const row = 7 - ri;
-          const col = ci;
+          const row = isFlipped ? ri : 7 - ri;
+          const col = isFlipped ? 7 - ci : ci;
           const p = displayBoard[row][col];
           if (!p) continue;
           if (localDragRef.current?.row === row && localDragRef.current?.col === col) continue;
@@ -625,7 +641,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
           // Skip ghost's square — drawn separately above with ghost animation
           if (invisibleUnder && invisibleUnder.row === row && invisibleUnder.col === col) continue;
 
-          const x = col * SQ, y = ri * SQ;
+          const x = ci * SQ, y = ri * SQ;
           const img = PIECE_IMAGES[`${p.color}_${p.type}`];
           if (!isUsableImage(img)) continue;
 
@@ -1026,8 +1042,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
           const [tpr, tpc] = (pp.parasiteTarget as string).split(',').map(Number);
           const tp2 = displayBoard[tpr]?.[tpc];
           if (!tp2) continue;
-          const x1 = pc  * SQ + SQ / 2, y1 = (7 - pr)  * SQ + SQ / 2;
-          const x2 = tpc * SQ + SQ / 2, y2 = (7 - tpr) * SQ + SQ / 2;
+          const x1 = sqToCenterX(pc), y1 = sqToCenterY(pr);
+          const x2 = sqToCenterX(tpc), y2 = sqToCenterY(tpr);
           const pulse = 0.55 + Math.sin(now / 220) * 0.35;
           // outer glow line
           ctx.save();
@@ -1079,7 +1095,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
             ctx.restore();
             ctx.save();
             ctx.globalAlpha = 0.25;
-            ctx.drawImage(img, activeDrag.col*SQ+3, (7-activeDrag.row)*SQ+3, SQ-6, SQ-6);
+            ctx.drawImage(img, sqToX(activeDrag.col) + 3, sqToY(activeDrag.row) + 3, SQ - 6, SQ - 6);
             ctx.restore();
           }
         }
@@ -1092,8 +1108,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
           spawnedBombs.add(key);
           spawnBombParticles(sq);
         }
-        const cx = sq.col * SQ + SQ/2;
-        const cy = (7 - sq.row) * SQ + SQ/2;
+        const cx = sqToCenterX(sq.col);
+        const cy = sqToCenterY(sq.row);
         const tElapsed = now - (swapStartT.current || 0);
         const fb = ctx.createRadialGradient(cx, cy, 0, cx, cy, SQ * 1.8);
         fb.addColorStop(0, 'rgba(255,255,255,0.95)');
@@ -1126,8 +1142,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
           spawnedLava.add(key);
           spawnLavaParticles(sq);
         }
-        const cx = sq.col * SQ + SQ/2;
-        const cy = (7 - sq.row) * SQ + SQ/2;
+        const cx = sqToCenterX(sq.col);
+        const cy = sqToCenterY(sq.row);
         const lb = ctx.createRadialGradient(cx, cy, 0, cx, cy, SQ * 1.5);
         lb.addColorStop(0, 'rgba(255,200,0,0.9)');
         lb.addColorStop(0.3, 'rgba(255,80,0,0.8)');
@@ -1142,7 +1158,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       // ── Lava active squares ───────────────────────────────────────────────
       for (const ls of lavaSquares) {
         if (lavaExploding.some((e: Sq) => e.row===ls.row && e.col===ls.col)) continue;
-        const x = ls.col * SQ, y = (7 - ls.row) * SQ;
+        const x = sqToX(ls.col), y = sqToY(ls.row);
         const pulse = 0.55 + Math.sin(now / 280 + ls.col + ls.row) * 0.25;
         const lavGrad = ctx.createRadialGradient(x+SQ/2, y+SQ/2, 0, x+SQ/2, y+SQ/2, SQ*0.65);
         lavGrad.addColorStop(0, `rgba(255,${Math.floor(100+pulse*80)},0,${pulse * 0.85})`);
@@ -1176,8 +1192,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
         const cr1 = Math.min(7, zone.centerRow + 1);
         const cc0 = Math.max(0, zone.centerCol - 1);
         const cc1 = Math.min(7, zone.centerCol + 1);
-        const zx  = cc0 * SQ;
-        const zy  = (7 - cr1) * SQ;
+        const zx  = (isFlipped ? 7 - cc1 : cc0) * SQ;
+        const zy  = (isFlipped ? cr0 : 7 - cr1) * SQ;
         const zw  = (cc1 - cc0 + 1) * SQ;
         const zh  = (cr1 - cr0 + 1) * SQ;
         const zcx = zx + zw / 2;
@@ -1320,8 +1336,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
               const hp = (reviewBoard ?? board)[fogRow][fogCol];
               if (!hp || hp.color !== zone.ownerColor) continue;
 
-              const fx  = fogCol * SQ;
-              const fy  = (7 - fogRow) * SQ;
+              const fx  = sqToX(fogCol);
+              const fy  = sqToY(fogRow);
               const bob = Math.sin(now / 1800 + fogRow * 1.1 + fogCol * 0.8) * 2.2;
 
               ctx.save();
@@ -1375,8 +1391,8 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
         const dur = 650;
         const t = Math.min(1, elapsed / dur);
 
-        const cx1 = sa.sq1.col * SQ + SQ/2, cy1 = (7 - sa.sq1.row) * SQ + SQ/2;
-        const cx2 = sa.sq2.col * SQ + SQ/2, cy2 = (7 - sa.sq2.row) * SQ + SQ/2;
+        const cx1 = sqToCenterX(sa.sq1.col), cy1 = sqToCenterY(sa.sq1.row);
+        const cx2 = sqToCenterX(sa.sq2.col), cy2 = sqToCenterY(sa.sq2.row);
         const mx = (cx1+cx2)/2, my = (cy1+cy2)/2;
         const dx = cx2-cx1, dy = cy2-cy1, len = Math.sqrt(dx*dx+dy*dy)||1;
         const bulge = Math.min(80, len*0.5);
@@ -1389,16 +1405,16 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
         const alpha = t < 0.8 ? 1 : 1 - (t-0.8)/0.2;
 
         ctx.fillStyle = `rgba(${r1c},${g1c},${b1c},${0.18 * alpha})`;
-        ctx.fillRect(sa.sq1.col*SQ, (7-sa.sq1.row)*SQ, SQ, SQ);
+        ctx.fillRect(sqToX(sa.sq1.col), sqToY(sa.sq1.row), SQ, SQ);
         ctx.strokeStyle = `rgba(${r1c},${g1c},${b1c},${0.9 * alpha})`;
         ctx.lineWidth = 2.5;
-        ctx.strokeRect(sa.sq1.col*SQ+1.5, (7-sa.sq1.row)*SQ+1.5, SQ-3, SQ-3);
+        ctx.strokeRect(sqToX(sa.sq1.col)+1.5, sqToY(sa.sq1.row)+1.5, SQ-3, SQ-3);
 
         ctx.fillStyle = `rgba(${r2c},${g2c},${b2c},${0.18 * alpha})`;
-        ctx.fillRect(sa.sq2.col*SQ, (7-sa.sq2.row)*SQ, SQ, SQ);
+        ctx.fillRect(sqToX(sa.sq2.col), sqToY(sa.sq2.row), SQ, SQ);
         ctx.strokeStyle = `rgba(${r2c},${g2c},${b2c},${0.9 * alpha})`;
         ctx.lineWidth = 2.5;
-        ctx.strokeRect(sa.sq2.col*SQ+1.5, (7-sa.sq2.row)*SQ+1.5, SQ-3, SQ-3);
+        ctx.strokeRect(sqToX(sa.sq2.col)+1.5, sqToY(sa.sq2.row)+1.5, SQ-3, SQ-3);
 
         const drawArc = (
           x1: number, y1: number, qx: number, qy: number, x2: number, y2: number,
@@ -1477,7 +1493,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
             transformSpawned.current = true;
           }
         }
-        paintTransformAnim(ctx, ta, now);
+        paintTransformAnim(ctx, ta, now, isFlipped);
       }
 
       // ── Sniper animation ──────────────────────────────────────────────────
@@ -1485,7 +1501,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       if (sa) {
         const elapsed = now - sa.startTime;
         if (elapsed < SNIPER_DURATION) {
-          paintSniperAnim(ctx, sa, now);
+          paintSniperAnim(ctx, sa, now, isFlipped);
         } else {
           sniperRef.current = null;
         }
@@ -1496,7 +1512,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       if (tpa) {
         const elapsed = now - tpa.startTime;
         if (elapsed < TELEPORT_DURATION) {
-          paintTeleportAnim(ctx, tpa, now);
+          paintTeleportAnim(ctx, tpa, now, isFlipped);
         } else {
           teleportRef.current = null;
         }
@@ -1507,7 +1523,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       if (ja) {
         const elapsed = now - ja.startTime;
         if (elapsed < JUMP_DURATION) {
-          paintJumpAnim(ctx, ja, now);
+          paintJumpAnim(ctx, ja, now, isFlipped);
         } else {
           jumpRef.current = null;
         }
@@ -1529,7 +1545,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       if (sacA) {
         const elapsed = now - sacA.startTime;
         if (elapsed < SACRIFICE_DURATION) {
-          paintSacrificeAnim(ctx, sacA, now);
+          paintSacrificeAnim(ctx, sacA, now, isFlipped);
         } else {
           sacrificeRef.current = null;
         }
@@ -1540,7 +1556,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       if (mcA) {
         const elapsed = now - mcA.startTime;
         if (elapsed < MINDCONTROL_DURATION) {
-          paintMindControlAnim(ctx, mcA, now);
+          paintMindControlAnim(ctx, mcA, now, isFlipped);
         } else {
           mindControlRef.current = null;
         }
@@ -1551,7 +1567,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       if (fusA) {
         const elapsed = now - fusA.startTime;
         if (elapsed < FUSE_DURATION) {
-          paintFuseAnim(ctx, fusA, now);
+          paintFuseAnim(ctx, fusA, now, isFlipped);
         } else {
           fuseRef.current = null;
         }
@@ -1628,7 +1644,12 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
     const sqX = rect.width / 8;
     const sqY = rect.height / 8;
-    return { row: 7 - Math.floor(y / sqY), col: Math.floor(x / sqX) };
+    const ci = Math.floor(x / sqX);
+    const ri = Math.floor(y / sqY);
+    return {
+      row: isFlipped ? ri : 7 - ri,
+      col: isFlipped ? 7 - ci : ci,
+    };
   };
 
   const getTouchSquare = (e: TouchEvent): Sq | null => {
@@ -1640,7 +1661,12 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     const x = touch.clientX - rect.left, y = touch.clientY - rect.top;
     const sqX = rect.width / 8;
     const sqY = rect.height / 8;
-    return { row: 7 - Math.floor(y / sqY), col: Math.floor(x / sqX) };
+    const ci = Math.floor(x / sqX);
+    const ri = Math.floor(y / sqY);
+    return {
+      row: isFlipped ? ri : 7 - ri,
+      col: isFlipped ? 7 - ci : ci,
+    };
   };
 
   const touchStartSq = React.useRef<Sq | null>(null);

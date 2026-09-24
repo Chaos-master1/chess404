@@ -655,7 +655,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       premoveRef.current = null;
       return;
     }
-    const myColor = hostedRuntime ? viewerSeatRef.current : turn;
+    const myColor = viewerSeatRef.current ?? (hostedRuntime ? 'white' : turn);
     if (turn === myColor && premoveRef.current) {
       const pm = premoveRef.current;
       setPremove(null);

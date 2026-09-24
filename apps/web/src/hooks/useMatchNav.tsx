@@ -161,25 +161,25 @@ export function useMatchNav(props: UseMatchNavProps) {
     ? (activePage === 'Play' || activePage === 'Modes' || activePage === 'Queue' || activePage === 'Lobbies')
     : (activePage === 'Modes' || activePage === 'Queue' || activePage === 'Lobbies'));
   const showBoardSurface = isMatchRoute || activePage === 'Match' || (!hostedRuntime && activePage === 'Play');
-  const controlledSeat = hostedRuntime ? viewerSeat : null;
+  const controlledSeat = viewerSeat ?? (hostedRuntime ? 'white' : null);
   const topSeat: PieceColor = controlledSeat === 'black' ? 'white' : 'black';
   const bottomSeat: PieceColor = controlledSeat === 'black' ? 'black' : 'white';
   const topHand = topSeat === 'white' ? whiteHand : blackHand;
   const bottomHand = bottomSeat === 'white' ? whiteHand : blackHand;
-  const whiteSeatBadge = hostedRuntime
+  const whiteSeatBadge = viewerSeat
     ? viewerSeat === 'white'
       ? 'You'
-      : viewerSeat === 'black'
-        ? 'Opponent'
-        : 'Spectator'
-    : null;
-  const blackSeatBadge = hostedRuntime
+      : 'Opponent'
+    : hostedRuntime
+      ? 'Spectator'
+      : null;
+  const blackSeatBadge = viewerSeat
     ? viewerSeat === 'black'
       ? 'You'
-      : viewerSeat === 'white'
-        ? 'Opponent'
-        : 'Spectator'
-    : null;
+      : 'Opponent'
+    : hostedRuntime
+      ? 'Spectator'
+      : null;
   const showHostedSoloBanner = hostedRuntime && !authoritativeMatchId;
   const showHostedReconnectWarning = false;
   const activeDisconnectGraceFor = authoritativeStatus === 'active' ? authoritativeDisconnectGraceFor : null;
@@ -342,7 +342,7 @@ export function useMatchNav(props: UseMatchNavProps) {
         };
     }
   })();
-  const actorSeatForHostedControls: PieceColor | null = hostedRuntime ? viewerSeat : turn;
+  const actorSeatForHostedControls: PieceColor | null = viewerSeat ?? (hostedRuntime ? null : turn);
   const actorSeatPlainLabel = actorSeatForHostedControls
     ? (actorSeatForHostedControls === 'white' ? 'White' : 'Black')
     : 'Spectator';

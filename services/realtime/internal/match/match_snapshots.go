@@ -79,6 +79,21 @@ func filterEventsForColor(events []contracts.ResolvedEvent, color string) []cont
 		if e.Type == "card_drawn" && e.Payload != nil {
 			owner, _ := e.Payload["owner"].(string)
 			if owner != "" && owner != color {
+				sanitizedPayload := make(map[string]any, len(e.Payload))
+				for k, v := range e.Payload {
+					sanitizedPayload[k] = v
+				}
+				cardCount := 1
+				if rawCards, ok := e.Payload["cards"].([]contracts.GameCard); ok {
+					cardCount = len(rawCards)
+				} else if rawCards, ok := e.Payload["cards"].([]any); ok {
+					cardCount = len(rawCards)
+				}
+				sanitizedPayload["cards"] = stubHiddenHand(cardCount)
+				sanitizedPayload["hidden"] = true
+				sanitizedEvent := e
+				sanitizedEvent.Payload = sanitizedPayload
+				filtered = append(filtered, sanitizedEvent)
 				continue
 			}
 		}
