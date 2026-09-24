@@ -89,6 +89,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
   const sacrificeRef     = React.useRef<SacrificeAnim | null>(null);
   const mindControlRef   = React.useRef<MindControlAnim | null>(null);
   const fuseRef          = React.useRef<FuseAnim | null>(null);
+  const justDroppedRef   = React.useRef(false);
 
   React.useEffect(() => {
     sacrificeRef.current = sacrificeAnim ?? null;
@@ -1751,9 +1752,6 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     }
     if (e.button !== 0) return;
     if (cardPending || isReviewing) return;
-    if (premove) {
-      onPremove?.();
-    }
     onClearAnalysisArrows();
     const p = displayBoard[sq.row]?.[sq.col];
     if (viewerColor && p?.color === viewerColor) {
@@ -1793,10 +1791,13 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       }
       setLocalDrag(null);
       setLocalDragPos(null);
+      justDroppedRef.current = true;
+      setTimeout(() => { justDroppedRef.current = false; }, 80);
     }
   };
 
   const handleClick = (e: React.MouseEvent) => {
+    if (justDroppedRef.current) return;
     if (localDrag) return;
     if (annotationStart) return;
     const sq = getSquare(e);

@@ -47,6 +47,16 @@ export function useBoardInteraction() {
   const overRef    = React.useRef(over);
   const premoveRef = React.useRef<{ from: Sq; to: Sq } | null>(null);
 
+  boardRef.current      = board;
+  turnRef.current       = turn;
+  movedRef.current      = moved;
+  lmRef.current         = lm;
+  hmcRef.current        = hmc;
+  fmnRef.current        = fmn;
+  posHistRef.current    = posHist;
+  overRef.current       = over;
+  premoveRef.current    = premove;
+
   React.useEffect(() => { boardRef.current      = board;      }, [board]);
   React.useEffect(() => { turnRef.current       = turn;       }, [turn]);
   React.useEffect(() => { movedRef.current      = moved;      }, [moved]);

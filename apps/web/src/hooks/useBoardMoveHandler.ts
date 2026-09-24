@@ -807,21 +807,39 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     }
     const canPremove = hostedRuntime && authoritativeMatchIdRef.current && myColor && !isMyTurn && !overRef.current;
 
-    if (canPremove && !sel) {
-      if (p && p.color === myColor && canSelectPiece(r, c)) {
-        setSel({ row: r, col: c });
-        setHints(getMoves(r, c));
-        setCardMsg('🔄 Premove set: click destination');
+    if (canPremove) {
+      if (p && p.color === myColor) {
+        if (sel && sel.row === r && sel.col === c) {
+          setSel(null);
+          setHints([]);
+          return;
+        }
+        if (canSelectPiece(r, c)) {
+          setSel({ row: r, col: c });
+          setHints(getMoves(r, c));
+          setCardMsg('🔄 Premove: click destination');
+          return;
+        }
       }
-      return;
-    }
 
-    if (canPremove && sel && hints.some(m => m.row === r && m.col === c)) {
-      setPremove({ from: sel, to: { row: r, col: c } });
+      if (sel && hints.some(m => m.row === r && m.col === c)) {
+        setPremove({ from: sel, to: { row: r, col: c } });
+        setSel(null);
+        setHints([]);
+        setCardMsg('✔ Premove queued');
+        setTimeout(() => { if (premoveRef.current) setCardMsg('⏳ Premove will fire when turn starts'); }, 1200);
+        return;
+      }
+
+      // Clicked outside legal moves / on empty square: deselect and cancel queued premove
       setSel(null);
       setHints([]);
-      setCardMsg('✔ Premove queued');
-      setTimeout(() => { if (premoveRef.current) setCardMsg('⏳ Premove will fire when turn starts'); }, 1200);
+      if (premoveRef.current) {
+        setPremove(null);
+        premoveRef.current = null;
+        setCardMsg('✕ Premove cancelled');
+        setTimeout(() => setCardMsg(''), 1500);
+      }
       return;
     }
 

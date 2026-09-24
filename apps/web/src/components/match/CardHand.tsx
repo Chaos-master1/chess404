@@ -21,9 +21,11 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
   const xStep  = hand.length > 1 ? Math.min(52, 500 / hand.length) : 0;
   const spread = hand.length > 1 ? Math.min(18, 60 / hand.length)  : 0;
 
+  if (!hand || hand.length === 0) return null;
+
   return (
     <div style={{
-      position:'relative', height:'100px', width:'580px',
+      position:'relative', height: isBottom ? '100px' : '82px', width:'580px',
       display:'flex', alignItems: isBottom ? 'flex-end' : 'flex-start',
       justifyContent:'center',
       marginTop: isBottom ? '4px' : 0, marginBottom: isBottom ? 0 : '4px',

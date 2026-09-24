@@ -669,9 +669,16 @@ export function MatchBoardView() {
                 const canPremove = hostedRuntime && authoritativeMatchId && actingColor && turn !== actingColor && !over;
                 if (canPremove && mv.some(m => m.row === r && m.col === c)) {
                   setPremove({ from: drag, to: { row: r, col: c } });
-                  setCardMsg('? Premove queued');
+                  setCardMsg('✔ Premove queued');
+                  setTimeout(() => { setCardMsg('⏳ Premove will fire when turn starts'); }, 1200);
                 } else if (mv.some(m => m.row === r && m.col === c)) {
                   doMove(drag.row, drag.col, r, c);
+                } else if (canPremove && (r !== drag.row || c !== drag.col)) {
+                  if (premove) {
+                    setPremove(null);
+                    setCardMsg('✕ Premove cancelled');
+                    setTimeout(() => setCardMsg(''), 1500);
+                  }
                 }
                 setDrag(null); setDragPos(null); setSel(null); setHints([]);
               }}
@@ -963,7 +970,8 @@ export function MatchBoardView() {
               <div style={{ color:'#a0b8d8', fontSize:'9px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.8px' }}>Round</div>
               <div style={{ color: roundNumber >= 7 ? '#f39c12' : '#fff', fontSize:'20px', fontWeight:800, lineHeight:1.1 }}>{roundNumber}</div>
               <div style={{ color:'#4a6080', fontSize:'9px', marginTop:'1px' }}>
-                {roundNumber < INITIAL_DEAL_ROUND ? `cards dealt at r${INITIAL_DEAL_ROUND}`
+                {(!hostedRuntime && !authoritativeMatchId && roundNumber < INITIAL_DEAL_ROUND)
+                ? `cards dealt at r${INITIAL_DEAL_ROUND}`
                 : roundNumber < DRAW_FROM        ? `next draw at r${DRAW_FROM}`
                 : (roundNumber - DRAW_FROM) % DRAW_EVERY === 0 ? '🃏 draw now!'
                 : `next draw r${DRAW_FROM + Math.ceil((roundNumber - DRAW_FROM) / DRAW_EVERY) * DRAW_EVERY}`}

@@ -480,6 +480,13 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     setAuthoritativeDisconnectGraceFor(match.disconnectGraceFor ?? null);
     setAuthoritativeDisconnectGraceDeadline(match.disconnectGraceDeadline ?? null);
 
+    boardRef.current = match.board as Board;
+    turnRef.current = match.turn as PieceColor;
+    movedRef.current = new Set(match.moved);
+    lmRef.current = match.lastMove;
+    hmcRef.current = match.halfMoveClock;
+    fmnRef.current = match.fullMoveNumber;
+
     setBoard(match.board as Board);
     const isNewMatch = authoritativeMatchIdRef.current !== match.matchId;
     if (isNewMatch) {
@@ -524,6 +531,25 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
               fireCardAnim('sniper', `${piece.type} eliminated`);
             }
           }
+        } else if (ev.type === 'card_drawn') {
+          const owner = ev.payload?.owner as PieceColor | undefined;
+          const isOpponent = !myActor?.playerId || (ev.actorId ? ev.actorId !== myActor.playerId : (mySeat ? owner !== mySeat : owner !== 'white'));
+          playCardSound();
+          if (isOpponent) {
+            setCardMsg('🃏 Opponent drew a card!');
+            setLastDrawAnim({ color: (owner || 'black') as any, rarity: 'common' });
+          } else {
+            const cards = ev.payload?.cards as GameCard[] | undefined;
+            const rarity = cards?.[0]?.rarity || 'common';
+            setCardMsg('🃏 You drew a card!');
+            setLastDrawAnim({ color: (owner || 'white') as any, rarity: rarity as any });
+          }
+          setTimeout(() => setLastDrawAnim(null), 2500);
+        } else if ((ev.type as string) === 'card_draw_lost') {
+          const owner = ev.payload?.owner as string | undefined;
+          const reason = ev.payload?.reason as string | undefined;
+          setCardMsg(`⚠️ ${owner || 'Player'} card draw lost (${reason || 'hand full'})`);
+          setTimeout(() => setCardMsg(''), 2500);
         }
       }
     }
@@ -566,7 +592,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setClockActive(true);
       setTicking(match.turn);
     }
-  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, playCardSound, setCardMsg, authoritativeActorForColor]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;
@@ -634,9 +660,16 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       const pm = premoveRef.current;
       setPremove(null);
       premoveRef.current = null;
+      const legalMoves = getMoves(pm.from.row, pm.from.col);
+      const isLegal = legalMoves.some(m => m.row === pm.to.row && m.col === pm.to.col);
+      if (!isLegal) {
+        setCardMsg('⚠️ Premove cancelled: no longer legal');
+        setTimeout(() => setCardMsg(''), 2000);
+        return;
+      }
       doMove(pm.from.row, pm.from.col, pm.to.row, pm.to.col);
     }
-  }, [turn, over, hostedRuntime, doMove, setPremove, premoveRef, viewerSeatRef]);
+  }, [turn, over, hostedRuntime, doMove, setPremove, premoveRef, viewerSeatRef, getMoves, setCardMsg]);
 
   const bootstrapAuthoritativeMatch = React.useCallback(async () => {
     if (!hostedRuntime) return;
