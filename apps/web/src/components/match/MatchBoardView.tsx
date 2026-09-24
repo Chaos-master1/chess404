@@ -417,7 +417,7 @@ export function MatchBoardView() {
             if (over)           blockReason = 'Game is over';
             else if (!isViewerOwner) blockReason = "Not your card to use";
             else if (usedThisTurn) blockReason = 'Already used a card this turn';
-            else if (selectedCard.type !== 'trap' && turn !== ownerColor) blockReason = `Only usable on ${ownerColor}'s turn`;
+            else if (turn !== ownerColor) blockReason = `Only usable on ${ownerColor}'s turn`;
             return (
               <div style={{ display:'flex', flexDirection:'column', background: selectedCard.color, animation:'cardReveal 0.22s cubic-bezier(0.34,1.56,0.64,1)', flex:1, overflow:'hidden' }}>
                 <div style={{ padding:'10px 14px 8px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:`1px solid ${selectedCard.accent}55` }}>

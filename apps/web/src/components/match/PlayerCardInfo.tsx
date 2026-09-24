@@ -3,6 +3,7 @@
 import React from 'react';
 import type { PieceColor } from '../../types';
 import { useMatchState } from '../../contexts/MatchStateContext';
+import { useMatchCard } from '../../contexts/MatchCardContext';
 
 interface PlayerCardInfoProps {
   seat: PieceColor;
@@ -14,12 +15,15 @@ export default function PlayerCardInfo({ seat }: PlayerCardInfoProps) {
     displayedWhiteRating, displayedBlackRating,
     timeW, timeB, fmtClock, tickingState,
   } = useMatchState();
+  const { whiteHand, blackHand } = useMatchCard();
 
   const isWhite = seat === 'white';
   const name = isWhite ? displayedWhiteName : displayedBlackName;
   const rating = isWhite ? displayedWhiteRating : displayedBlackRating;
   const time = isWhite ? timeW : timeB;
   const isTicking = tickingState === seat;
+  const hand = isWhite ? whiteHand : blackHand;
+  const cardCount = hand ? hand.length : 0;
 
   return (
     <div style={{
@@ -35,10 +39,28 @@ export default function PlayerCardInfo({ seat }: PlayerCardInfoProps) {
         border:'2px solid rgba(255,255,255,0.2)',
         boxShadow:'0 2px 6px rgba(0,0,0,0.3)',
       }} />
-      <div style={{ flex:1 }}>
-        <div style={{ fontWeight:700, fontSize:'12px', color:'#f0e6d0' }}>{name}</div>
-        {rating != null && (
-          <div style={{ fontSize:'10px', color:'rgba(200,190,170,0.7)' }}>Rating: {rating}</div>
+      <div style={{ flex:1, display:'flex', alignItems:'center', gap:'8px' }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:'12px', color:'#f0e6d0' }}>{name}</div>
+          {rating != null && (
+            <div style={{ fontSize:'10px', color:'rgba(200,190,170,0.7)' }}>Rating: {rating}</div>
+          )}
+        </div>
+        {cardCount > 0 && (
+          <div
+            title={`${cardCount} card${cardCount > 1 ? 's' : ''} in hand`}
+            style={{
+              display:'inline-flex', alignItems:'center', gap:'3px',
+              padding:'2px 7px', borderRadius:'12px',
+              fontSize:'10px', fontWeight:800,
+              background:'rgba(168,85,247,0.18)',
+              border:'1px solid rgba(168,85,247,0.4)',
+              color:'#d8b4fe',
+            }}
+          >
+            <span>🎴</span>
+            <span>{cardCount}</span>
+          </div>
         )}
       </div>
       <div style={{

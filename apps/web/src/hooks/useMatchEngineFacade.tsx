@@ -472,6 +472,13 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     setAuthoritativeDisconnectGraceDeadline(match.disconnectGraceDeadline ?? null);
 
     setBoard(match.board as Board);
+    const isNewMatch = authoritativeMatchIdRef.current !== match.matchId;
+    if (isNewMatch) {
+      resetCardUsed('white');
+      resetCardUsed('black');
+    } else if (turnRef.current !== match.turn) {
+      resetCardUsed(match.turn as PieceColor);
+    }
     setTurn(match.turn);
     setMoved(new Set(match.moved));
     setLm(match.lastMove);
@@ -565,7 +572,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     over, setOver, winner, setWinner, movHist, setMovHist, snapshots, setSnapshots,
     analysisArrows, setAnalysisArrows, boardRef, turnRef, movedRef, lmRef,
     hmcRef, fmnRef, posHistRef, overRef, premoveRef, setPremove, doubleMove,
-    setDoubleMove, doubleMoveRef, cardPending, selectedCard, promoPicker, cardPromo,
+    setDoubleMove, doubleMoveRef, cardPending, selectedCard, setSelectedCard, promoPicker, cardPromo,
     jokerPicker, ghostRef, setGhostPiece, hostedRuntime, viewerSeatRef,
     authoritativeMatchIdRef, authoritativeActorForColor, applyAuthoritativeSnapshot,
     resetCardUsed, startAbortCountdown, stopAbortCountdown, setTicking, setClockActive,

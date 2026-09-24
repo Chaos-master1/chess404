@@ -355,7 +355,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
       const actor = authoritativeActorForColor(playerColor);
       if (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken)) return false;
     }
-    if (card.type !== 'trap' && turn !== playerColor) return false;
+    if (turn !== playerColor) return false;
     return !cardUsedByRef.current[playerColor];
   }, [over, turn, hostedRuntime, authoritativeActorForColor, cardUsedByRef, viewerSeatRef]);
 
@@ -375,6 +375,9 @@ export function useCardInteraction(props: UseCardInteractionProps) {
 
       void applyIntent(authoritativeMatchIdRef.current, targetIntent).then(snapshot => {
         applyAuthoritativeSnapshot(snapshot);
+        if (!snapshot.match?.pendingCard) {
+          setSelectedCard(null);
+        }
         if (mechanic === 'freeze') {
           setCardMsg(`Freeze applied at ${FILES[col]}${RANKS[row]}`);
         } else if (mechanic === 'shield') {
@@ -615,6 +618,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
 
       void applyIntent(authoritativeMatchIdRef.current, playCardIntent).then(snapshot => {
         applyAuthoritativeSnapshot(snapshot);
+        pendingCardUseRef.current.delete(card.id);
         if (card.mechanic === 'doublemove_diff') {
           setCardMsg('Twin active! Make your first move, then move a different piece.');
         } else if (card.mechanic === 'doublemove_same') {

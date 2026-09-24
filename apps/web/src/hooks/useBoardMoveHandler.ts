@@ -93,6 +93,7 @@ export interface UseBoardMoveHandlerProps {
   doubleMoveRef: React.MutableRefObject<DoubleMove | null>;
   cardPending: CardPendingState;
   selectedCard: GameCard | null;
+  setSelectedCard?: (card: GameCard | null) => void;
   promoPicker: { sq: Sq; options: PieceType[]; mechanic: CardMechanic } | null;
   cardPromo: { sq: Sq; color: PieceColor } | null;
   jokerPicker: any;
@@ -126,7 +127,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     over, setOver, winner, setWinner, movHist, setMovHist, snapshots, setSnapshots,
     analysisArrows, setAnalysisArrows, boardRef, turnRef, movedRef, lmRef,
     hmcRef, fmnRef, posHistRef, overRef, premoveRef, setPremove, doubleMove,
-    setDoubleMove, doubleMoveRef, cardPending, selectedCard, promoPicker, cardPromo,
+    setDoubleMove, doubleMoveRef, cardPending, selectedCard, setSelectedCard, promoPicker, cardPromo,
     jokerPicker, ghostRef, setGhostPiece, hostedRuntime, viewerSeatRef,
     authoritativeMatchIdRef, authoritativeActorForColor, applyAuthoritativeSnapshot,
     resetCardUsed, startAbortCountdown, stopAbortCountdown, setTicking, setClockActive,
@@ -230,7 +231,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
   const canSubmitAuthoritativeMove = React.useCallback((fr: number, fc: number, tr: number, tc: number) => {
     const matchId = authoritativeMatchIdRef.current;
     if (!matchId) return false;
-    if (cardPending || selectedCard || promo || promoPicker || cardPromo || jokerPicker) return false;
+    if (cardPending || promo || promoPicker || cardPromo || jokerPicker) return false;
     if (ghostRef.current) return false;
 
     const piece = boardRef.current[fr]?.[fc];
@@ -245,7 +246,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     if (piece.fusedWith || piece.invisible || piece.shielded || piece.frozen) return false;
     if (target?.fusedWith || target?.shielded || target?.invisible) return false;
     return true;
-  }, [cardPending, selectedCard, promo, promoPicker, cardPromo, jokerPicker, hostedRuntime, authoritativeActorForColor, authoritativeMatchIdRef, boardRef, ghostRef, turnRef, viewerSeatRef]);
+  }, [cardPending, promo, promoPicker, cardPromo, jokerPicker, hostedRuntime, authoritativeActorForColor, authoritativeMatchIdRef, boardRef, ghostRef, turnRef, viewerSeatRef]);
 
   const doMove = React.useCallback((fr: number, fc: number, tr: number, tc: number, forcePromo?: PieceType) => {
     if (overRef.current) return;
@@ -306,6 +307,9 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     }
 
     if (canSubmitAuthoritativeMove(fr, fc, tr, tc)) {
+      if (selectedCard) {
+        setSelectedCard?.(null);
+      }
       if (matchId) {
         const backendMoveIntent: Omit<Extract<PlayerIntent, { type: 'make_move' }>, 'matchId'> = {
           type: 'make_move',
@@ -332,6 +336,9 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     // submit (for example while its seat credentials are hydrating), do not
     // fall through into the offline board-mutation path.
     if (matchId && hostedRuntime) return;
+    if (selectedCard) {
+      setSelectedCard?.(null);
+    }
     const b    = boardRef.current;
     const t    = turnRef.current;
     const mv   = movedRef.current;
@@ -609,7 +616,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     setTurn(next);
     checkEndGame(nb, next, newMv, newLm, newHmc, newPh, posKey, fen, t);
     setDrawOffer(null);
-  }, [overRef, authoritativeMatchIdRef, boardRef, ghostRef, hostedRuntime, viewerSeatRef, turnRef, authoritativeActorForColor, applyAuthoritativeSnapshot, setCardMsg, setPromo, movedRef, hmcRef, fmnRef, canSubmitAuthoritativeMove, posHistRef, doubleMoveRef, setGhostPiece, setBoard, setMoved, setLm, setFmn, setHmc, setMovHist, resetCardUsed, setTicking, setSel, setHints, handleLavaLanding, setDoubleMove, setSnapshots, setPosHist, blackMovedRef, startAbortCountdown, stopAbortCountdown, setClockActive, setTurn, checkEndGame, setDrawOffer, isAttackedWithFusion]);
+  }, [overRef, authoritativeMatchIdRef, boardRef, ghostRef, hostedRuntime, viewerSeatRef, turnRef, authoritativeActorForColor, applyAuthoritativeSnapshot, setCardMsg, setPromo, movedRef, hmcRef, fmnRef, canSubmitAuthoritativeMove, posHistRef, doubleMoveRef, setGhostPiece, setBoard, setMoved, setLm, setFmn, setHmc, setMovHist, resetCardUsed, setTicking, setSel, setHints, handleLavaLanding, setDoubleMove, setSnapshots, setPosHist, blackMovedRef, startAbortCountdown, stopAbortCountdown, setClockActive, setTurn, checkEndGame, setDrawOffer, isAttackedWithFusion, selectedCard, setSelectedCard]);
 
   const doPromo = React.useCallback((type: PieceType) => {
     if (!promo) return;

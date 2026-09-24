@@ -66,18 +66,20 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
             );
           }
           return (
-            <div key={card.id} style={{
+            <div key={key} style={{
               position:'absolute', top:`${yOff}px`,
               left:`calc(50% + ${xOff}px - ${CW/2}px)`,
               width:`${CW}px`, height:`${CH}px`,
               transform:`rotate(${-angle}deg)`, transformOrigin:'50% -20%',
-              borderRadius:'7px', boxShadow:'0 6px 18px rgba(0,0,0,0.7)',
-              background:'linear-gradient(160deg, #1a1a3e 0%, #0d0d1f 100%)',
-              border:'1px solid rgba(80,80,160,0.45)', overflow:'hidden', zIndex:i, pointerEvents:'none',
+              borderRadius:'7px',
+              boxShadow:'0 6px 18px rgba(0,0,0,0.8), 0 0 12px rgba(168,85,247,0.3)',
+              background:'linear-gradient(160deg, #1e1338 0%, #0d091a 100%)',
+              border:'1.5px solid rgba(168,85,247,0.55)',
+              overflow:'hidden', zIndex:i, pointerEvents:'none',
             }}>
-              <div style={{ position:'absolute', inset:0, backgroundImage:'repeating-linear-gradient(45deg, rgba(60,60,120,0.12) 0px, rgba(60,60,120,0.12) 2px, transparent 2px, transparent 10px)' }} />
-              <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', opacity:0.35 }}>♛</div>
-              <div style={{ position:'absolute', inset:'4px', borderRadius:'5px', border:'1px solid rgba(100,100,200,0.25)' }} />
+              <div style={{ position:'absolute', inset:0, backgroundImage:'repeating-linear-gradient(45deg, rgba(168,85,247,0.15) 0px, rgba(168,85,247,0.15) 2px, transparent 2px, transparent 8px)' }} />
+              <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', color:'#c084fc', textShadow:'0 0 10px rgba(192,132,252,0.7)', opacity:0.85 }}>🂠</div>
+              <div style={{ position:'absolute', inset:'3px', borderRadius:'5px', border:'1px solid rgba(192,132,252,0.3)' }} />
             </div>
           );
         }
