@@ -213,6 +213,21 @@ func gameStatusWithFusion(board [][]*contracts.Piece, player string, lastMove *c
 	return inCheck, inCheck && !hasLegal, !inCheck && !hasLegal
 }
 
+// suffixForMove returns the SAN check/mate suffix for a move already applied
+// to board: "#" when the side to move is checkmated, "+" when merely in
+// check, "" otherwise. fortressZones is needed because fortress-guaranteed
+// squares still block an attack for check detection.
+func suffixForMove(board [][]*contracts.Piece, colorToMove string, lastMove *contracts.LastMove, moved map[string]struct{}, fortressZones []contracts.FortressZone) string {
+	inCheck, isMate, _ := gameStatusWithFusion(board, colorToMove, lastMove, moved, fortressZones)
+	if isMate {
+		return "#"
+	}
+	if inCheck {
+		return "+"
+	}
+	return ""
+}
+
 func pseudoMoves(board [][]*contracts.Piece, from contracts.Square, lastMove *contracts.LastMove, moved map[string]struct{}, fortressZones []contracts.FortressZone) []contracts.Square {
 	piece := pieceAt(board, from)
 	if piece == nil {
@@ -436,12 +451,16 @@ func hasEffectiveType(piece *contracts.Piece, targetType string) bool {
 }
 
 func insufficientMaterial(board [][]*contracts.Piece) bool {
-	nonKings := make([]*contracts.Piece, 0, 8)
+	type remainingPiece struct {
+		piece   *contracts.Piece
+		sqColor int
+	}
+	nonKings := make([]remainingPiece, 0, 8)
 	for r := 0; r < 8; r++ {
 		for c := 0; c < 8; c++ {
 			piece := board[r][c]
 			if piece != nil && piece.Type != "king" {
-				nonKings = append(nonKings, piece)
+				nonKings = append(nonKings, remainingPiece{piece: piece, sqColor: (r + c) % 2})
 			}
 		}
 	}
@@ -450,17 +469,24 @@ func insufficientMaterial(board [][]*contracts.Piece) bool {
 	case 0:
 		return true
 	case 1:
-		return hasEffectiveType(nonKings[0], "bishop") || hasEffectiveType(nonKings[0], "knight")
+		return hasEffectiveType(nonKings[0].piece, "bishop") || hasEffectiveType(nonKings[0].piece, "knight")
 	case 2:
-		// KBN vs K is a known forced mate; never draw. Two knights vs lone king is also
-		// not a forced draw. The only true insufficient-material positions are:
-		//   K vs K, KB vs K, KN vs K, KBB vs K (same-color bishops).
-		// KBN vs K is decidable mate, so we must NOT declare it a draw.
-		// We treat any bishop+knight combination on a single side as still winnable.
-		// (Same-color bishops on KBB vs K are also decided; we do not need to enumerate
-		//  every position, we just need to avoid false positives.)
-		return (hasEffectiveType(nonKings[0], "bishop") && hasEffectiveType(nonKings[1], "bishop")) ||
-			(hasEffectiveType(nonKings[0], "knight") && hasEffectiveType(nonKings[1], "knight"))
+		// KBN vs K is a forced mate and KNN vs K is still winnable against a
+		// cornered king, so neither may be declared a draw -- before this fix
+		// the code did exactly that, contradicting its own comment and ending
+		// winnable games. The remaining two-piece dead positions are the
+		// bishops-only ones where every bishop is confined to one square
+		// color: KBB vs K with same-colored bishops, and KB vs KB with both
+		// bishops on the same color (a FIDE dead position regardless of
+		// which side owns which bishop). Bishops on opposite square colors
+		// can mate, so they never draw here. Fused pieces are excluded via
+		// hasEffectiveType: fusion only ever adds movement capability.
+		firstBishop := hasEffectiveType(nonKings[0].piece, "bishop")
+		secondBishop := hasEffectiveType(nonKings[1].piece, "bishop")
+		if !firstBishop || !secondBishop {
+			return false
+		}
+		return nonKings[0].sqColor == nonKings[1].sqColor
 	default:
 		return false
 	}

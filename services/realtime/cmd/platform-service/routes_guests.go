@@ -109,7 +109,7 @@ func registerGuestRoutes(mux *http.ServeMux, archive *platform.MatchArchiveStore
 			http.Error(w, `{"error":"unknown black guest"}`, http.StatusBadRequest)
 			return
 		}
-		white, black, changed, err := guests.FinalizeMatch(payload.MatchID, entry.WhiteGuestID, entry.BlackGuestID, winner)
+		white, black, changed, err := guests.FinalizeMatch(payload.MatchID, entry.WhiteGuestID, entry.BlackGuestID, winner, entry.ModeID)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return

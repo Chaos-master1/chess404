@@ -20,6 +20,8 @@ interface InternalServiceProxyConfig {
   fallbackUrl: string;
   envName: string;
   serviceName: string;
+  // Which backend this proxy talks to; selects the per-target token chain.
+  target?: InternalServiceTarget;
 }
 
 interface ResolvedInternalService {
@@ -33,7 +35,7 @@ export async function proxyInternalService(request: Request, path: string, confi
   const url = `${resolved.baseUrl}${path}`;
   const init: RequestInit = {
     method: request.method,
-    headers: buildUpstreamHeaders(request),
+    headers: buildUpstreamHeaders(request, config.target ?? 'gateway'),
     cache: 'no-store',
     // Without this, undici waits 300s for headers. A single wedged upstream
     // then pins a Next handler for five minutes, and enough of them exhaust
@@ -190,7 +192,7 @@ export function filterHeaders(headers: Headers): Headers {
 //      not provide one (same-origin POST). Without this, server-to-server
 //      POSTs from the gateway arrive at the backend with no Origin and
 //      are rejected with 403 "CSRF check failed: origin header required".
-export function buildUpstreamHeaders(request: Request): Headers {
+export function buildUpstreamHeaders(request: Request, target: InternalServiceTarget = 'gateway'): Headers {
   const headers = filterHeaders(request.headers);
   const url = new URL(request.url);
   const forwardedHost = headers.get('x-forwarded-host') ?? url.host;
@@ -204,7 +206,7 @@ export function buildUpstreamHeaders(request: Request): Headers {
   if (!headers.has('origin') && forwardedHost) {
     headers.set('origin', `${forwardedProto}://${forwardedHost}`);
   }
-  const token = internalServiceToken();
+  const token = internalServiceTokenForTarget(target);
   if (token) {
     headers.set('x-chess404-service-token', token);
   }
@@ -218,13 +220,43 @@ export function buildUpstreamHeaders(request: Request): Headers {
 // every player's requests shared one internal IP's 60/min global rate limit.
 export function internalServiceToken(): string {
   return (
-    process.env.MATCH_INTERNAL_SERVICE_TOKEN ??
     process.env.GATEWAY_INTERNAL_SERVICE_TOKEN ??
     process.env.PLATFORM_INTERNAL_SERVICE_TOKEN ??
     process.env.CHESS404_INTERNAL_SERVICE_TOKEN ??
     process.env.INTERNAL_SERVICE_TOKEN ??
     ''
   ).trim();
+}
+
+// Per-target token chains, mirroring each backend's accept list in the same
+// precedence order: whatever this sends first is exactly what the callee
+// expects first once matching envs are staged on both sides. This is what
+// lets each backend rotate to its own distinct token (RUNBOOK.md, "Internal
+// service tokens") without a coordinated deploy.
+//
+// Note the gateway target deliberately does NOT consult
+// MATCH_INTERNAL_SERVICE_TOKEN: the gateway service never accepts that env,
+// and sending it there would break bootstrap when only the match-specific
+// token is staged.
+export type InternalServiceTarget = 'gateway' | 'match' | 'platform';
+
+export function internalServiceTokenForTarget(target: InternalServiceTarget): string {
+  const pick = (...names: string[]): string => {
+    for (const name of names) {
+      const value = process.env[name];
+      if (value?.trim()) return value.trim();
+    }
+    return '';
+  };
+  switch (target) {
+    case 'match':
+      return pick('MATCH_INTERNAL_SERVICE_TOKEN', 'PLATFORM_INTERNAL_SERVICE_TOKEN', 'CHESS404_INTERNAL_SERVICE_TOKEN', 'INTERNAL_SERVICE_TOKEN');
+    case 'platform':
+      return pick('PLATFORM_INTERNAL_SERVICE_TOKEN', 'CHESS404_INTERNAL_SERVICE_TOKEN', 'INTERNAL_SERVICE_TOKEN');
+    case 'gateway':
+    default:
+      return pick('GATEWAY_INTERNAL_SERVICE_TOKEN', 'PLATFORM_INTERNAL_SERVICE_TOKEN', 'CHESS404_INTERNAL_SERVICE_TOKEN', 'INTERNAL_SERVICE_TOKEN');
+  }
 }
 
 function filterResponseHeaders(headers: Headers): Headers {

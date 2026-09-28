@@ -1,6 +1,7 @@
 package match
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -168,14 +169,41 @@ func TestCreateMatchStarterThreeModeStartsWithThreeCards(t *testing.T) {
 	if len(snapshot.Match.WhiteHand) != 3 || len(snapshot.Match.BlackHand) != 3 {
 		t.Fatalf("expected three starter cards per side, got white=%d black=%d", len(snapshot.Match.WhiteHand), len(snapshot.Match.BlackHand))
 	}
-	if cardIDByMechanic(t, snapshot.Match.WhiteHand, "freeze") == "" {
-		t.Fatalf("expected freeze in starter hand")
+	// The opening deal is seeded-random: assert structural validity (3
+	// distinct, dealable cards) rather than specific mechanics. The old
+	// fixed freeze/shield/smallsacrifice hand made every computer game open
+	// with the same freeze-the-queen line.
+	mechanics := map[string]bool{}
+	for _, card := range snapshot.Match.WhiteHand {
+		if mechanics[card.Mechanic] {
+			t.Fatalf("opening hand dealt a duplicate mechanic: %s", card.Mechanic)
+		}
+		mechanics[card.Mechanic] = true
 	}
-	if cardIDByMechanic(t, snapshot.Match.WhiteHand, "shield") == "" {
-		t.Fatalf("expected shield in starter hand")
+	for _, banned := range []string{"mirror", "joker", "mindcontrol", "parasite"} {
+		if mechanics[banned] {
+			t.Fatalf("opening hand dealt board-dependent card %s", banned)
+		}
 	}
-	if cardIDByMechanic(t, snapshot.Match.WhiteHand, "smallsacrifice") == "" {
-		t.Fatalf("expected smallsacrifice in starter hand")
+}
+
+func TestOpeningHandsDifferAcrossMatches(t *testing.T) {
+	service := NewService()
+	now := time.Date(2026, 5, 5, 8, 2, 0, 0, time.UTC)
+	signatures := map[string]bool{}
+	for i := 0; i < 12; i++ {
+		snapshot := createTestMatch(service, contracts.CreateMatchRequest{
+			MatchID:         fmt.Sprintf("hand_variety_%d", i),
+			StarterHandMode: "starter_three",
+		}, now.Add(time.Duration(i)*time.Second))
+		sig := ""
+		for _, card := range snapshot.Match.WhiteHand {
+			sig += card.Mechanic + ","
+		}
+		signatures[sig] = true
+	}
+	if len(signatures) < 4 {
+		t.Fatalf("expected opening hands to vary across matches, got %d distinct hands in 12 games: %v", len(signatures), signatures)
 	}
 }
 
@@ -666,6 +694,57 @@ func TestMoveCheckmateFinishesAuthoritatively(t *testing.T) {
 	}
 }
 
+// Checkmate must end the match EVEN when the mated side still holds cards.
+// Previously the hand delayed the finish in non-computer modes, so the clock
+// kept running past a mate until the mated player spent or lost their cards
+// (product decision: no card except Reverse/Joker can undo mate, and neither
+// should keep a finished position ticking).
+func TestCheckmateFinishesEvenWithCardsInHand(t *testing.T) {
+	service := NewService()
+	now := time.Date(2026, 5, 5, 8, 9, 0, 0, time.UTC)
+
+	createTestMatch(service, contracts.CreateMatchRequest{
+		MatchID:         "mate_with_cards",
+		ModeID:          contracts.MatchModeHiddenCards,
+		StarterHandMode: "starter_three",
+	}, now)
+
+	state := service.getMatchContainer("mate_with_cards").state
+	state.Board = emptyBoard()
+	state.Board[5][5] = &contracts.Piece{Type: "king", Color: "white"}
+	state.Board[5][6] = &contracts.Piece{Type: "queen", Color: "white"}
+	state.Board[7][7] = &contracts.Piece{Type: "king", Color: "black"}
+	state.Turn = "white"
+	state.Moved = nil
+	state.LastMove = nil
+	state.HalfMoveClock = 0
+	state.FullMoveNum = 1
+	state.MoveHistory = nil
+	// Both sides deliberately hold cards -- the mated side's hand must not
+	// delay the finish anymore.
+	state.WhiteHand = []contracts.GameCard{{ID: "c1", Name: "Freeze", Mechanic: "freeze", Rarity: "common"}}
+	state.BlackHand = []contracts.GameCard{{ID: "c2", Name: "Shield", Mechanic: "shield", Rarity: "rare"}}
+	state.History = []contracts.PositionState{capturePositionState(state)}
+
+	snapshot, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type:     "make_move",
+		MatchID:  "mate_with_cards",
+		PlayerID: "white_player",
+		From:     &contracts.Square{Row: 5, Col: 6},
+		To:       &contracts.Square{Row: 6, Col: 6},
+	}, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("expected mating move to succeed, got %v", err)
+	}
+
+	if snapshot.Match.Status != "finished" || snapshot.Match.Winner != "white" || snapshot.Match.FinishReason != "checkmate" {
+		t.Fatalf("expected immediate checkmate despite cards in hand, got status=%q winner=%q reason=%q", snapshot.Match.Status, snapshot.Match.Winner, snapshot.Match.FinishReason)
+	}
+	if snapshot.Match.Clock.RunningFor != "" || snapshot.Match.Clock.StartedAt != nil {
+		t.Fatalf("clock must stop at mate, got runningFor=%q", snapshot.Match.Clock.RunningFor)
+	}
+}
+
 func TestFiftyMoveRuleFinishesAuthoritatively(t *testing.T) {
 	service := NewService()
 	now := time.Date(2026, 5, 5, 8, 10, 0, 0, time.UTC)
@@ -831,6 +910,52 @@ func TestDisconnectGraceFinishesAbandonedMatch(t *testing.T) {
 	lastEvent := events[len(events)-1]
 	if lastEvent.Type != "match_finished" || lastEvent.Payload["result"] != "abandon" || lastEvent.Payload["disconnected"] != "white" {
 		t.Fatalf("expected abandon finish payload, got %#v", lastEvent)
+	}
+}
+
+// Regression: an explicitly-disconnected seat (MarkDisconnected zeroes its
+// last-seen time) used to slide its forfeit deadline forward every tick,
+// because the zero last-seen made the computed deadline now-relative and the
+// grace window was re-armed on every drift. The abandoned opponent never got
+// the win and the clock kept burning. The grace window must stay armed from
+// the first tick of the disconnect episode.
+func TestMarkDisconnectedSeatForfeitsAfterGrace(t *testing.T) {
+	service := NewService()
+	now := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	createTestMatch(service, contracts.CreateMatchRequest{
+		MatchID:      "presence_mark_disconnect",
+		WhiteGuestID: "guest-white",
+		BlackGuestID: "guest-black",
+	}, now)
+
+	if err := service.HeartbeatPresence("presence_mark_disconnect", testPresence("guest-white"), now); err != nil {
+		t.Fatalf("expected white heartbeat to succeed, got %v", err)
+	}
+	if err := service.HeartbeatPresence("presence_mark_disconnect", testPresence("guest-black"), now); err != nil {
+		t.Fatalf("expected black heartbeat to succeed, got %v", err)
+	}
+
+	if err := service.MarkDisconnected("presence_mark_disconnect", "guest-white", "white-secret", now.Add(5*time.Second)); err != nil {
+		t.Fatalf("expected white disconnect mark to succeed, got %v", err)
+	}
+
+	// First tick after the disconnect arms the grace window (deadline = t+45s).
+	service.collectAndBroadcast(now.Add(10 * time.Second))
+
+	// Keep black visibly alive while white is gone, otherwise this exercises
+	// the both-disconnected grace path instead of the single-seat forfeit.
+	if err := service.HeartbeatPresence("presence_mark_disconnect", testPresence("guest-black"), now.Add(40*time.Second)); err != nil {
+		t.Fatalf("expected black heartbeat during grace to succeed, got %v", err)
+	}
+
+	service.collectAndBroadcast(now.Add(56 * time.Second))
+
+	finishedSnapshot, err := service.GetMatch("presence_mark_disconnect")
+	if err != nil {
+		t.Fatalf("expected finished snapshot to load, got %v", err)
+	}
+	if finishedSnapshot.Match.Status != "finished" || finishedSnapshot.Match.Winner != "black" || finishedSnapshot.Match.FinishReason != "abandon" {
+		t.Fatalf("expected marked-disconnected white to forfeit, got status=%q winner=%q reason=%q", finishedSnapshot.Match.Status, finishedSnapshot.Match.Winner, finishedSnapshot.Match.FinishReason)
 	}
 }
 

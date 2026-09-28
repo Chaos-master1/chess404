@@ -90,3 +90,138 @@ Railway keeps prior builds. In dashboard → service → Deployments → pick th
 ## When to run the full audit again
 
 After any change to `services/realtime/internal/match` (state machine), `services/realtime/internal/platform` (stores), or `apps/web/app/api/*/_lib/*` (proxies), re-run `go test -race ./internal/match` and the `pages-smoke` spec against live before merging.
+
+## Internal service tokens: per-service migration (4.1)
+
+Every backend service accepts the legacy **shared** internal token
+(`CHESS404_INTERNAL_SERVICE_TOKEN` / `INTERNAL_SERVICE_TOKEN`) and now also a
+**service-specific** token, checked first by each resolver:
+
+| Service | Specific env (preferred) | Also accepts (fallback) |
+| --- | --- | --- |
+| gateway | `GATEWAY_INTERNAL_SERVICE_TOKEN` | `PLATFORM_INTERNAL_SERVICE_TOKEN`, `CHESS404_INTERNAL_SERVICE_TOKEN`, `INTERNAL_SERVICE_TOKEN` |
+| match-service | `MATCH_INTERNAL_SERVICE_TOKEN` | `PLATFORM_INTERNAL_SERVICE_TOKEN`, `CHESS404_INTERNAL_SERVICE_TOKEN`, `INTERNAL_SERVICE_TOKEN` |
+| platform-service | `PLATFORM_INTERNAL_SERVICE_TOKEN` | `CHESS404_INTERNAL_SERVICE_TOKEN`, `INTERNAL_SERVICE_TOKEN` |
+| matchmaking-service | `MATCHMAKING_INTERNAL_SERVICE_TOKEN` | `PLATFORM_INTERNAL_SERVICE_TOKEN`, `CHESS404_INTERNAL_SERVICE_TOKEN`, `INTERNAL_SERVICE_TOKEN` |
+| web (proxy) | sends the first set of: `MATCH_INTERNAL_SERVICE_TOKEN`, `GATEWAY_INTERNAL_SERVICE_TOKEN`, `PLATFORM_INTERNAL_SERVICE_TOKEN`, `CHESS404_INTERNAL_SERVICE_TOKEN`, `INTERNAL_SERVICE_TOKEN` | resolver: `apps/web/app/api/_lib/internal-service.ts` |
+
+Why: with one shared value, a single leaked proxy route inherits
+internal-caller trust against *every* service. Each service now boot-logs a
+`[security]` warning when it has no specific token or when a shared env holds
+the same value as its specific one — watch for these lines during deploy.
+
+**Important caller constraint before you rotate anything:** the web proxy and
+the gateway each send *one* token value to *all* backends (their resolvers are
+not per-target yet), and each backend compares against a single expected
+value. So today you cannot give two callers of the same backend different
+tokens, and full per-service isolation additionally requires a small code
+change: per-target token injection in `buildUpstreamHeaders` (web) and in the
+gateway's outbound request builder. Until that lands, the staged env-only
+migration below is still worth doing — it stages distinct credentials and
+removes reliance on the *name* `INTERNAL_SERVICE_TOKEN` — but the shared
+value must keep working for the multi-caller backends (platform,
+matchmaking, match).
+
+### Migration checklist
+
+1. **Inventory** current values per service (Railway → service → Variables).
+   Note which services share the same token value today (boot warnings list
+   the colliding env names).
+2. **Stage specific envs** (do not remove shared ones yet):
+   `openssl rand -hex 32` once per service; set
+   `GATEWAY_INTERNAL_SERVICE_TOKEN` / `MATCH_INTERNAL_SERVICE_TOKEN` /
+   `PLATFORM_INTERNAL_SERVICE_TOKEN` / `MATCHMAKING_INTERNAL_SERVICE_TOKEN`
+   on their services, and on **web** set the same *value* the corresponding
+   callee expects — because web sends one value everywhere, all of
+   gateway/match/platform/matchmaking must accept web's value during this
+   stage (via their shared fallbacks).
+3. **Redeploy all five services**, then run the mandatory live gate below.
+   Every queue/match/bootstrap flow must still pass; a 401/403 storm means a
+   caller/callee pair disagree on the value.
+4. **Per-caller isolation (code work, not yet done):** add per-target token
+   selection to the web proxy (`buildUpstreamHeaders`) and the gateway
+   outbound builder, then give web its own token, distinct from gateway's.
+   After this lands, backends can drop the shared fallbacks one service at a
+   time (start with matchmaking — two callers only).
+5. **Retire the shared envs** last, after the boot warnings show no service
+   relies on them. Keep `INTERNAL_SERVICE_TOKEN` out of any new docs.
+
+## Owner operations checklist (4.3)
+
+Things only the account owner can do from the Railway/Upstash/email-provider
+dashboards — the code cannot do them for you:
+
+- **Postgres backups / PITR.** Production Postgres is the Railway plugin
+  (`postgres-ssl:18`); `PLATFORM_POSTGRES_URL` and
+  `MATCH_ARCHIVE_POSTGRES_URL` both point at it. Losing it loses accounts,
+  ratings, and match history. Dashboard → Postgres service → **Backups**:
+  enable scheduled backups and, if your plan includes it, point-in-time
+  recovery; verify a restore once into a throwaway instance before you need
+  it. Matchmaking tickets live in Upstash Redis (`MATCH_REDIS_URL`), not
+  Postgres — check Upstash's own backup/eviction settings and remember the
+  free tier's monthly `db_request_limit`.
+- **SMTP provider.** Account verification/password email is sent by
+  platform-service over SMTP: `ACCOUNT_EMAIL_PROVIDER=smtp` plus
+  `ACCOUNT_EMAIL_SMTP_ADDRESS` (host:port), `ACCOUNT_EMAIL_SMTP_FROM`,
+  `ACCOUNT_EMAIL_SMTP_USERNAME`, `ACCOUNT_EMAIL_SMTP_PASSWORD`,
+  `ACCOUNT_EMAIL_SMTP_TLS=true` (hard-required for any non-loopback host —
+  the service refuses to start delivery otherwise),
+  `ACCOUNT_EMAIL_SMTP_FROM_NAME`, `ACCOUNT_EMAIL_SMTP_REPLY_TO`,
+  `ACCOUNT_EMAIL_SMTP_MESSAGE_DOMAIN`. Use a transactional provider's SMTP
+  relay (Resend/Postmark/Mailgun) and verify the sender domain (SPF/DKIM) or
+  every mail lands in spam. If delivery init fails, deploy logs show
+  `failed to initialize account email delivery`.
+- **Moderation admin access.** Set `PLATFORM_ADMIN_HANDLES` (comma/space
+  separated handles) and/or `PLATFORM_ADMIN_ACCOUNT_IDS` on platform-service.
+  The capabilities endpoint drives whether the admin UI renders; both envs
+  authorize actions. Put at least one owner account in that set before
+  launch — an empty set means nobody can resolve reports or bans.
+- **Re-run the deploy gates** in "What to check before you deploy" and the
+  "Mandatory live gate" above after touching any of the above.
+
+## Session hardening shipped (stage 4, 2026-09)
+
+Per-target internal tokens (4.1 step 4) are DONE: the web proxy now picks the
+token per callee (`internalServiceTokenForTarget` in
+`apps/web/app/api/_lib/internal-service.ts`, used by `buildUpstreamHeaders`),
+and the gateway picks per-target tokens in its outbound builder. Each backend
+matches its own specific env first, then the shared fallbacks. The "one value
+everywhere" caller constraint above is gone; retiring shared fallbacks one
+service at a time (start with matchmaking) is now purely an env operation.
+
+Also shipped this stage:
+
+- **Cookie session resume.** The gateway folds `session_secret_{white|black}`
+  and `session_guest_{side}` cookies into the bootstrap request
+  (`foldSessionCookieIdentities` in `gateway_mux.go`, BEFORE the payload is
+  built). JSON credentials in the request body still win per-field. Web
+  dual-writes both cookie shapes per seat (`buildSessionSecretCookies`).
+- **Rated is account-only, enforced server-side at every entry point:**
+  gateway private create (403 without an account session), private join
+  (gated on the target room's stored queue; uninspectable rooms fail through
+  so real upstream errors surface), rematch, matchmaking enqueue (client
+  gate + `CHESS404_PUBLIC_BETA_READY` capability), and the trusted
+  finalizer (platform rejects rated archival unless BOTH guests hold
+  accounts). Tests: `TestGatewayRatedPrivateMatchRequiresAccount`,
+  `TestGatewayCasualPrivateMatchStillAllowsGuests`.
+- **Name policy.** Random generated names are display fallbacks only. The
+  server renames a linked guest to the account handle at claim/register/
+  login (`renameLinkedGuestToHandle`); the web mirrors
+  `account.handle` into the local profile at bootstrap. Guests render as
+  "Anonymous" rather than a generated name. NOTE: matches created before
+  this deploy keep their stored `whiteName`/`blackName` — the fix shows on
+  new matches or after re-claim.
+- **Unrated ladders never display a borrowed number.** Account/Profiles mode
+  tiles show an em dash ("no rated games yet") until that specific mode has
+  rated games; previously they displayed the blended Elo, which moved when
+  unrelated games landed. Elo itself only ever moves for rated games between
+  two accounts (verified through the finalize pipeline).
+- **Gameplay/UI fixes.** Shielded pieces are movable (shield only absorbs a
+  capture; moving drops it); card hand re-select drops the card on touch
+  (selection raise is style-driven, hover skipped while selected); chat
+  auto-scroll is container-scoped so incoming chat no longer yanks the match
+  page on phones; card hand fan clamps to container width (full 10-card hand
+  no longer overlaps board/panels on narrow laptops); computer mode removed
+  from queue/invite/challenge pickers (vs-computer lives in its own Play-hub
+  section); Inbox feed embedded in Friends (single Social nav entry with a
+  combined unread badge; /inbox stays as a deep link).

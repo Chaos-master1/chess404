@@ -1,15 +1,14 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { OFFICIAL_MATCH_MODES } from '@chess404/contracts';
 import type { Board, MatchFinishReason, MatchModeId } from '@chess404/contracts';
 import BoardPreview from './components/match/BoardPreview';
 import type { MatchArchiveEntry } from './lib/platform-service';
 import {
   formatDateTime,
-  formatFinishReasonLabel,
   formatMatchFormat,
-  formatMatchPlayers,
   formatMatchResult,
   formatPlayerLabel,
 } from './lib/display';
@@ -18,6 +17,7 @@ import {
   buildReplayPageUrlWithGuest,
   buildGuestHistoryUrl,
   copyTextToClipboard,
+  readStoredAccountIdentity,
   readStoredGuestIdentity,
 } from './lib/session-storage';
 
@@ -33,17 +33,6 @@ function publicPlayerSeatLabel(name?: string, accountHandle?: string, fallback =
   });
 }
 
-function finishReasonLabel(reason?: MatchFinishReason): string | null {
-  const label = formatFinishReasonLabel(reason);
-  if (!label) {
-    return null;
-  }
-  if (label === 'Draw agreement') {
-    return 'mutual agreement';
-  }
-  return label.toLowerCase();
-}
-
 function resultLabel(entry: MatchArchiveEntry): string {
   return formatMatchResult({
     status: entry.status,
@@ -56,18 +45,48 @@ function playerIdentityLabel(
   name?: string,
   _guestId?: string,
   accountHandle?: string,
-  fallback = 'Guest',
+  fallback = 'Anonymous',
 ): string {
   return publicPlayerSeatLabel(name, accountHandle, fallback);
 }
 
-function playersLabel(entry: MatchArchiveEntry): string {
-  return formatMatchPlayers({
-    whiteName: entry.whiteName,
-    whiteHandle: entry.whiteAccountHandle,
-    blackName: entry.blackName,
-    blackHandle: entry.blackAccountHandle,
+function seatLabel(options: {
+  name?: string | null;
+  handle?: string | null;
+  guestId?: string | null;
+  accountId?: string | null;
+  selfGuestId?: string | null;
+  selfAccountId?: string | null;
+  fallback: string;
+}): string {
+  const isSelf = (options.guestId && options.guestId === options.selfGuestId)
+    || (options.accountId && options.accountId === options.selfAccountId);
+  if (isSelf) {
+    return 'You';
+  }
+  return formatPlayerLabel({ name: options.name, handle: options.handle, fallback: options.fallback });
+}
+
+function playersLabel(entry: MatchArchiveEntry, self?: { guestId?: string | null; accountId?: string | null }): string {
+  const white = seatLabel({
+    name: entry.whiteName,
+    handle: entry.whiteAccountHandle,
+    guestId: entry.whiteGuestId,
+    accountId: entry.whiteAccountId,
+    selfGuestId: self?.guestId,
+    selfAccountId: self?.accountId,
+    fallback: 'Anonymous',
   });
+  const black = seatLabel({
+    name: entry.blackName,
+    handle: entry.blackAccountHandle,
+    guestId: entry.blackGuestId,
+    accountId: entry.blackAccountId,
+    selfGuestId: self?.guestId,
+    selfAccountId: self?.accountId,
+    fallback: 'Anonymous',
+  });
+  return `${white} vs ${black}`;
 }
 
 function formatLabel(entry: MatchArchiveEntry): string {
@@ -240,11 +259,15 @@ export default function HistoryPage({
   const replayFrames = selectedMatch?.snapshot.replayFrames ?? [];
   const activeReplayFrame = replayFrames[selectedReplayIndex] ?? null;
   const previewBoard: Board | null = activeReplayFrame?.board ?? snapshot?.board ?? null;
-  const replayLastMove = activeReplayFrame && activeReplayFrame.moveHistory.length > 0
-    ? activeReplayFrame.moveHistory[activeReplayFrame.moveHistory.length - 1]
-    : null;
   const recentEvents = selectedMatch?.snapshot.events ?? [];
   const activeEffects = snapshot ? collectActiveEffects(snapshot) : [];
+  // This viewer's identity, so their own seat renders as "You" instead of
+  // the pre-claim guest name stored on old archive rows (e.g. a guest
+  // session created before the account was claimed).
+  const selfIdentity = {
+    guestId: viewerGuestId ?? readStoredGuestIdentity('white').guestId,
+    accountId: readStoredAccountIdentity('white').accountId,
+  };
   const shareReplayLink = React.useCallback(async () => {
     if (!selectedMatch) {
       return;
@@ -277,6 +300,44 @@ export default function HistoryPage({
     }
   }, [focusGuestId]);
 
+  // Lichess-style gate: history is an account feature. A guest who lands
+  // here gets a sign-up prompt, not an always-empty archive. Shared replay
+  // links (?replay=…) and guest archive links (?guest=…) still resolve.
+  const storedAccount = readStoredAccountIdentity('white');
+  const hasAccountSession = Boolean((selfIdentity.accountId ?? '').trim() && (storedAccount.sessionToken ?? '').trim());
+  // focusMatchId is self-polluted: the list auto-selects its first match
+  // and reports it back through onSelectMatchId, so it cannot distinguish
+  // "opened a replay link" from "list auto-selected". The URL is the
+  // source of truth for explicit focus (?replay= / ?guest= / ?match=).
+  const urlFocus = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : null;
+  const hasUrlFocus = Boolean(urlFocus && (urlFocus.get('replay')?.trim() || urlFocus.get('guest')?.trim() || urlFocus.get('match')?.trim()));
+  const showHistoryGate = !focusGuestId && !hasUrlFocus && !hasAccountSession;
+  const router = useRouter();
+
+  if (showHistoryGate) {
+    return (
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+        <div style={{ maxWidth: '460px', width: '100%', textAlign: 'center', padding: '36px 28px', borderRadius: '16px', background: 'linear-gradient(180deg, rgba(14,18,30,0.98) 0%, rgba(9,12,20,0.96) 100%)', border: '1px solid rgba(255,165,40,0.16)', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
+          <div style={{ fontSize: '40px', marginBottom: '10px' }}>♟️</div>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#ffd487' }}>Match history needs an account</div>
+          <div style={{ marginTop: '10px', fontSize: '13px', lineHeight: 1.6, color: 'rgba(255,232,180,0.72)' }}>
+            Accounts keep your games, ratings, and progress. Guests play anonymously — their games are not saved.
+          </div>
+          <div style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button onClick={() => router.push('/account')} style={{ padding: '10px 22px', borderRadius: '10px', border: '1px solid rgba(255,180,60,0.4)', background: 'linear-gradient(180deg, rgba(200,134,10,0.32) 0%, rgba(122,79,8,0.4) 100%)', color: '#fff2c8', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>
+              Create an account
+            </button>
+            <button onClick={() => router.push('/watch')} style={{ padding: '10px 22px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)', color: 'rgba(255,232,180,0.85)', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+              Watch live games
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, padding: '22px 28px 26px', gap: '18px' }}>
       <div
@@ -299,8 +360,8 @@ export default function HistoryPage({
               <div style={{ color: '#ffcf72', fontSize: '13px', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase' }}>Match History</div>
               <div style={{ color: 'rgba(255,232,180,0.72)', fontSize: '12px', marginTop: '4px' }}>
                 {focusGuestId
-                  ? 'Archived matches linked to the selected player seat.'
-                  : 'Archived matches from the public replay archive, grouped by official mode.'}
+                  ? 'Matches for this player seat.'
+                  : 'Your finished games.'}
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -428,12 +489,7 @@ export default function HistoryPage({
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
                     <div style={{ fontWeight: 800, fontSize: '12px', color: '#ffcf72' }}>
-                      {formatMatchPlayers({
-                        whiteName: match.whiteName,
-                        whiteHandle: match.whiteAccountHandle,
-                        blackName: match.blackName,
-                        blackHandle: match.blackAccountHandle,
-                      })}
+                      {playersLabel(match, selfIdentity)}
                     </div>
                     <div
                       style={{
@@ -455,15 +511,7 @@ export default function HistoryPage({
                     </div>
                   </div>
                   <div style={{ marginTop: '8px', fontSize: '11px', color: 'rgba(255,232,180,0.7)' }}>
-                    {match.moveCount} moves
-                    {match.lastMove ? ` · last ${match.lastMove}` : ''}
-                    {` · ${formatLabel(match)}`}
-                  </div>
-                  <div style={{ marginTop: '5px', fontSize: '11px', color: 'rgba(210,220,255,0.62)' }}>
-                    {playersLabel(match)}
-                  </div>
-                  <div style={{ marginTop: '5px', fontSize: '11px', color: 'rgba(170,190,220,0.62)' }}>
-                    Updated {formatDateTime(match.updatedAt)}
+                    {match.moveCount} moves · {formatLabel(match)} · {formatDateTime(match.updatedAt)}
                   </div>
                 </button>
               );
@@ -489,7 +537,7 @@ export default function HistoryPage({
         <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid rgba(255,165,40,0.12)' }}>
           <div style={{ color: '#ffcf72', fontSize: '13px', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase' }}>Match Detail</div>
           <div style={{ color: 'rgba(255,232,180,0.72)', fontSize: '12px', marginTop: '4px' }}>
-            Canonical replay destination for archived Chess404 games. Shared replay links and guest archive links resolve through this surface instead of ephemeral list state.
+            Pick a match to replay it move by move.
           </div>
         </div>
 
@@ -516,7 +564,7 @@ export default function HistoryPage({
           ) : !selectedMatch || !snapshot ? (
             <div style={{ color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>Pick a match from the left to inspect its archived state.</div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.35fr) minmax(280px, 0.85fr)', gap: '18px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '18px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }}>
                 <div
                   style={{
@@ -527,7 +575,7 @@ export default function HistoryPage({
                   }}
                 >
                   <div style={{ fontSize: '15px', fontWeight: 800, color: '#fff2c8' }}>{resultLabel(selectedMatch)}</div>
-                  <div style={{ marginTop: '6px', fontSize: '12px', color: 'rgba(210,220,255,0.72)' }}>{playersLabel(selectedMatch)}</div>
+                  <div style={{ marginTop: '6px', fontSize: '12px', color: 'rgba(210,220,255,0.72)' }}>{playersLabel(selectedMatch, selfIdentity)}</div>
                   <div style={{ marginTop: '4px', fontSize: '11px', color: 'rgba(255,232,180,0.62)' }}>{formatLabel(selectedMatch)} · archived {formatDateTime(selectedMatch.updatedAt)}</div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
                     <button
@@ -600,7 +648,7 @@ export default function HistoryPage({
                           cursor: onOpenGuest ? 'pointer' : 'default',
                         }}
                       >
-                        {playerIdentityLabel(selectedMatch.whiteName, selectedMatch.whiteGuestId, selectedMatch.whiteAccountHandle, 'White player')}
+                        {playerIdentityLabel(selectedMatch.whiteName, selectedMatch.whiteGuestId, selectedMatch.whiteAccountHandle, 'Anonymous')}
                       </button>
                     )}
                     {selectedMatch.blackGuestId && (
@@ -617,24 +665,11 @@ export default function HistoryPage({
                           cursor: onOpenGuest ? 'pointer' : 'default',
                         }}
                       >
-                        {playerIdentityLabel(selectedMatch.blackName, selectedMatch.blackGuestId, selectedMatch.blackAccountHandle, 'Black player')}
+                        {playerIdentityLabel(selectedMatch.blackName, selectedMatch.blackGuestId, selectedMatch.blackAccountHandle, 'Anonymous')}
                       </button>
                     )}
                   </div>
-                  <div style={{ marginTop: '8px', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px 14px', fontSize: '12px' }}>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Status:</span> <span style={{ color: '#fff4d0' }}>{snapshot.status}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Winner:</span> <span style={{ color: '#fff4d0' }}>{snapshot.winner ?? 'none'}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Finish:</span> <span style={{ color: '#fff4d0' }}>{finishReasonLabel(selectedMatch.finishReason) ?? 'unspecified'}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Format:</span> <span style={{ color: '#fff4d0' }}>{formatLabel(selectedMatch)}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Turn:</span> <span style={{ color: '#fff4d0' }}>{activeReplayFrame?.turn ?? snapshot.turn}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>White:</span> <span style={{ color: '#fff4d0' }}>{selectedMatch.whiteAccountHandle ? `@${selectedMatch.whiteAccountHandle}` : selectedMatch.whiteName ?? 'Guest'}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Black:</span> <span style={{ color: '#fff4d0' }}>{selectedMatch.blackAccountHandle ? `@${selectedMatch.blackAccountHandle}` : selectedMatch.blackName ?? 'Guest'}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Moves:</span> <span style={{ color: '#fff4d0' }}>{selectedMatch.moveCount}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Created:</span> <span style={{ color: '#fff4d0' }}>{formatDateTime(selectedMatch.createdAt)}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Updated:</span> <span style={{ color: '#fff4d0' }}>{formatDateTime(selectedMatch.updatedAt)}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Last move:</span> <span style={{ color: '#fff4d0' }}>{replayLastMove ?? selectedMatch.lastMove ?? 'none'}</span></div>
-                    <div><span style={{ color: 'rgba(255,232,180,0.58)' }}>Rules:</span> <span style={{ color: '#fff4d0' }}>{snapshot.rulesVersion}</span></div>
-                  </div>
+
                   <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center' }}>
                     {previewBoard ? <BoardPreview board={previewBoard} /> : null}
                   </div>
@@ -718,12 +753,12 @@ export default function HistoryPage({
                     </div>
                   </div>
                   <div style={{ marginTop: '12px', color: 'rgba(210,220,255,0.7)', fontSize: '12px', lineHeight: 1.5 }}>
-                    Hidden hands and private chat content are stripped from the public replay surface. Replay keeps the board, move list, clocks, and safe event timeline only.
+                    Hidden hands and chat stay private.
                   </div>
                   <div style={{ marginTop: '14px' }}>
                     <div style={{ color: 'rgba(255,232,180,0.58)', marginBottom: '6px', fontSize: '12px' }}>Active effects</div>
                     {activeEffects.length === 0 ? (
-                      <div style={{ color: 'rgba(255,232,180,0.5)', fontSize: '12px' }}>No active timed or pending effects in this snapshot.</div>
+                      <div style={{ color: 'rgba(255,232,180,0.5)', fontSize: '12px' }}>No active effects.</div>
                     ) : (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                         {activeEffects.map(effect => (
@@ -756,9 +791,8 @@ export default function HistoryPage({
                   }}
                 >
                   <div style={{ fontSize: '12px', fontWeight: 800, color: '#ffcf72', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>Replay Head and Events</div>
-                  <div style={{ fontSize: '12px', color: 'rgba(255,232,180,0.75)', marginBottom: '10px' }}>Replay head: {selectedMatch.snapshot.replayHead}</div>
                   {recentEvents.length === 0 ? (
-                    <div style={{ fontSize: '12px', color: 'rgba(255,232,180,0.58)' }}>No stored events on this snapshot yet.</div>
+                    <div style={{ fontSize: '12px', color: 'rgba(255,232,180,0.58)' }}>No events yet.</div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {recentEvents.slice(-6).reverse().map(event => (
@@ -823,8 +857,8 @@ export default function HistoryPage({
                 </div>
               </div>
 
-                <div
-                  style={{
+              <div
+                style={{
                   minWidth: 0,
                   padding: '16px',
                   borderRadius: '12px',
@@ -835,14 +869,11 @@ export default function HistoryPage({
                   gap: '12px',
                 }}
               >
-                <div style={{ fontSize: '12px', fontWeight: 800, color: '#ffcf72', textTransform: 'uppercase', letterSpacing: '1px' }}>Replay Notes</div>
-                <div style={{ padding: '12px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,165,40,0.08)', color: '#d9e9ff', fontSize: '12px', lineHeight: 1.6 }}>
-                  Public replay keeps the authoritative board progression, move history, clocks, result, and safe event timeline. Private seat secrets, hidden hands, and chat contents are intentionally removed.
-                </div>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: '#ffcf72', textTransform: 'uppercase', letterSpacing: '1px' }}>Replay Info</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px 12px', fontSize: '12px' }}>
                   <div>
-                    <div style={{ color: 'rgba(255,232,180,0.58)', marginBottom: '3px' }}>Archived chat</div>
-                    <div style={{ color: '#fff4d0', fontWeight: 700 }}>{selectedMatch.chatMessageCount ?? 0} hidden</div>
+                    <div style={{ color: 'rgba(255,232,180,0.58)', marginBottom: '3px' }}>Chat (hidden)</div>
+                    <div style={{ color: '#fff4d0', fontWeight: 700 }}>{selectedMatch.chatMessageCount ?? 0}</div>
                   </div>
                   <div>
                     <div style={{ color: 'rgba(255,232,180,0.58)', marginBottom: '3px' }}>Replay frames</div>

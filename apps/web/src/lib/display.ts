@@ -65,11 +65,14 @@ export function formatPlayerLabel(options: {
   handle?: string | null;
   fallback: string;
 }): string {
-  const base = options.name?.trim() || options.handle?.trim() || options.fallback;
-  if (options.handle?.trim() && options.name?.trim() && options.handle.trim().toLowerCase() !== options.name.trim().toLowerCase()) {
-    return `${options.name.trim()} (@${options.handle.trim()})`;
+  // Lichess-style identity: only account handles are shown. Players without
+  // an account are Anonymous — never a generated guest name. (Old archive
+  // rows may still carry a pre-claim guest name; it is deliberately hidden.)
+  const handle = options.handle?.trim();
+  if (handle) {
+    return `@${handle}`;
   }
-  return base;
+  return options.fallback;
 }
 
 export function formatMatchPlayers(options: {
@@ -81,12 +84,12 @@ export function formatMatchPlayers(options: {
   const white = formatPlayerLabel({
     name: options.whiteName,
     handle: options.whiteHandle,
-    fallback: 'White player',
+    fallback: 'Anonymous',
   });
   const black = formatPlayerLabel({
     name: options.blackName,
     handle: options.blackHandle,
-    fallback: 'Black player',
+    fallback: 'Anonymous',
   });
   return `${white} vs ${black}`;
 }

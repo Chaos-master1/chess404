@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chess404/realtime/internal/contracts"
 	_ "modernc.org/sqlite"
 )
 
@@ -214,7 +215,7 @@ func (s *SQLiteGuestStore) ResumeGuestByToken(guestID, sessionToken string) (Gue
 	return session, nil
 }
 
-func (s *SQLiteGuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, winner string) (GuestProfile, GuestProfile, bool, error) {
+func (s *SQLiteGuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, winner string, modeID contracts.MatchModeID) (GuestProfile, GuestProfile, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -256,7 +257,20 @@ func (s *SQLiteGuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, wi
 	}
 
 	now := time.Now().UTC()
-	newWhite, newBlack := ApplyEloMatchResult(white.Rating, black.Rating, winner)
+	// Per-seat K factors: placements outrank everything, otherwise the K
+	// decays with games played (same curve as the account ladder -- see
+	// eloKFactorForGames).
+	whiteK := eloKFactorForGames(white.MatchesPlayed)
+	blackK := eloKFactorForGames(black.MatchesPlayed)
+	if white.PlacementsRemaining > 0 {
+		whiteK = defaultPlacementEloKFactor
+	}
+	if black.PlacementsRemaining > 0 {
+		blackK = defaultPlacementEloKFactor
+	}
+	newWhite, _ := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, whiteK, defaultEloMinRating)
+	_, newBlack := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, blackK, defaultEloMinRating)
+	applyGuestModeElo(&white, &black, modeID, winner, whiteK)
 	switch winner {
 	case "white":
 		white.Rating = newWhite
@@ -302,7 +316,7 @@ func (s *SQLiteGuestStore) ListGuests(limit int) []GuestProfile {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at from guests order by rating desc, created_at asc, guest_id asc`)
+	rows, err := s.db.Query(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at from guests order by rating desc, created_at asc, guest_id asc`)
 	if err != nil {
 		return nil
 	}
@@ -333,7 +347,7 @@ func (s *SQLiteGuestStore) ListRecentGuests(limit int) []GuestProfile {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at from guests order by last_seen_at desc, guest_id asc`)
+	rows, err := s.db.Query(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at from guests order by last_seen_at desc, guest_id asc`)
 	if err != nil {
 		return nil
 	}
@@ -347,6 +361,34 @@ func (s *SQLiteGuestStore) ListRecentGuests(limit int) []GuestProfile {
 		items = items[:limit]
 	}
 	return items
+}
+
+// RenameGuest replaces a guest's display name (see the JSON store comment:
+// account-linked guests must carry the account handle, not a placeholder).
+func (s *SQLiteGuestStore) RenameGuest(guestID, displayName string) (GuestProfile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	guestID = strings.TrimSpace(guestID)
+	displayName = strings.TrimSpace(displayName)
+	if guestID == "" || displayName == "" {
+		return GuestProfile{}, os.ErrInvalid
+	}
+	result, err := s.db.Exec(`update guests set display_name = ?, last_seen_at = ? where guest_id = ?`, displayName, timeString(time.Now().UTC()), guestID)
+	if err != nil {
+		return GuestProfile{}, err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		return GuestProfile{}, os.ErrNotExist
+	}
+	entry, ok, err := lookupGuestDB(s.db, guestID)
+	if err != nil {
+		return GuestProfile{}, err
+	}
+	if !ok {
+		return GuestProfile{}, os.ErrNotExist
+	}
+	return entry, nil
 }
 
 func (s *SQLiteGuestStore) Stats() GuestStoreStats {
@@ -396,6 +438,15 @@ func (s *SQLiteGuestStore) init() error {
 	if _, err := s.db.Exec(`alter table guests add column session_expires_at text`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 		return err
 	}
+	// Per-mode guest ladders (open/hidden), added after the split. Zero/NULL
+	// means "no games in that mode yet"; the first rated game seeds from the
+	// blended rating.
+	if _, err := s.db.Exec(`alter table guests add column rating_open integer not null default 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return err
+	}
+	if _, err := s.db.Exec(`alter table guests add column rating_hidden integer not null default 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return err
+	}
 	return nil
 }
 
@@ -405,7 +456,7 @@ func lookupGuestDB(db *sql.DB, guestID string) (GuestProfile, bool, error) {
 }
 
 func lookupGuestSessionDB(db *sql.DB, guestID string) (GuestSession, bool, error) {
-	return lookupGuestSessionScanner(db.QueryRow(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = ?`, guestID))
+	return lookupGuestSessionScanner(db.QueryRow(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = ?`, guestID))
 }
 
 func lookupGuestTx(tx *sql.Tx, guestID string) (GuestProfile, bool, error) {
@@ -414,7 +465,7 @@ func lookupGuestTx(tx *sql.Tx, guestID string) (GuestProfile, bool, error) {
 }
 
 func lookupGuestSessionTx(tx *sql.Tx, guestID string) (GuestSession, bool, error) {
-	return lookupGuestSessionScanner(tx.QueryRow(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = ?`, guestID))
+	return lookupGuestSessionScanner(tx.QueryRow(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = ?`, guestID))
 }
 
 type guestScanner interface {
@@ -434,6 +485,8 @@ func lookupGuestSessionScanner(scanner guestScanner) (GuestSession, bool, error)
 		&entry.GuestID,
 		&entry.DisplayName,
 		&entry.Rating,
+		&entry.RatingOpen,
+		&entry.RatingHidden,
 		&entry.MatchesPlayed,
 		&entry.Wins,
 		&entry.Losses,
@@ -482,10 +535,12 @@ func countGuestsTx(tx *sql.Tx) (int, error) {
 
 func insertGuestTx(tx *sql.Tx, session GuestSession) error {
 	_, err := tx.Exec(
-		`insert into guests(guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`insert into guests(guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.Guest.GuestID,
 		session.Guest.DisplayName,
 		session.Guest.Rating,
+		session.Guest.RatingOpen,
+		session.Guest.RatingHidden,
 		session.Guest.MatchesPlayed,
 		session.Guest.Wins,
 		session.Guest.Losses,
@@ -501,9 +556,11 @@ func insertGuestTx(tx *sql.Tx, session GuestSession) error {
 
 func updateGuestTx(tx *sql.Tx, entry GuestProfile) error {
 	_, err := tx.Exec(
-		`update guests set display_name = ?, rating = ?, matches_played = ?, wins = ?, losses = ?, draws = ?, created_at = ?, last_seen_at = ? where guest_id = ?`,
+		`update guests set display_name = ?, rating = ?, rating_open = ?, rating_hidden = ?, matches_played = ?, wins = ?, losses = ?, draws = ?, created_at = ?, last_seen_at = ? where guest_id = ?`,
 		entry.DisplayName,
 		entry.Rating,
+		entry.RatingOpen,
+		entry.RatingHidden,
 		entry.MatchesPlayed,
 		entry.Wins,
 		entry.Losses,
@@ -527,6 +584,8 @@ func scanGuestRows(rows *sql.Rows) ([]GuestProfile, error) {
 			&entry.GuestID,
 			&entry.DisplayName,
 			&entry.Rating,
+			&entry.RatingOpen,
+			&entry.RatingHidden,
 			&entry.MatchesPlayed,
 			&entry.Wins,
 			&entry.Losses,

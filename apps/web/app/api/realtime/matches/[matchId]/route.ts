@@ -1,3 +1,4 @@
+import { internalServiceTokenForTarget } from '../../../_lib/internal-service';
 import { proxyRealtime } from '../../_lib/proxy';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,8 @@ export async function GET(
   context: { params: Promise<{ matchId: string }> }
 ): Promise<Response> {
   const { matchId } = await context.params;
-  const verifiedSeat = await resolveVerifiedMatchSeat(request, matchId);
+  const seatResolution = await resolveVerifiedMatchSeat(request, matchId);
+  const verifiedSeat = seatResolution.seat;
   const upstreamUrl = `${matchServiceBaseUrl}/api/matches/${encodeURIComponent(matchId)}`;
   const upstreamHeaders = buildInternalHeaders(request.headers, 'match');
   if (verifiedSeat) {
@@ -55,6 +57,15 @@ export async function GET(
 
   const publicReadable = isPublicSpectatorReadable(snapshot);
   if (!publicReadable) {
+    // Ownership could not be PROVEN or DISPROVEN because the platform claims
+    // service itself was unreachable. Answering 404 here would tell clients
+    // the terminal "match is gone" verdict for what may be a live private
+    // match -- the exact failure mode behind repeated "match is not public"
+    // errors during platform-service incidents. 503 is retryable and honest.
+    if (seatResolution.dependencyFailed) {
+      console.error('[MATCH_FETCH] claims service unreachable; refusing to answer 404 for an unverifiable match');
+      return Response.json({ error: 'match access check unavailable' }, { status: 503, headers: noStoreHeaders() });
+    }
     // Log only which credential slots were present, never the identifiers
     // themselves -- this line runs on every unauthorized read attempt.
     const credentialsPresent = {
@@ -85,10 +96,10 @@ export async function POST(
 }
 
 interface MatchSnapshotResponse {
-  match: Record<string, any>;
+  match: Record<string, unknown>;
   replayHead?: number;
-  replayFrames?: any[];
-  events?: Array<Record<string, any>>;
+  replayFrames?: unknown[];
+  events?: Array<Record<string, unknown>>;
   seqNum?: number;
 }
 
@@ -161,9 +172,18 @@ interface VerifiedMatchSeat {
   playerSecret: string;
 }
 
-async function resolveVerifiedMatchSeat(request: Request, matchId: string): Promise<VerifiedMatchSeat | null> {
+interface SeatResolution {
+  seat: VerifiedMatchSeat | null;
+  // True when at least one claims-service attempt failed for infrastructure
+  // reasons (network error, 5xx) rather than an authorization verdict. The
+  // caller must then never treat seat === null as "not the owner".
+  dependencyFailed: boolean;
+}
+
+async function resolveVerifiedMatchSeat(request: Request, matchId: string): Promise<SeatResolution> {
   const candidates = readGuestSessionCandidates(request.headers);
   const sideSecrets = readSideSecretsFromCookies(request.headers);
+  let dependencyFailed = false;
   for (const candidate of candidates) {
     const playerSecret = candidate.sessionSecret || (candidate.side ? sideSecrets[candidate.side] : undefined);
     const payload: Record<string, string> = {
@@ -184,6 +204,13 @@ async function resolveVerifiedMatchSeat(request: Request, matchId: string): Prom
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
+        // 401/403/404 are the claims service's real authorization verdicts
+        // (bad session, not a participant, match finished). 5xx means the
+        // service itself is unhealthy -- that is not evidence of anything
+        // about ownership.
+        if (response.status >= 500) {
+          dependencyFailed = true;
+        }
         continue;
       }
       const claim = await response.json() as MatchClaimResponse;
@@ -200,18 +227,24 @@ async function resolveVerifiedMatchSeat(request: Request, matchId: string): Prom
         // that server-side. It never leaves this process.
         const claimSecret = trimValue(claim.playerSecret);
         if (isUsableSeatSecret(claimSecret)) {
-          return { guestId: candidate.guestId, playerSecret: claimSecret };
+          return { seat: { guestId: candidate.guestId, playerSecret: claimSecret }, dependencyFailed };
         }
         // Private/direct matches: the browser does hold the seat secret
         // (it created the match with it). A session token alone cannot scope
         // the match-service response, so never downgrade to a broad snapshot.
-        return playerSecret ? { guestId: candidate.guestId, playerSecret } : null;
+        return {
+          seat: playerSecret ? { guestId: candidate.guestId, playerSecret } : null,
+          dependencyFailed,
+        };
       }
     } catch {
+      // Network failure talking to the claims service: an outage, never an
+      // ownership verdict.
+      dependencyFailed = true;
       continue;
     }
   }
-  return null;
+  return { seat: null, dependencyFailed };
 }
 
 function readGuestSessionCandidates(headers: Headers): Array<{ guestId: string; sessionToken?: string; sessionSecret?: string; side?: 'white' | 'black' }> {
@@ -286,23 +319,11 @@ function filterHeaders(headers: Headers): Headers {
 
 function buildInternalHeaders(headers: Headers, target: 'match' | 'platform'): Headers {
   const next = filterHeaders(headers);
-  const token = internalServiceToken(target);
+  const token = internalServiceTokenForTarget(target);
   if (token) {
     next.set('x-chess404-service-token', token);
   }
   return next;
-}
-
-function internalServiceToken(target: 'match' | 'platform'): string {
-  const specific = target === 'match'
-    ? process.env.MATCH_INTERNAL_SERVICE_TOKEN
-    : process.env.PLATFORM_INTERNAL_SERVICE_TOKEN;
-  return (
-    specific ??
-    process.env.CHESS404_INTERNAL_SERVICE_TOKEN ??
-    process.env.INTERNAL_SERVICE_TOKEN ??
-    ''
-  ).trim();
 }
 
 function filterResponseHeaders(headers: Headers): Headers {

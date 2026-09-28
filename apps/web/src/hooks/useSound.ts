@@ -2,116 +2,67 @@
 
 import React from 'react';
 
+// ── Sound engine ──────────────────────────────────────────────────────────────
+// Plays the bundled Lichess standard sound set (apps/web/public/sounds/
+// lichess-standard/, AGPL-3.0-or-later, see the README next to the files)
+// through a small pool of HTMLAudioElement clones per sound so overlapping
+// plays (fast moves, simultaneous notifications) never cut each other off.
+//
+// Browsers block audible playback until a user gesture; we optimistically
+// create/pool elements and "unlock" them on the first gesture by attempting an
+// inaudible play. Every call site is guarded so audio failures can never break
+// the game UI.
+
 type SoundType = 'move' | 'capture' | 'check' | 'timer_warning' | 'game_over' | 'card_play' | 'chat' | 'error';
 
-let audioCtx: AudioContext | null = null;
-let userGestured = false;
-
-function markUserGesture() {
-  if (!userGestured) {
-    userGestured = true;
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume().catch(() => {});
-    }
-  }
+export interface GameOverSoundOptions {
+  /** Who won, from the viewer's perspective. Omit for neutral "game ended". */
+  result?: 'win' | 'loss' | 'draw';
 }
 
-function getAudioCtx(): AudioContext | null {
-  if (!userGestured) return null;
-  if (!audioCtx) {
-    try {
-      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    } catch {
-      return null;
-    }
-  }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume().catch(() => {});
-  }
-  return audioCtx;
-}
+const SOUND_DIR = '/sounds/lichess-standard';
 
-if (typeof document !== 'undefined') {
-  const gestureEvents = ['click', 'touchstart', 'keydown', 'pointerdown'];
-  for (const ev of gestureEvents) {
-    document.addEventListener(ev, markUserGesture, { once: true });
-  }
-}
-
-function playTone(freq: number, duration: number, type: OscillatorType = 'sine', volume = 0.08) {
-  try {
-    const ctx = getAudioCtx();
-    if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, ctx.currentTime);
-    gain.gain.setValueAtTime(volume, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + duration);
-  } catch {}
-}
-
-function playNoise(duration: number, volume = 0.04) {
-  try {
-    const ctx = getAudioCtx();
-    if (!ctx) return;
-    const bufferSize = ctx.sampleRate * duration;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(volume, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-    source.connect(gain);
-    gain.connect(ctx.destination);
-    source.start();
-  } catch {}
-}
-
-const SOUND_DEFS: Record<SoundType, () => void> = {
-  move: () => {
-    playTone(800, 0.06, 'sine', 0.06);
-  },
-  capture: () => {
-    playTone(300, 0.1, 'triangle', 0.08);
-    playTone(200, 0.12, 'sine', 0.04);
-  },
-  check: () => {
-    playTone(1000, 0.1, 'square', 0.05);
-    setTimeout(() => playTone(1200, 0.1, 'square', 0.05), 100);
-  },
-  timer_warning: () => {
-    playTone(600, 0.05, 'square', 0.03);
-  },
-  game_over: () => {
-    playTone(523, 0.15, 'sine', 0.07);
-    setTimeout(() => playTone(659, 0.15, 'sine', 0.07), 150);
-    setTimeout(() => playTone(784, 0.3, 'sine', 0.07), 300);
-  },
-  card_play: () => {
-    playTone(500, 0.08, 'sine', 0.05);
-    setTimeout(() => playTone(700, 0.08, 'sine', 0.05), 60);
-    setTimeout(() => playTone(900, 0.1, 'sine', 0.05), 120);
-    playNoise(0.15, 0.02);
-  },
-  chat: () => {
-    playTone(880, 0.06, 'sine', 0.04);
-  },
-  error: () => {
-    playTone(150, 0.15, 'sawtooth', 0.05);
-    playNoise(0.12, 0.03);
-  },
+const SOUND_SRC: Record<SoundType, string> = {
+  move: `${SOUND_DIR}/Move.mp3`,
+  capture: `${SOUND_DIR}/Capture.mp3`,
+  check: `${SOUND_DIR}/Check.mp3`,
+  timer_warning: `${SOUND_DIR}/LowTime.mp3`,
+  game_over: `${SOUND_DIR}/Victory.mp3`, // overridden per-result at play time
+  card_play: `${SOUND_DIR}/Confirmation.mp3`,
+  chat: `${SOUND_DIR}/GenericNotify.mp3`,
+  error: `${SOUND_DIR}/Error.mp3`,
 };
 
+const GAME_OVER_RESULT_SRC: Record<NonNullable<GameOverSoundOptions['result']>, string> = {
+  win: `${SOUND_DIR}/Victory.mp3`,
+  loss: `${SOUND_DIR}/Defeat.mp3`,
+  draw: `${SOUND_DIR}/Draw.mp3`,
+};
+
+/** Per-sound volume (relative to the global user volume, 0..1). */
+const SOUND_VOLUME: Record<SoundType, number> = {
+  move: 0.9,
+  capture: 0.9,
+  check: 0.9,
+  timer_warning: 0.8,
+  game_over: 1.0,
+  card_play: 0.9,
+  chat: 0.7,
+  error: 0.8,
+};
+
+/** Number of pooled <audio> clones per sound; round-robin across them. */
+const POOL_SIZE = 3;
+/** Debounce so StrictMode double-fired effects don't sound twice. */
+const SAME_SOUND_COOLDOWN_MS = 60;
+
+const audioPool = new Map<SoundType, HTMLAudioElement[]>();
+const poolIndex = new Map<SoundType, number>();
+const lastPlayedAt = new Map<SoundType, number>();
+
 let soundEnabled = true;
+let soundVolume = 1;
+let unlocked = false;
 
 export function setSoundEnabled(enabled: boolean) {
   soundEnabled = enabled;
@@ -121,13 +72,94 @@ export function isSoundEnabled(): boolean {
   return soundEnabled;
 }
 
-export function playSound(type: SoundType) {
-  if (!soundEnabled || typeof window === 'undefined') return;
-  SOUND_DEFS[type]();
+export function setSoundVolume(volume: number) {
+  soundVolume = Math.min(1, Math.max(0, volume));
+}
+
+export function isSoundMuted(): boolean {
+  return !soundEnabled || soundVolume <= 0;
+}
+
+function poolFor(type: SoundType): HTMLAudioElement[] {
+  let pool = audioPool.get(type);
+  if (!pool) {
+    pool = [];
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const audio = new Audio(SOUND_SRC[type]);
+      audio.preload = 'auto';
+      pool.push(audio);
+    }
+    audioPool.set(type, pool);
+  }
+  return pool;
+}
+
+function nextFromPool(type: SoundType): HTMLAudioElement {
+  const pool = poolFor(type);
+  const index = (poolIndex.get(type) ?? 0) % pool.length;
+  poolIndex.set(type, index + 1);
+  return pool[index];
+}
+
+function attemptUnlock() {
+  if (unlocked) return;
+  unlocked = true;
+  // Browsers require a gesture to start audio; playing one pooled element
+  // inaudibly here unlocks the rest. Failures are fine: every play attempt
+  // retries via play().catch anyway, and the next real gesture usually wins.
+  try {
+    const audio = nextFromPool('move');
+    audio.muted = true;
+    audio.volume = 0;
+    const p = audio.play();
+    if (p) {
+      p.then(() => {
+        audio.muted = false;
+        audio.pause();
+        audio.currentTime = 0;
+      }).catch(() => {
+        audio.muted = false;
+      });
+    }
+  } catch {}
+}
+
+if (typeof document !== 'undefined') {
+  const gestureEvents = ['click', 'touchstart', 'keydown', 'pointerdown'];
+  for (const ev of gestureEvents) {
+    document.addEventListener(ev, attemptUnlock, { once: false, passive: true });
+  }
+}
+
+function resolveSrc(type: SoundType, options?: GameOverSoundOptions): string {
+  if (type === 'game_over' && options?.result && GAME_OVER_RESULT_SRC[options.result]) {
+    return GAME_OVER_RESULT_SRC[options.result];
+  }
+  return SOUND_SRC[type];
+}
+
+export function playSound(type: SoundType, options?: GameOverSoundOptions) {
+  if (!soundEnabled || soundVolume <= 0 || typeof window === 'undefined') return;
+  if (typeof document !== 'undefined') attemptUnlock();
+  const now = Date.now();
+  if (now - (lastPlayedAt.get(type) ?? 0) < SAME_SOUND_COOLDOWN_MS) return;
+  lastPlayedAt.set(type, now);
+  try {
+    const audio = nextFromPool(type);
+    const src = resolveSrc(type, options);
+    if (audio.currentSrc !== src && !audio.src.endsWith(src)) {
+      audio.src = src;
+    }
+    audio.volume = Math.min(1, SOUND_VOLUME[type] * soundVolume);
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p) p.catch(() => {}); // autoplay refusal or decode hiccup: stay silent, never throw
+  } catch {}
 }
 
 export function useSound() {
   const [enabled, setEnabled] = React.useState(true);
+  const [volume, setVolume] = React.useState(1);
 
   const toggle = React.useCallback(() => {
     setEnabled(prev => {
@@ -138,9 +170,18 @@ export function useSound() {
     });
   }, []);
 
+  const changeVolume = React.useCallback((next: number) => {
+    setVolume(next);
+    setSoundVolume(next);
+  }, []);
+
   React.useEffect(() => {
     setSoundEnabled(enabled);
   }, [enabled]);
 
-  return { soundEnabled: enabled, setSoundEnabled: setEnabled, toggleSound: toggle };
+  React.useEffect(() => {
+    setSoundVolume(volume);
+  }, [volume]);
+
+  return { soundEnabled: enabled, setSoundEnabled: setEnabled, toggleSound: toggle, soundVolume: volume, setSoundVolume: changeVolume };
 }

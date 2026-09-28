@@ -92,6 +92,55 @@ node packages/game-core/scripts/sync-cards-json.mjs
 
 ## Current status (2026-08-24)
 
+### Hardening pass — 2026-09-28 (full-codebase review follow-up, verified locally)
+
+All gates green after this pass: `go build`/`go vet`, full `go test ./...`,
+`-race` on `internal/match`, `internal/matchmaking`, `cmd/matchmaking-service`;
+web `tsc --noEmit`, vitest (9 files / 39 tests), and the new ESLint gate.
+
+- **Ticket cancel secrets are now issued exactly once** (POST create response).
+  Three leak paths fixed: GET ticket-by-id, the `ActiveTicketError` 409 body,
+  and same-lane re-join (which now re-issues a fresh secret). Everything else
+  redacts; deletion requires the secret (pinned by tests in
+  `cmd/matchmaking-service`).
+- **GC finalize no longer races subscribers** (`internal/match/state.go`):
+  broadcast + flush happen while still holding the conn lock; regression test
+  runs under `-race` (H2).
+- **CI runs the Go suite under the race detector** (new `go-race` job in
+  `.github/workflows/ci.yml`, after `go-test`).
+- **Matchmaking pairing is two-phase**: reserve both tickets → create the
+  match → promote; a crash in between leaves a stale pairing that the cleanup
+  loop recovers to `queued` after 60s (`StatusPairing`,
+  `recoverStalePairingsLocked`). Previously a failed CreateMatch could leave
+  one ticket paired and its opponent stuck queued forever.
+- **Web match polling rebalanced** (1100 ms first poll / 1000 ms steady) so
+  poll + presence can no longer exceed the 60/min trusted-bypass budget.
+- **Elo K-factor now decays with games played** (K=40 under 30 games, 24
+  under 120, 16 beyond; placements are K=64), applied per-seat in accounts
+  and guest finalization (M6, pinned by tests).
+- **Per-service internal tokens staged (4.1):** every service accepts its own
+  token env first (`MATCH_/PLATFORM_/GATEWAY_/MATCHMAKING_INTERNAL_SERVICE_TOKEN`)
+  and boot-logs a `[security]` warning when it is on the shared value;
+  match-service now boots with any accepted token env instead of
+  hard-requiring `INTERNAL_SERVICE_TOKEN`. Shared values still work by
+  design — web/gateway send a single token to all backends — full rotation
+  steps are in RUNBOOK.md ("Internal service tokens").
+- **Gateway bootstrap dual-writes HttpOnly `session_secret_{white,black}`
+  cookies on the web origin (4.2):** the gateway's own Set-Cookies never
+  survived the proxy re-wrap; localStorage stays the primary source until
+  the backend reads cookies (groundwork for cookie-based session auth).
+- **ESLint gates the web app (M5):** flat config with typescript-eslint +
+  eslint-config-next + react-hooks; `app/**` and `src/lib/**` are held at
+  zero warnings, legacy UI findings surface as warnings, vendored Stockfish
+  builds under `public/` are ignored. It immediately caught a real bug
+  (conditional `useEffect` in OnboardingTutorial — hooks now run
+  unconditionally). CI `web-lint` runs it.
+- Dead `src/Setupproxy.js` deleted; Playwright default base URL corrected to
+  the production host (M3/M4); `requireIntentColor` seat/secret pairing and
+  the WS claim origin are pinned by regression tests.
+- RUNBOOK.md gained the 4.1 token-migration checklist and the 4.3 owner-ops
+  checklist (Postgres PITR backups, SMTP provider envs, moderation admin).
+
 ### Release gate — 2026-09-04 → verified 2026-09-06
 
 The pre-launch RC (`05e16e3`, incl. `7fc4180`) was deployed to all four
@@ -114,17 +163,226 @@ defects in the RC, each fixed and verified live the same day:
 Gate status after the fixes: **solo (computer match), private-invite, and
 history-replay specs pass against production** — the gate's required
 private/computer-match → finish → history/replay flow is green. The
-`card-play` spec still times out on UI automation (the played card never
-resolves through canvas target clicks within the spec's budget), but the
-property it guards was verified live server-side on 2026-09-06: a
-play_card → select_target intent sequence returned 200 and the dealt hand
-shrank 3 → 2 across fresh authenticated snapshot reads. Repairing the spec's
-canvas-target interaction (edge squares are the suspects) is follow-up work,
-not a launch blocker. Full-suite state after the fixes: 25 of 27 specs pass
-against production; `card-play` (above) and `multiplayer` casual-queue
-pairing fail — both browsers create real tickets, the second never
-transitions to a match (matchmaking pairing/second-joiner transition needs a
-dedicated diagnosis; casual PvP is not part of this gate's required flow).
+`card-play` and `multiplayer` casual-queue failures noted below were both
+root-caused, fixed and verified against production on 2026-09-25 (see the
+live-hardening pass below).
+
+### Live-hardening pass — 2026-09-25
+
+The two remaining production-E2E failures are fixed and verified against
+production (full `multiplayer` suite ×3 consecutive runs, all green):
+
+- **Queue matches silently swallowed board input.** Two stacked causes.
+  (1) `requestedMatchIdRef` was only populated at app mount, so SPA
+  navigation to `/match/<id>` (queue auto-open, computer match) left the
+  authoritative bootstrap a no-op and the
+  `authoritativeStatus !== 'active'` gate ate every board event; fixed with a
+  `window.location.pathname` fallback in `useMatchEngineFacade` +
+  `useGameState` (deploy `4d361713`). (2) A press+release on a board square
+  always ran `onDrop(origin)`, which cleared the selection the mousedown had
+  just set, and the follow-up click was swallowed by the 80ms post-drop
+  window — so click-click moves died whenever React flushed the mousedown
+  state before mouseup (always, under queue matches' snapshot churn;
+  drag-to-move kept working, which masked the bug). Fixed in
+  `MatchBoardView.tsx` via `pressToggleRef`: a same-square release now
+  preserves the selection (and toggles off only for a re-press of an
+  already-selected square).
+- **Premove E2E added**: `multiplayer.spec.ts` pairs two browsers, resolves
+  seats from the server snapshot's guest ids (queue pairing assigns colors
+  randomly — never assume page A is white), makes server-truth moves
+  (asserted via authenticated snapshot reads, not UI echoes), and verifies a
+  black premove auto-fires on white's turn (≥4 plies, turn returns to
+  white).
+- **Move-to-board latency was ~1000ms per accepted intent.** Every
+  mutation issued two synchronous Upstash round trips (SaveSnapshotAtomic
+  save + pub/sub publish) while holding the match mutex, before the WS
+  broadcast that actually updates the board — measured 942–1043ms per intent
+  in production on 2026-09-25. Fixed in `persist_queue.go`: the save and
+  cross-instance publish are deferred to background workers (strict per-match
+  ordering, latest-wins coalescing of bursts into one round trip), local WS
+  delivery happens inline, terminal states + match creation flush inline
+  (after draining that match's backlog), and `Close()` drains so redeploys
+  lose no writes. Post-deploy measurements (2026-09-26): HTTP intent RTT
+  ~690ms avg via the gateway hop; **WS intent→broadcast (the path clients
+  actually use) 402/566/416/386ms, avg ~443ms** — the remainder is the WAN
+  round trip plus the necessarily synchronous seq-counter mint.
+### Bug-batch pass — 2026-09-26
+
+Second hardening batch, all deployed and verified against production
+(match-service deploy `9f9e5f0b`, web deploy `d81f3889`):
+
+- **Board bounce root-caused and fixed.** The hosted play path
+  (`useMatchEngineFacade.tsx`) applied EVERY snapshot unconditionally, so the
+  once-a-second clock tick generated *before* a move could land *after* the
+  move's broadcast and repaint the pre-move board (the visible
+  "snaps-back-then-plays" bounce, worst vs computer). Fixed with a shared
+  three-tier applier (`lib/snapshot-tier.ts` + vitest): older seq → drop,
+  **equal seq → cosmetic-only** (clock/terminal state only — the tick
+  deliberately repeats the seq; a naive `<=` guard would freeze clocks),
+  newer/seq-less → full apply. The other runtime's applier
+  (`useGameState.ts`) already dropped stale seqs and keeps doing so.
+- **Chat fixed (real root cause, not just error surfacing).** The facade
+  snapshot applier never mapped `match.chatMessages` — the server stored
+every message and NOBODY saw it, not even the sender. Now synced per
+  snapshot; intent errors are surfaced in the card-message toast instead of
+  being swallowed.
+- **Draw banners**: opponent draw payloads are server-stubbed (`hidden: true`),
+  so the client no longer fabricates a fake rarity for the opponent; banners
+  and sounds are de-duplicated by event ID (resyncs replay the event tail).
+- **Stream stops on finished matches** (`match-service.ts` terminal latch):
+  no more post-game "Reconnecting…" banner/ping loop; the 45s watchdog and
+  reconnect scheduler honor the latch.
+- **Checkmate ends the game unconditionally** (`cards_finish.go`): the mated
+  side's hand no longer delays the finish (clock stopped running past mate
+  while cards remained). Stalemate keeps its hand window (Reverse/Joker can
+  legitimately un-stalemate). Regression test:
+  `TestCheckmateFinishesEvenWithCardsInHand`.
+- **One-active-computer-game guard is client-visible**: friendly 409 message
+  on ComputerPage and PlayHub instead of a raw error. Guard + zombie-GC
+  contract pinned by tests (`computer_guard_test.go`).
+- **Watch page no longer flashes** on its 10s auto-refresh (loading UI only
+  when the current filter has no data yet; otherwise updates in place).
+- **WS apply_intent is now rate limited per player** (90/min via the shared
+  limiter; socket frames previously bypassed every limiter). `nil` limiter
+  (tests) = unlimited.
+- **Seed hardening**: `chooseSeed` deliberately ignores client-supplied seeds
+  (a pinned seed would let a hidden-cards player compute the opponent's hand
+  and future draws) — contract now documented and test-pinned
+  (`hand_seed_test.go`); the stored RNGSeed is what makes replays
+  reproducible. Also fixed the open-cards hand-reveal filter to EXACT-match
+  `MatchModeOpenCards` (NormalizeMatchModeID would have treated unknown/legacy
+  modes as open → hand leak), and fail-safe-hidden is test-pinned.
+- Full gates green: Go vet + whole suite (incl. new
+  `persist_queue_test.go`, `computer_guard_test.go`, `hand_seed_test.go`,
+  mate-with-cards test), web tsc + 30 vitest, prod e2e trio
+  (multiplayer ×3 incl. premove, solo, card-play) + WS latency probe.
+
+- Debugging technique worth keeping: real clicks failing while everything
+  looks wired is decidable by comparing real-click vs direct-fiber-call
+  (`clickSq` via the context fiber) and reading `sel`/`hints` between steps —
+  the mousedown→mouseup→click handoff on the canvas, not the gates, was where
+  input died.
+
+### Deep-audit pass 2 — 2026-09-26 (matchmaking integrity + untimed-GC)
+
+Second audit round (queue end-to-end, disconnect grace, draw/chat edges,
+recovery paths). All fixes test-pinned and gates green (Go vet + full suite,
+web tsc + 30 vitest). Deploys: matchmaking-suite, match-service, web.
+
+- **Untimed matches no longer get draw-abandoned by the zombie GC**
+  (`state.go`): the ≥10-min-idle active branch is now presence-gated
+  (`zombiePresenceLocked`) — finalize only when NEITHER seat has heartbeat
+  presence within the timeout (computer seats always count as alive;
+  presence-less legacy containers keep the old rule). Previously bare
+  `UpdatedAt` idleness triggered abandon; timed matches only survived
+  because the clock tick refreshed `UpdatedAt`, so untimed games and long
+  thinks were exposed. Tests: heartbeat-kept alive, one-live-player alive,
+  both-gone still finalizes.
+- **Double-pairing TOCTOU eliminated** (`queue.go`): `EnqueueWithAccount`
+  no longer unlocks around `CreateMatch` (up to 3s window where a second
+  enqueue could pair the SAME waiting ticket into a second room). Pairing
+  is fully atomic under `s.mu`; an `inFlight` guest set blocks re-entrant
+  enqueues. Test: 24 concurrent joiners vs 24 waiters → each pairs exactly
+  once, no room reuse.
+- **Create-failure rollback re-queues instead of deleting**
+  (`rollbackPairingLocked`): a transient match-service outage no longer
+  silently kicks a waiting opponent out of the queue. Test: failing creator
+  → both tickets return to queued and pair again.
+- **Matched-ticket recovery TTL 3→15 min** + warn log when pruning a
+  matched ticket that still points at a room (orphan visibility).
+  Companion: re-joining the SAME lane while marked matched releases the
+  stale ticket (claims are independent of tickets) so a quick game doesn't
+  wedge requeue behind a 409; other lanes still 409.
+- **Queue mutations authenticated** (`matchmaking-service/main.go`):
+  `DELETE /api/queues/tickets/{id}` requires the per-ticket cancel secret
+  (issued once on the POST create response) or the internal service token;
+  anonymous full-ticket-list GET is now 403. **Precedence rule:** the web
+  proxy injects its service token into EVERY forwarded request, so a
+  presented ticket secret demotes the request to the user path (secret
+  verified against the ticket); token-only = service path
+  (`CancelByService`). Cancel secret persisted client-side keyed by ticket
+  id; secret redacted from all list/get responses.
+- **Matched-ticket 404 recovers into the match** (QueuePage): a vanished
+  ticket now resolves the guest's active seat claim via the new
+  `POST /api/platform/match-claims/active` web route +
+  `fetchActiveMatchClaim`, and navigates through the claim flow instead of
+  silently clearing state.
+
+### Old-review verification pass — 2026-09-26
+
+User re-posted an old review; verified every item in code. Already fixed
+& confirmed live: watch-feed excludes computer/direct/empty-seat games
+(`IsPublicLiveSpectateMatch`/`IsPublicReplayableMatch`); watch-page refresh
+flash (silent refresh, loadedKeyRef); one-active-computer-game guard (409);
+seed-random opening hands (the "engine always freezes my queen" was the old
+hardcoded starter hand, deals are now seeded per match; the current `search`
+engine plays cards tactically — freeze-then-capture is test-pinned — and the
+queen-first freeze behavior was the legacy `v1` opponent, now a rollback
+switch via `COMPUTER_OPPONENT=v1`); clocks stop on finish
+(`markMatchFinished` clears RunningFor/StartedAt); chat works (facade now
+syncs `match.chatMessages`); post-game "Reconnecting"/draw-toast loops
+(stream terminal latch + event de-dup); lichess sound set shipped
+(11 files incl. Capture/Check/LowTime/Victory/Defeat); per-mode Elo fields
+exist server-side.
+Fixed THIS pass:
+- **Open-cards mode now actually shows both hands** (`CardHand.tsx`): the
+  server ships real opposing cards in open mode, but the top-hand renderer
+  drew face-down backs unless RADAR was active — the mode's whole feature
+  was hidden by the UI. Now any real card renders its face (radar keeps its
+  blue glow); hidden mode still sends neutral stubs → backs.
+- **`@e2e_…` handles removed from public surfaces**: the auth e2e suite
+  registers REAL accounts against prod by default and there is no
+  account-deletion endpoint, so every run leaked a handle into the live
+  directory. `filterPublicDirectoryAccounts` now excludes `e2e_*` handles
+  from directory/ratings/profiles/community (accounts stay functional for
+  the tests). Cosmetic doc-fix in auth.spec.ts explaining the prefix.
+Known-open (data + product, flagged to owner): ratings page mode filter
+returns nobody because per-mode `ratingHistory` entries predate mode
+tagging (needs data migration or per-mode defaulting); queue matches
+hardcode 10+3 (no time-control picker); rematch is private-match-only;
+`logo192/512.png` still look like placeholders (user says they supplied the
+real logo — asset not found in repo); guests have a rating field but the
+product direction is guests-invisible everywhere (matches lichess) —
+partially wired via watch/computer exclusions, full sweep pending.
+
+### Hardening pass 3 — 2026-09-26 (time-control picker + ticket persistence)
+
+- **Queue time control is now pickable end-to-end.** Previously every queue
+  match was hardcoded 600s (matchmaking-service create payload). Now: the
+  queue page offers 5+0 / 10+0 / 15+10 / 30+0 (`QUEUE_CLOCK_OPTIONS` in
+  QueuePage.tsx, persisted to localStorage `chess404.clock.selection`); the
+  choice rides the enqueue payload (`clockSeconds`/`clockIncrement`) through
+  the web proxy whitelist, is normalized server-side
+  (`normalizeClockSeconds`: allowlist 300/600/900/1800/3600 else 600;
+  increment clamped 0..30) onto `Ticket.ClockSeconds/ClockIncrement`, and
+  **pairing requires exact clock equality** (`findMatchCandidateLocked`) so
+  a 5+0 seeker never pairs with a 30+0 waiter — the clock is part of the
+  lane identity. The matched assignment carries the clock into the
+  match-service create (fallback 600), the engine already honored
+  `ClockIncrement`. Tickets/queue-activity cards show the control;
+  restored tickets re-align the picker.
+- **SQLite ticket store persisted neither `CancelSecret` nor the clock** —
+  schema, INSERT and SELECT all omitted `cancel_secret`, so a SQLite-backed
+  restart silently revoked every queued client's cancel credential (cancels
+  401ing after restart). Redis (prod) and file stores serialize the whole
+  ticket and were unaffected. Now `cancel_secret`, `clock_seconds`,
+  `clock_increment` are in schema + `alter table` migrations + INSERT/SELECT,
+  with a restart round-trip test.
+- Tests: `internal/matchmaking/clock_pairing_test.go` (same-clock-only
+  pairing, same-increment pairing, normalization table, unknown-clock
+  defaulting, SQLite round-trip keeps cancel secret + clock). Gates green
+  (go vet + full go test; web tsc + 30 vitest); deployed platform-service
+  (matchmaking lives there) + web; prod e2e multiplayer 3/3.
+- Closed after verification (no code needed): the "ratings mode filter shows
+  nobody" item is NOT a legacy-data bug — `NormalizeMatchModeID("")` →
+  `open_cards` already defaults untagged `ratingHistory` entries at read
+  time (`filterAccountRatingHistoryByMode`); the prod mode ladders are empty
+  only because this prod DB has one real account with zero games.
+Known-open unchanged: rated-rematch Elo decision; rematch still
+  private-only; guests-invisible full sweep; logo assets need the file from
+  the owner; MatchPage does not yet label the time control (queue surfaces
+  do); MatchPage-adjacent `formatClock` shows base time countdown only.
+
 Mimosa deep-scan triage is done
 ([docs/audits/2026-09-06-mimosa-scan-triage.md](docs/audits/2026-09-06-mimosa-scan-triage.md);
 152 findings, all dispositioned, no code changes required).
@@ -186,7 +444,7 @@ Remaining phases (per the plan file used to drive this work): Phase 3 (real quan
 - **Page loads occasionally exceed 45 s.** Two spec runs failed on a `page.goto` navigation timeout against `/play` and `/account` while p95 under load was 1.85 s. **2026-09-02 follow-up: not an SSR-compute problem.** A production build served locally renders every page in 8–16 ms (110 ms on the very first request after server start; HTML shells are 9–12 KB). HTML caching is also structurally unavailable: the per-request CSP nonce (`middleware.ts` → `x-nonce` → `layout.tsx`) and the middleware's global `Cache-Control: no-store` (a deliberate fix for stale env-config CDN caching) both force per-request HTML. The remaining suspects are operational: Railway cold starts of the `web` container, cold/unhealthy Go services behind the `/api` proxy (match-service was on a stale deploy at audit time), or first-connection overhead. Fix directions: keep instances warm (min replica), finish the match-service redeploy, watch real-user timings; do not chase page-level caching.
 - No moderation admin exists in production (`PLATFORM_ADMIN_ACCOUNT_IDS` / `PLATFORM_ADMIN_HANDLES` are both unset).
 - Email delivery still defaults to a `preview` provider (logs the reset link instead of sending real email).
-- The internal service token is a single shared value across all four services, and the web proxy stamps it on every proxied request, so any browser-reachable proxy route inherits internal-caller trust. Archive writes are not exposed this way (the web route is GET-only), but new proxy routes must be checked against this.
+- The internal service token is a single shared value across all four services, and the web proxy stamps it on every proxied request, so any browser-reachable proxy route inherits internal-caller trust. Archive writes are not exposed this way (the web route is GET-only), but new proxy routes must be checked against this. 2026-09-28 update: per-service token envs are accepted first everywhere with boot warnings on shared usage; retiring the shared value still requires per-target token injection in the web proxy and gateway (RUNBOOK.md § Internal service tokens).
 - `GET /api/platform/guests` and `/api/platform/rankings` publish the full player roster unauthenticated. That is a deliberate directory (the client uses it), and a guest id alone grants nothing — but it is enumerable.
 - **No database backups exist.** Railway's Postgres **Backups tab → Enable PITR** is the right fix; it is a dashboard action with a small billing cost, so it needs a human decision. `deploy/postgres-backup.sh` works standalone but nothing schedules it and without `AWS_S3_BUCKET` it writes to an ephemeral container disk.
 - Repo-root `railway.json` was deleted (2026-07-29): it used a `services`/`cron`/`volumes` shape Railway's config-as-code schema does not support. The healthcheck/restart-policy/replica settings it described **are** live, applied via the dashboard/API. See `deploy/railway/reference-config.json`.
@@ -194,6 +452,43 @@ Remaining phases (per the plan file used to drive this work): Phase 3 (real quan
 E2E lives in `e2e/` and runs against production by default (`E2E_BASE_URL` overrides; `pnpm test:e2e`). Shared helpers are in `e2e/_helpers.ts`. Go 1.25 is installed on the Linux machine at `~/sdk/go1.25.6/bin` (add it to PATH); on machines without Go, the Docker route (`golang:1.25`) still works but SELinux blocks bind-mounting the repo directly — copy the module to a scratch dir and mount it with `:z`.
 
 The full 2026-08-30 launch audit report lives at [docs/audits/2026-08-30-launch-audit.md](docs/audits/2026-08-30-launch-audit.md); superseded audit history is under `docs/audit-archive/`, and the old running status journal is `docs/history/PROJECT_STATUS.md` (stale — historical only).
+
+
+## Session hardening (2026-09, stage 4 complete)
+
+Security/gameplay changes an editor must know about before touching the
+affected files:
+
+- **Internal tokens are per-target.** Web's `buildUpstreamHeaders(request,
+  target)` (`app/api/_lib/internal-service.ts`) and the gateway's outbound
+  builder pick the token per callee; backends check their specific env
+  (`{SERVICE}_INTERNAL_SERVICE_TOKEN`) before shared fallbacks. When adding a
+  new web->service call, pass the right `target`; when adding a new backend,
+  add its specific env to the accept-set.
+- **Rated gating is server-enforced at four layers:** gateway private
+  create/join/rematch (`enforcePrivateRatedAccountPolicy` /
+  `enforcePrivateRatedJoinPolicy` in `gateway_privatematch.go`), the
+  trusted finalizer (`finalizeArchivedRatedMatch` requires accounts on both
+  seats), the `CHESS404_PUBLIC_BETA_READY` capability gate, and client-side
+  QueuePage/Lobbies gates (advisory only). Never trust the client gates.
+- **Session cookies.** The gateway folds `session_secret_*` /
+  `session_guest_*` cookies into bootstrap before payload construction
+  (`foldSessionCookieIdentities`); body credentials still win per-field. Web
+  dual-writes secret+guest-id cookies per seat.
+- **Elo invariants.** Only rated queue games between two account-holding
+  guests move Elo (blended and per-mode ladders); casual/computer games
+  never touch ratings. Unrated mode ladders render an em dash, never the
+  blended rating (`ModeLadderTile`/`ProfileModeLadderTile`).
+- **Gameplay rules.** Shielded pieces are movable (shield absorbs a capture
+  via `shield_blocked_capture`; moving drops the shield) — do not re-add
+  `piece.shielded` to `canSubmitAuthoritativeMove`. Match chat auto-scroll
+  must stay container-scoped (no `scrollIntoView`, it scrolls the page on
+  phones). The card-hand fan clamps to container width via ResizeObserver.
+- **Mode pickers hide `computer`.** `OFFICIAL_MATCH_MODES` includes
+  `computer` for the engine queue/ComputerPage only; human-vs-human pickers
+  (QueuePage, LobbiesPage, FriendsPage) filter it out. Inbox renders
+  embedded inside FriendsPage (`embedded` prop); the Social nav has one
+  Friends entry with a combined attention+unread badge.
 
 ## Important Note
 After major changes, please update this file (@CLAUDE.md). Keep this file up-to-date with the project's status.

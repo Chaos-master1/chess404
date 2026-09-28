@@ -18,14 +18,33 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
 
   const CW = 56, CH = 78;
   const isBottom = position === 'bottom';
-  const xStep  = hand.length > 1 ? Math.min(52, 500 / hand.length) : 0;
+
+  // The fan must fit the space it actually has: a hard 580px container let a
+  // full 10-card hand (~506px of cards) spill over the board and side panels
+  // on narrow laptop windows. Measure the wrapper and clamp the per-card x
+  // step so the widest fan stays inside the container. At the full 580px
+  // width this computes the exact same steps as the old fixed formula.
+  const fanRef = React.useRef<HTMLDivElement | null>(null);
+  const [fanWidth, setFanWidth] = React.useState(580);
+  React.useEffect(() => {
+    const el = fanRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect?.width ?? 0;
+      if (width > 0) setFanWidth(width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const xStep  = hand.length > 1 ? Math.min(52, (Math.max(fanWidth, CW + 40) - CW - 8) / (hand.length - 1), 500 / hand.length) : 0;
   const spread = hand.length > 1 ? Math.min(18, 60 / hand.length)  : 0;
 
   if (!hand || hand.length === 0) return null;
 
   return (
-    <div style={{
-      position:'relative', height: isBottom ? '100px' : '82px', width:'580px',
+    <div ref={fanRef} style={{
+      position:'relative', height: isBottom ? '100px' : '82px', width:'min(580px, 100%)',
       display:'flex', alignItems: isBottom ? 'flex-end' : 'flex-start',
       justifyContent:'center',
       marginTop: isBottom ? '4px' : 0, marginBottom: isBottom ? 0 : '4px',
@@ -45,7 +64,16 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
           // must never reach the radar renderer (RARITY_STYLE[card.rarity]
           // would throw on an unknown rarity).
           const isHiddenStub = !card.id && !card.mechanic && !card.rarity;
-          if (radarActive && !isHiddenStub) {
+          if (!isHiddenStub) {
+            // The server shipped the REAL card: open-cards mode reveals both
+            // hands by design (radar reveal reuses the same path). Hidden
+            // mode keeps sending neutral stubs, which render as backs below.
+            // Previously only the radar path drew faces here, so open-cards
+            // games arrived with visible hands and the UI hid them anyway.
+            const glow = radarActive
+              ? '0 6px 24px rgba(0,0,0,0.8), 0 0 16px rgba(96,165,250,0.5)'
+              : '0 6px 18px rgba(0,0,0,0.8), 0 0 12px rgba(168,85,247,0.3)';
+            const border = radarActive ? '2px solid #60a5fa' : '1.5px solid rgba(168,85,247,0.55)';
             return (
               <div key={key} style={{
                 position:'absolute', top:`${yOff}px`,
@@ -53,17 +81,20 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
                 width:`${CW}px`, height:`${CH}px`,
                 transform:`rotate(${-angle}deg)`, transformOrigin:'50% -20%',
                 borderRadius:'7px',
-                boxShadow:`0 6px 24px rgba(0,0,0,0.8), 0 0 16px rgba(96,165,250,0.5)`,
+                boxShadow: glow,
                 background:`linear-gradient(160deg, ${card.color} 0%, color-mix(in srgb, ${card.color} 60%, #000) 100%)`,
-                border:`2px solid #60a5fa`, overflow:'hidden', zIndex:i,
-                pointerEvents:'none', animation:'radarReveal 0.4s cubic-bezier(0.34,1.56,0.64,1)',
+                border: border, overflow:'hidden', zIndex:i,
+                pointerEvents:'none',
+                animation: radarActive ? 'radarReveal 0.4s cubic-bezier(0.34,1.56,0.64,1)' : 'none',
               }}>
-                <div style={{ position:'absolute', inset:0, background:'rgba(96,165,250,0.08)', zIndex:0 }} />
+                {radarActive && <div style={{ position:'absolute', inset:0, background:'rgba(96,165,250,0.08)', zIndex:0 }} />}
                 <div style={{ width:'100%', height:'38px', background:`radial-gradient(ellipse at 50% 30%, ${card.accent}44 0%, transparent 70%)`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', borderBottom:`1px solid ${card.accent}33` }}>{card.icon}</div>
                 <div style={{ padding:'2px 3px', fontSize:'6px', fontWeight:700, color:'#fff', textAlign:'center', lineHeight:'1.2' }}>{card.name}</div>
                 <div style={{ margin:'2px 4px 0', padding:'1px 3px', background:`${card.accent}33`, border:`1px solid ${card.accent}55`, borderRadius:'3px', fontSize:'5px', color:card.accent, textAlign:'center', fontWeight:700, textTransform:'uppercase' }}>{card.type}</div>
                 <div style={{ margin:'1px 4px 0', padding:'1px 2px', border:`1px solid ${RARITY_STYLE[card.rarity].accent}88`, borderRadius:'3px', fontSize:'4.5px', color:RARITY_STYLE[card.rarity].accent, textAlign:'center', fontWeight:800, textTransform:'uppercase' }}>{RARITY_STYLE[card.rarity].label}</div>
-                <div style={{ position:'absolute', top:'2px', left:'2px', fontSize:'7px', background:'rgba(96,165,250,0.9)', borderRadius:'3px', padding:'1px 3px', color:'#fff', fontWeight:800 }}>📡</div>
+                {radarActive && (
+                  <div style={{ position:'absolute', top:'2px', left:'2px', fontSize:'7px', background:'rgba(96,165,250,0.9)', borderRadius:'3px', padding:'1px 3px', color:'#fff', fontWeight:800 }}>📡</div>
+                )}
               </div>
             );
           }
@@ -89,13 +120,17 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
         const canUse = canUseCard(card, playerColor);
         const alreadyUsedThisTurn = cardUsedBy[playerColor];
         return (
-          <div key={card.id}
+          <div key={isSelected ? `${card.id}-selected` : card.id}
             data-testid={`hand-card-${card.mechanic}`}
             style={{
               position:'absolute', bottom:`${yOff}px`,
               left:`calc(50% + ${xOff}px - ${CW/2}px)`,
               width:`${CW}px`, height:`${CH}px`,
-              transform:`rotate(${angle}deg)`, transformOrigin:'50% 120%',
+              // Selection itself raises the card, so clicking a selected
+              // card again visibly DROPS it (deselect) instead of leaving
+              // it floating because the hover transform is still applied.
+              transform: isSelected ? `rotate(${angle}deg) translateY(-20px) scale(1.08)` : `rotate(${angle}deg)`,
+              transformOrigin:'50% 120%',
               cursor: !canUse ? 'not-allowed' : 'pointer',
               transition:'transform 0.18s ease, filter 0.18s ease',
               zIndex: isSelected ? 99 : i + 1,
@@ -111,12 +146,24 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
               overflow:'visible',
               animation: isJokerCard && canUse ? 'jokerFloat 3s ease-in-out infinite' : 'none',
             }}
+            onPointerDown={e => {
+              // Touch has no hover: on phones the raise MUST come from the
+              // selected state (the style above), so also clear any inline
+              // hover transform left over from a previous pointer type --
+              // otherwise a stale mouse-hover transform on a shared element
+              // keeps the card raised after a deselect tap.
+              const el = e.currentTarget as HTMLDivElement;
+              el.style.transform = '';
+            }}
             onClick={() => {
               if (!canUse) return;
               setSelectedCard(isSelected ? null : card);
             }}
             onMouseEnter={e => {
-              if (!canUse) return;
+              // Hover raise only applies to unselected cards: a selected
+              // card is already raised, and after a deselect-click it must
+              // visibly drop instead of snapping back up via hover.
+              if (!canUse || isSelected) return;
               const el = e.currentTarget as HTMLDivElement;
               el.style.transform = `rotate(${angle}deg) translateY(-20px) scale(1.08)`;
               el.style.zIndex = '99';
@@ -125,7 +172,7 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
             }}
             onMouseLeave={e => {
               const el = e.currentTarget as HTMLDivElement;
-              el.style.transform = `rotate(${angle}deg)`;
+              el.style.transform = isSelected ? `rotate(${angle}deg) translateY(-20px) scale(1.08)` : `rotate(${angle}deg)`;
               el.style.zIndex = String(isSelected ? 99 : i + 1);
               const tip = el.querySelector('.card-tooltip') as HTMLElement;
               if (tip) tip.style.display = 'none';

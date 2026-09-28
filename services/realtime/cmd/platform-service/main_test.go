@@ -1775,7 +1775,7 @@ func TestAccountDetailIncludesDerivedGuestStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected account claim to succeed, got %v", err)
 	}
-	if _, _, _, err := guests.FinalizeMatch("stats_match_1", "guest_account_stats", "guest_other_1", "white"); err == nil {
+	if _, _, _, err := guests.FinalizeMatch("stats_match_1", "guest_account_stats", "guest_other_1", "white", contracts.MatchModeOpenCards); err == nil {
 		t.Fatalf("expected missing opponent to reject finalize before setup")
 	}
 	if _, err := guests.EnsureGuest("guest_other_1", ""); err != nil {
@@ -1784,10 +1784,10 @@ func TestAccountDetailIncludesDerivedGuestStats(t *testing.T) {
 	if _, err := guests.EnsureGuest("guest_other_2", ""); err != nil {
 		t.Fatalf("expected second opponent creation to succeed, got %v", err)
 	}
-	if _, _, changed, err := guests.FinalizeMatch("stats_match_1", "guest_account_stats", "guest_other_1", "white"); err != nil || !changed {
+	if _, _, changed, err := guests.FinalizeMatch("stats_match_1", "guest_account_stats", "guest_other_1", "white", contracts.MatchModeOpenCards); err != nil || !changed {
 		t.Fatalf("expected first rated result to succeed, got changed=%v err=%v", changed, err)
 	}
-	if _, _, changed, err := guests.FinalizeMatch("stats_match_2", "guest_account_stats", "guest_other_2", "draw"); err != nil || !changed {
+	if _, _, changed, err := guests.FinalizeMatch("stats_match_2", "guest_account_stats", "guest_other_2", "draw", contracts.MatchModeOpenCards); err != nil || !changed {
 		t.Fatalf("expected second rated result to succeed, got changed=%v err=%v", changed, err)
 	}
 
@@ -1819,8 +1819,13 @@ func TestAccountDetailIncludesDerivedGuestStats(t *testing.T) {
 	if response.Account.AccountID != accountSession.Account.AccountID || response.Account.Handle != "aurora_stats" {
 		t.Fatalf("unexpected account identity response %#v", response)
 	}
-	if response.Account.DisplayName != guestSession.Guest.DisplayName || response.Account.Rating != 1229 {
-		t.Fatalf("expected derived account display/rating=1229, got %#v", response)
+	// The handle is the account's only username: the linked guest's
+	// auto-minted display name must NOT surface on account detail.
+	if response.Account.DisplayName != "aurora_stats" {
+		t.Fatalf("expected account displayName to be the handle, got %#v", response.Account.DisplayName)
+	}
+	if response.Account.Rating != 1229 {
+		t.Fatalf("expected derived account rating=1229, got %#v", response)
 	}
 	if response.Account.MatchesPlayed != 2 || response.Account.Wins != 1 || response.Account.Losses != 0 || response.Account.Draws != 1 || response.Account.GuestCount != 1 {
 		t.Fatalf("expected derived account stats, got %#v", response)
@@ -1972,10 +1977,10 @@ func TestAccountsListCanSortByDerivedRating(t *testing.T) {
 	if _, err := accounts.ClaimGuest(whiteTwo.Guest, "aurora_two"); err != nil {
 		t.Fatalf("expected second account claim to succeed, got %v", err)
 	}
-	if _, _, changed, err := guests.FinalizeMatch("rank_match_1", "guest_rating_one", "guest_loss_a", "white"); err != nil || !changed {
+	if _, _, changed, err := guests.FinalizeMatch("rank_match_1", "guest_rating_one", "guest_loss_a", "white", contracts.MatchModeOpenCards); err != nil || !changed {
 		t.Fatalf("expected first result finalize to succeed, got changed=%v err=%v", changed, err)
 	}
-	if _, _, changed, err := guests.FinalizeMatch("rank_match_2", "guest_rating_two", "guest_loss_b", "draw"); err != nil || !changed {
+	if _, _, changed, err := guests.FinalizeMatch("rank_match_2", "guest_rating_two", "guest_loss_b", "draw", contracts.MatchModeOpenCards); err != nil || !changed {
 		t.Fatalf("expected second result finalize to succeed, got changed=%v err=%v", changed, err)
 	}
 

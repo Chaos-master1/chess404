@@ -3,6 +3,10 @@ import { collectErrors, dismissOnboarding } from './_helpers';
 
 // Unique per run so the spec can be re-run against the same production DB.
 function uniqueHandle(): string {
+  // Prefix choice matters: accounts directory themselves by handle, so these
+  // test accounts are EXCLUDED from the public leaderboard by the platform's
+  // e2e test-account filter. Without the marker, every CI run leaked a new
+  // handle into the live rankings (the stray "@e2e_..." players users saw).
   return `e2e_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`.slice(0, 24);
 }
 

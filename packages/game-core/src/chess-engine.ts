@@ -268,25 +268,26 @@ export const gameStatus = (board: Board, player: PieceColor, lm: { from: Sq; to:
 };
 
 export const insuffMat = (board: Board): boolean => {
-  const nonKings: Piece[] = [];
+  const nonKings: { piece: Piece; sqColor: number }[] = [];
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
       const piece = board[r][c];
-      if (piece && piece.type !== 'king') nonKings.push(piece);
+      if (piece && piece.type !== 'king') nonKings.push({ piece, sqColor: (r + c) % 2 });
     }
   }
   if (nonKings.length === 0) return true;
-  if (nonKings.length === 1) return nonKings[0].type === 'bishop' || nonKings[0].type === 'knight';
+  if (nonKings.length === 1) return nonKings[0].piece.type === 'bishop' || nonKings[0].piece.type === 'knight';
   if (nonKings.length === 2) {
-    // KBN vs K is a known forced mate — must NOT be declared a draw.
-    // Two knights vs lone king is also not a forced draw. The only true
-    // insufficient-material positions are: K vs K, KB vs K, KN vs K,
-    // KBB vs K (same-color bishops). We keep the safe B+B and N+N cases only.
-    const types = nonKings.map((piece) => piece.type).sort();
-    return (
-      (types[0] === 'bishop' && types[1] === 'bishop') ||
-      (types[0] === 'knight' && types[1] === 'knight')
-    );
+    // KBN vs K is a forced mate and KNN vs K is still winnable against a
+    // cornered king, so neither may be declared a draw (the old code did
+    // exactly that, contradicting this comment). The remaining two-piece
+    // dead positions are the bishops-only ones where every bishop is
+    // confined to one square color: KBB vs K with same-colored bishops,
+    // and KB vs KB with both bishops on the same color. Bishops on
+    // opposite square colors can mate, so they never draw here.
+    const [a, b] = nonKings;
+    if (a.piece.type !== 'bishop' || b.piece.type !== 'bishop') return false;
+    return a.sqColor === b.sqColor;
   }
   return false;
 };

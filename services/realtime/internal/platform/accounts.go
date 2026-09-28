@@ -36,9 +36,73 @@ type AccountProfile struct {
 	Draws               int                         `json:"draws"`
 	PlacementsRemaining int                         `json:"placementsRemaining"`
 	RatingHistory       []AccountRatingHistoryEntry `json:"ratingHistory,omitempty"`
+	ModeRatingStats     *AccountModeRatings         `json:"modeRatings,omitempty"`
 	CreatedAt           time.Time                   `json:"createdAt"`
 	LastSeenAt          time.Time                   `json:"lastSeenAt"`
 	LastActiveAt        time.Time                   `json:"lastActiveAt,omitempty"`
+}
+
+// Per-mode ratings: hidden-cards and open-cards are separate ladders (the
+// skills genuinely differ -- hidden rewards reads/bluffs, open rewards pure
+// tactics). Legacy accounts without stored mode ratings fall back to the
+// blended Rating. Computer matches are unrated and never touch either.
+type AccountModeRating struct {
+	Rating        int       `json:"rating"`
+	MatchesPlayed int       `json:"matchesPlayed"`
+	Wins          int       `json:"wins"`
+	Losses        int       `json:"losses"`
+	Draws         int       `json:"draws"`
+	UpdatedAt     time.Time `json:"updatedAt,omitempty"`
+}
+
+// ModeRatingsKey is the storage key for a match mode's rating ladder.
+func ModeRatingsKey(modeID contracts.MatchModeID) string {
+	switch contracts.NormalizeMatchModeID(string(modeID)) {
+	case contracts.MatchModeHiddenCards:
+		return "hidden_cards"
+	case contracts.MatchModeComputer:
+		return "" // unrated
+	default:
+		return "open_cards"
+	}
+}
+
+// ModeRatings maps a mode key ("hidden_cards"/"open_cards") to that ladder's
+// stats. Nil entries mean "no games in that mode yet".
+type AccountModeRatings struct {
+	HiddenCards *AccountModeRating `json:"hiddenCards,omitempty"`
+	OpenCards   *AccountModeRating `json:"openCards,omitempty"`
+}
+
+func (a *AccountProfile) modeRatingFor(modeKey string) *AccountModeRating {
+	if a.ModeRatingStats == nil {
+		return nil
+	}
+	switch modeKey {
+	case "hidden_cards":
+		return a.ModeRatingStats.HiddenCards
+	case "open_cards":
+		return a.ModeRatingStats.OpenCards
+	}
+	return nil
+}
+
+func (a *AccountProfile) ensureModeRating(modeKey string) *AccountModeRating {
+	if a.ModeRatingStats == nil {
+		a.ModeRatingStats = &AccountModeRatings{}
+	}
+	existing := a.modeRatingFor(modeKey)
+	if existing != nil {
+		return existing
+	}
+	fresh := &AccountModeRating{Rating: 1200}
+	switch modeKey {
+	case "hidden_cards":
+		a.ModeRatingStats.HiddenCards = fresh
+	case "open_cards":
+		a.ModeRatingStats.OpenCards = fresh
+	}
+	return fresh
 }
 
 type AccountRatingHistoryEntry struct {
@@ -759,6 +823,36 @@ func (s *AccountStore) FinalizeMatch(matchID, whiteAccountID, blackAccountID, wi
 	}
 	white.MatchesPlayed++
 	black.MatchesPlayed++
+	// Per-mode ladder: queue games update the mode's own rating in addition
+	// to the blended legacy one. Computer games are unrated and skip this.
+	if modeKey := ModeRatingsKey(modeID); modeKey != "" {
+		whiteMode := white.ensureModeRating(modeKey)
+		blackMode := black.ensureModeRating(modeKey)
+		whiteModeBefore := whiteMode.Rating
+		blackModeBefore := blackMode.Rating
+		modeK := defaultEloKFactor
+		if white.PlacementsRemaining > 0 || black.PlacementsRemaining > 0 {
+			modeK = defaultPlacementEloKFactor
+		}
+		newWhiteMode, newBlackMode := ApplyEloMatchResultWithK(whiteModeBefore, blackModeBefore, winner, modeK, defaultEloMinRating)
+		whiteMode.Rating = newWhiteMode
+		blackMode.Rating = newBlackMode
+		whiteMode.MatchesPlayed++
+		blackMode.MatchesPlayed++
+		switch winner {
+		case "white":
+			whiteMode.Wins++
+			blackMode.Losses++
+		case "black":
+			blackMode.Wins++
+			whiteMode.Losses++
+		default:
+			whiteMode.Draws++
+			blackMode.Draws++
+		}
+		whiteMode.UpdatedAt = now
+		blackMode.UpdatedAt = now
+	}
 	if white.PlacementsRemaining > 0 {
 		white.PlacementsRemaining--
 	}
@@ -990,11 +1084,22 @@ func applyAccountMatchResult(white, black *AccountProfile, winner string) error 
 	if white == nil || black == nil {
 		return os.ErrInvalid
 	}
-	kFactor := defaultEloKFactor
-	if white.PlacementsRemaining > 0 || black.PlacementsRemaining > 0 {
-		kFactor = defaultPlacementEloKFactor
+	// Per-seat K factors: each side's rating moves at its own experience
+	// rate. A placement game outranks everything; otherwise the K decays
+	// with games played (see eloKFactorForGames). Elo is zero-sum only when
+	// both Ks are equal -- with differing Ks the rating pool drifts slightly,
+	// which is exactly the intended property (a 10-game player's result
+	// matters more to them than to a 500-game opponent).
+	whiteK := eloKFactorForGames(white.MatchesPlayed)
+	blackK := eloKFactorForGames(black.MatchesPlayed)
+	if white.PlacementsRemaining > 0 {
+		whiteK = defaultPlacementEloKFactor
 	}
-	newWhite, newBlack := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, kFactor, defaultEloMinRating)
+	if black.PlacementsRemaining > 0 {
+		blackK = defaultPlacementEloKFactor
+	}
+	newWhite, _ := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, whiteK, defaultEloMinRating)
+	_, newBlack := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, blackK, defaultEloMinRating)
 	switch winner {
 	case "white":
 		white.Rating = newWhite

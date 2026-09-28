@@ -178,6 +178,16 @@ type Service struct {
 
 	relayMu      sync.Mutex
 	relayStarted map[string]bool
+
+	// Deferred persistence/publish queue (see persist_queue.go): the Upstash
+	// save and cross-instance publish run on background workers with strict
+	// per-match ordering, instead of blocking every mutation under c.mu.
+	persistMu      sync.Mutex
+	persistCond    *sync.Cond
+	persistQueues  map[string][]*asyncPersistJob
+	persistOwned   map[string]bool
+	persistStopped bool
+	persistWG      sync.WaitGroup
 }
 
 type authTokenEntry struct {
@@ -256,6 +266,7 @@ func NewServiceWithStoreBroadcasterAndTokenStore(archive MatchArchiver, store Ma
 	go service.startBroadcaster()
 	go service.startGC()
 	go service.cleanupAuthTokensLoop()
+	service.startPersistWorkers()
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 2 {
 		numWorkers = 2
@@ -361,12 +372,13 @@ func (s *Service) ResolveSeatSecret(matchID, guestID string) (string, error) {
 		return "", ErrMatchNotFound
 	}
 
-	// Computer matches have no second human seat: the black "player" is the
-	// engine, whose secret must never be claimable.
-	if c.state.ModeID == contracts.MatchModeComputer {
-		return "", errors.New("computer match seats cannot be claimed")
-	}
-
+	// Computer matches have one human seat and one engine seat. The engine
+	// "player" (guestID "computer") must never be claimable, but the HUMAN
+	// seat is a real seat backed by the creator's guest session -- refusing it
+	// broke the whole credential chain for computer matches: platform match
+	// claims, gateway bootstrap fallbacks, and WS auth-token issuance all
+	// funnel through here, so the client ended up with no working secret,
+	// every presence heartbeat 400'd, and the WebSocket never connected.
 	seatColor := ""
 	switch {
 	case strings.EqualFold(guestID, strings.TrimSpace(c.state.WhiteGuestID)):
@@ -375,6 +387,9 @@ func (s *Service) ResolveSeatSecret(matchID, guestID string) (string, error) {
 		seatColor = "black"
 	default:
 		return "", ErrUnauthorizedSeatClaim
+	}
+	if c.state.ModeID == contracts.MatchModeComputer && strings.EqualFold(strings.TrimSpace(seatOwnerGuestID(c.state, seatColor)), "computer") {
+		return "", errors.New("computer engine seat cannot be claimed")
 	}
 
 	secret := ""
@@ -387,6 +402,17 @@ func (s *Service) ResolveSeatSecret(matchID, guestID string) (string, error) {
 		return "", errors.New("seat has no player secret configured")
 	}
 	return secret, nil
+}
+
+// seatOwnerGuestID returns the guest that owns the given seat color in state.
+func seatOwnerGuestID(state *contracts.MatchState, seatColor string) string {
+	if state == nil {
+		return ""
+	}
+	if seatColor == "white" {
+		return strings.TrimSpace(state.WhiteGuestID)
+	}
+	return strings.TrimSpace(state.BlackGuestID)
 }
 
 func (s *Service) HeartbeatPresence(matchID string, req contracts.MatchPresenceRequest, now time.Time) error {
@@ -737,6 +763,14 @@ func (s *Service) Stats() ServiceStats {
 
 func (s *Service) Close() {
 	close(s.stopCh)
+	// Drain deferred persistence so a redeploy does not lose the tail of
+	// in-flight writes. Workers exit once the queues are empty; jobs that
+	// arrive after this point run inline (queueCommit handles that).
+	s.persistMu.Lock()
+	s.persistStopped = true
+	s.persistCond.Broadcast()
+	s.persistMu.Unlock()
+	s.persistWG.Wait()
 }
 
 func (s *Service) persistSnapshot(snapshot contracts.MatchSnapshotResponse) {
@@ -753,72 +787,31 @@ func (s *Service) persistSnapshot(snapshot contracts.MatchSnapshotResponse) {
 	}
 }
 
+// saveToRedis queues the Redis snapshot save as deferred IO. It is
+// deliberately cheap: no network call runs on the mutation path (see
+// persist_queue.go for the ordering invariants). The full snapshot --
+// including seat secrets -- is still what gets stored, so
+// hydrateFromRedisLocked can rebuild a container with intent auth working;
+// that is a direct point-to-point Redis write, not a broadcast, same trust
+// tier as the archive.
+//
+// All components go out as ONE pipelined round trip (SaveSnapshotAtomic).
+// The previous six sequential Save* calls put a ~6xWAN-RTT floor on every
+// move; deferring the round trip entirely removes the rest of the ~1s
+// intent-to-board latency measured in production on 2026-09-25.
 func (s *Service) saveToRedis(snapshot contracts.MatchSnapshotResponse, presence *matchPresenceState) {
-	if s.store == nil {
-		return
-	}
-	matchID := snapshot.Match.MatchID
+	s.queueSave(snapshot, presence)
+}
 
-	// The full snapshot -- including seat secrets -- is stored here so
-	// hydrateFromRedisLocked can rebuild a container on another instance (or
-	// after this one evicts it from memory) with intent auth still working.
-	// This is a direct point-to-point Redis read/write, not a broadcast: the
-	// same trust tier as the archive, which has always retained secrets for
-	// the same restart-recovery reason.
-	//
-	// All components go out as ONE pipelined round trip (SaveSnapshotAtomic).
-	// The previous six sequential Save* calls put a ~6xWAN-RTT floor on every
-	// move -- against Upstash from Railway that was ~0.5s of pure network
-	// time per mutation, paid again on the computer's reply (visible as a
-	// ~1.2s intent latency in production after MATCH_STATE_BACKEND=redis).
-	historyData, err := json.Marshal(snapshot.Match.History)
-	if err != nil {
-		s.Log.Error("failed to marshal history for redis", "matchId", matchID, "error", err)
-		historyData = nil
-	}
-	eventsData, err := json.Marshal(snapshot.Events)
-	if err != nil {
-		s.Log.Error("failed to marshal events for redis", "matchId", matchID, "error", err)
-		eventsData = nil
-	}
-	var presenceData []byte
-	if presence != nil {
-		presenceData, err = json.Marshal(presence)
-		if err != nil {
-			s.Log.Error("failed to marshal presence for redis", "matchId", matchID, "error", err)
-			presenceData = nil
-		}
-	}
-	var seenIDsData []byte
-	if len(snapshot.Match.SeenClientMoveIDs) > 0 {
-		seenIDsData, err = json.Marshal(snapshot.Match.SeenClientMoveIDs)
-		if err != nil {
-			s.Log.Error("failed to marshal seen client move ids for redis", "matchId", matchID, "error", err)
-			seenIDsData = nil
-		}
-	}
-	stateData, err := json.Marshal(snapshot)
-	if err != nil {
-		// The state payload is the one component hydration cannot rebuild
-		// from the others; if it will not marshal, log and keep the old
-		// per-component path so at least history/events still land.
-		s.Log.Error("failed to marshal state for redis", "matchId", matchID, "error", err)
-		if err := s.store.SaveState(matchID, snapshot); err != nil {
-			s.Log.Error("failed to save state to redis", "matchId", matchID, "error", err)
-		}
-		return
-	}
-	if err := s.store.SaveSnapshotAtomic(
-		matchID,
-		stateData,
-		hashSecret(snapshot.Match.WhitePlayerSecret),
-		hashSecret(snapshot.Match.BlackPlayerSecret),
-		historyData,
-		eventsData,
-		presenceData,
-		seenIDsData,
-	); err != nil {
-		s.Log.Error("failed to save snapshot to redis", "matchId", matchID, "error", err)
+// flushCommit persists the archive upsert + Redis snapshot save INLINE.
+// Use only where durability must precede the call returning: match creation
+// (a hydrate on another connection must find the match) and terminal states
+// (the final state must never be overtaken by a queued older write).
+func (s *Service) flushCommit(persistSnap contracts.MatchSnapshotResponse, presence *matchPresenceState) {
+	s.persistSnapshot(persistSnap)
+	s.drainMatchPersist(persistSnap.Match.MatchID)
+	if b := s.buildRedisSaveBundle(persistSnap, presence); b != nil {
+		s.runRedisSave(persistSnap.Match.MatchID, b)
 	}
 }
 
@@ -830,28 +823,12 @@ type redisBroadcastEnvelope struct {
 	Snapshot         contracts.MatchSnapshotResponse `json:"snapshot"`
 }
 
+// publishToRedis marshals the redacted envelope and queues the pub/sub
+// write as deferred IO (no network on the mutation path; see
+// persist_queue.go). Local subscribers are already served synchronously by
+// the caller (deliverToSubscribersLocked).
 func (s *Service) publishToRedis(matchID string, snapshot contracts.MatchSnapshotResponse) {
-	if s.broadcaster == nil {
-		return
-	}
-	if _, ok := s.broadcaster.(NoopBroadcaster); ok {
-		return
-	}
-	// Every consumer of this data -- local subscribers via broadcastLocked,
-	// and cross-instance subscribers via relayRedisBroadcasts -- runs it
-	// through filterStateForColor before it reaches a client, which already
-	// strips secrets. Redacting here too means the plaintext secret never
-	// transits Redis pub/sub at all, even on our own private channel.
-	snapshot.Match = redactSeatSecrets(snapshot.Match)
-	envelope := redisBroadcastEnvelope{OriginInstanceID: s.instanceID, Snapshot: snapshot}
-	data, err := json.Marshal(envelope)
-	if err != nil {
-		s.Log.Error("failed to marshal snapshot for broadcast", "matchId", matchID, "error", err)
-		return
-	}
-	if err := s.broadcaster.Publish(matchID, data); err != nil {
-		s.Log.Error("failed to publish to redis", "matchId", matchID, "error", err)
-	}
+	s.queuePublish(matchID, s.buildPublishPayload(snapshot))
 }
 
 // ensureRedisRelay subscribes this instance to cross-instance broadcasts for
@@ -951,8 +928,11 @@ func (s *Service) broadcastLocked(c *matchContainer, snapshot contracts.MatchSna
 	// so clients can resync on reconnect.
 	snapshot.ReplayFrames = nil
 
-	s.publishToRedis(c.state.MatchID, snapshot)
+	// Local delivery FIRST (in-memory, no IO): the acting client sees its
+	// move in the same instant the mutation commits. The cross-instance
+	// publish is deferred to the background queue.
 	deliverToSubscribersLocked(c, snapshot)
+	s.queuePublish(c.state.MatchID, s.buildPublishPayload(snapshot))
 }
 
 // broadcastLockedNoSeqBump delivers a snapshot without minting a new seq --
@@ -973,8 +953,8 @@ func (s *Service) broadcastLocked(c *matchContainer, snapshot contracts.MatchSna
 func (s *Service) broadcastLockedNoSeqBump(c *matchContainer, snapshot contracts.MatchSnapshotResponse) {
 	snapshot.SeqNum = c.seqNum
 	snapshot.ReplayFrames = nil
-	s.publishToRedis(c.state.MatchID, snapshot)
 	deliverToSubscribersLocked(c, snapshot)
+	s.queuePublish(c.state.MatchID, s.buildPublishPayload(snapshot))
 }
 
 func deliverToSubscribersLocked(c *matchContainer, snapshot contracts.MatchSnapshotResponse) {
@@ -992,28 +972,47 @@ func deliverToSubscribersLocked(c *matchContainer, snapshot contracts.MatchSnaps
 	cachedSpec.Match = filterStateForColor(snapshot.Match, "")
 	cachedSpec.Events = filterEventsForColor(snapshot.Events, "")
 
+	// Collect the channels first: a drop removes its channel from c.subs, and
+	// mutating a map while ranging it is exactly the kind of subtle bug this
+	// path used to have (the drop left the dead channel IN the map -- every
+	// later broadcast panicked into recover for that client forever, the slot
+	// counted against the per-match subscriber cap, and the eventual
+	// unsubscribe() closed the already-closed channel, an unrecovered panic on
+	// a hijacked-connection goroutine that could take down the process).
+	type subPush struct {
+		ch    chan contracts.MatchSnapshotResponse
+		snap  contracts.MatchSnapshotResponse
+	}
+	pushes := make([]subPush, 0, len(c.subs))
 	for ch, color := range c.subs {
-		if color == "white" {
-			pushSnapshot(ch, cachedWhite)
-		} else if color == "black" {
-			pushSnapshot(ch, cachedBlack)
-		} else {
-			pushSnapshot(ch, cachedSpec)
+		switch color {
+		case "white":
+			pushes = append(pushes, subPush{ch: ch, snap: cachedWhite})
+		case "black":
+			pushes = append(pushes, subPush{ch: ch, snap: cachedBlack})
+		default:
+			pushes = append(pushes, subPush{ch: ch, snap: cachedSpec})
 		}
+	}
+	for _, p := range pushes {
+		pushSnapshot(c, p.ch, p.snap)
 	}
 }
 
-func pushSnapshot(ch chan contracts.MatchSnapshotResponse, snapshot contracts.MatchSnapshotResponse) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("pushSnapshot: recovered panic for seq=%d: %v", snapshot.SeqNum, r)
-		}
-	}()
+// pushSnapshot delivers one snapshot to one subscriber. The caller must hold
+// c.mu so a drop can remove the dead channel from c.subs in the same critical
+// section. Removal-before-close is what keeps the subscribers map authoritative:
+// after a drop the channel no longer exists as a subscriber, its buffer slot is
+// freed for a new viewer, and no later broadcast can touch the closed channel.
+func pushSnapshot(c *matchContainer, ch chan contracts.MatchSnapshotResponse, snapshot contracts.MatchSnapshotResponse) {
 	select {
 	case ch <- snapshot:
 	default:
 		metrics.PushSnapshotDrops.Inc()
 		log.Printf("pushSnapshot: dropping event seq=%d for channel %p (buffer full) — forcing client resync", snapshot.SeqNum, ch)
+		if c != nil && c.subs != nil {
+			delete(c.subs, ch)
+		}
 		close(ch)
 	}
 }
@@ -1149,6 +1148,7 @@ func (s *Service) gcFinishedMatches(now time.Time) {
 	// and leaves the shard mutex permanently held, which wedges every
 	// Load/Store/Range on that shard for the lifetime of the process.
 	var stale []string
+	var zombies []string
 	s.matches.Range(func(matchID string, c *matchContainer) bool {
 		c.mu.Lock()
 		status := c.state.Status
@@ -1164,11 +1164,96 @@ func (s *Service) gcFinishedMatches(now time.Time) {
 			if now.Sub(updatedAt) >= waitingMatchTTL {
 				stale = append(stale, matchID)
 			}
+		case "active":
+			// An ACTIVE match with no connected player for long past the
+			// disconnect grace is a zombie: both players are gone and nothing
+			// will ever finalize it. Previously these were evicted while
+			// still "active", so the archived row stayed active forever and
+			// clogged the public watch/replay feed. Finalize them as draws
+			// (abandon) instead, exactly like the reconcile path does on
+			// restart.
+			//
+			// Presence-gated, NOT wall-clock idle: Untimed matches and long
+			// thinks legitimately sit without mutations, so UpdatedAt alone
+			// proves nothing about liveness. A connected player's presence
+			// heartbeat keeps the match alive regardless of how stale the
+			// UpdatedAt timestamp is.
+			const activeAbandonTTL = 10 * time.Minute
+			if now.Sub(updatedAt) >= activeAbandonTTL && s.zombiePresenceLocked(c, now) {
+				stale = append(stale, matchID)
+				zombies = append(zombies, matchID)
+			}
 		}
 		return true
 	})
 
+	for _, matchID := range zombies {
+		s.finalizeAbandonedMatch(matchID, now)
+	}
 	for _, matchID := range stale {
 		s.matches.Delete(matchID)
 	}
+}
+
+// zombiePresenceLocked reports whether an active match looks fully abandoned:
+// neither seat has been heard from within the presence heartbeat window. A
+// container with no presence state at all predates presence tracking (or was
+// never resumed through a presence-bearing path), so the historical wall-clock
+// zombie rule still applies to it -- that was the regression this branch was
+// built to clean up.
+//
+// Long thinks and untimed games are exactly what this guard protects: they
+// refresh nothing, but a live player's heartbeat keeps both the tick loop and
+// this GC away from the match.
+func (s *Service) zombiePresenceLocked(c *matchContainer, now time.Time) bool {
+	if c.presence == nil {
+		return true
+	}
+	cutoff := now.Add(-presenceHeartbeatTimeout)
+	whiteAlive := c.presence.WhiteLastSeenAt.After(cutoff)
+	blackAlive := c.presence.BlackLastSeenAt.After(cutoff)
+	if c.state.WhiteGuestID == "computer" {
+		whiteAlive = true
+	}
+	if c.state.BlackGuestID == "computer" {
+		blackAlive = true
+	}
+	return !whiteAlive && !blackAlive
+}
+
+// finalizeAbandonedMatch marks a zombie active match as a draw-abandon and
+// persists the finished state. Caller must NOT hold c.mu.
+func (s *Service) finalizeAbandonedMatch(matchID string, now time.Time) {
+	c := s.getMatchContainer(matchID)
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.state.Status != "active" {
+		c.mu.Unlock()
+		return
+	}
+	markMatchFinished(c.state, "draw", "abandon", now)
+	finishEvents := []contracts.ResolvedEvent{
+		makeEvent(matchID, "match_finished", now, "system", map[string]any{
+			"result":        "abandon",
+			"winner":        "draw",
+			"disconnected":  disconnectGraceBoth,
+		}),
+	}
+	c.events = append(c.events, finishEvents...)
+	snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), finishEvents, now)
+	persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
+	// flushCommit and broadcastLocked run while STILL HOLDING c.mu, exactly
+	// like every other call site (JoinMatchSeat, ApplyIntent, the computer
+	// worker). The previous version unlocked first: broadcastLocked ->
+	// deliverToSubscribersLocked then read c.subs and c.seqNum without the
+	// lock, racing a concurrently reconnecting player's Subscribe/ApplyIntent
+	// -- a concurrent map read+write is a fatal runtime panic that would take
+	// down the whole match-service process. Neither call re-enters c.mu (the
+	// persist workers never take it; see persist_queue.go), so holding it
+	// across both is safe and matches the established invariant.
+	s.flushCommit(persistSnap, c.presence)
+	s.broadcastLocked(c, snapshot)
+	c.mu.Unlock()
 }

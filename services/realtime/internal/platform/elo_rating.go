@@ -8,6 +8,14 @@ const (
 	defaultPlacementMatches    = 5
 	defaultEloStartRating      = 1200
 	defaultEloMinRating        = 100
+	// Post-placement K-factor decay (FIDE-style): new players converge fast,
+	// established players converge slowly so an established rating means
+	// something. Boundaries are games PLAYED (inclusive thresholds).
+	defaultKFactorEstablished = 16.0
+	defaultKFactorTours       = 24.0
+	defaultKFactorNovice      = 40.0
+	defaultKFactorGamesNovice = 30
+	defaultKFactorGamesTours  = 120
 )
 
 // ApplyEloMatchResult updates the two ratings according to the standard
@@ -19,6 +27,23 @@ const (
 // them (account finalization uses a stricter floor).
 func ApplyEloMatchResult(whiteRating, blackRating int, winner string) (int, int) {
 	return ApplyEloMatchResultWithK(whiteRating, blackRating, winner, defaultEloKFactor, defaultEloMinRating)
+}
+
+// eloKFactorForGames returns the post-placement K factor for a player with
+// the given number of games played (placements already consumed). The curve:
+// K=40 for the first 30 games (fast convergence off a provisional rating),
+// K=24 up to 120 games, K=16 beyond -- so climbing early is quick but the
+// rating of an established player is stable and meaningful. Placement games
+// (K=64) are handled separately by the caller before this helper is used.
+func eloKFactorForGames(matchesPlayed int) float64 {
+	switch {
+	case matchesPlayed < defaultKFactorGamesNovice:
+		return defaultKFactorNovice
+	case matchesPlayed < defaultKFactorGamesTours:
+		return defaultKFactorTours
+	default:
+		return defaultKFactorEstablished
+	}
 }
 
 func ApplyEloMatchResultWithK(whiteRating, blackRating int, winner string, kFactor float64, minRating int) (int, int) {

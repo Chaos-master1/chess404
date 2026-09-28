@@ -24,6 +24,7 @@ import {
 import { writeStoredRoomMeta } from './lib/match-service';
 import type { PrivateMatchIdentity } from './lib/private-match-service';
 import { formatDateTime } from './lib/display';
+import InboxPage from './InboxPage';
 
 interface FriendsPageProps {
   identity?: PrivateMatchIdentity | null;
@@ -32,6 +33,7 @@ interface FriendsPageProps {
   liveRefreshToken?: number;
   onOpenProfile?: (handle: string) => void;
   onOpenAccount?: () => void;
+  onUnreadCountChange?: (count: number) => void;
 }
 
 
@@ -98,6 +100,7 @@ export default function FriendsPage({
   liveRefreshToken = 0,
   onOpenProfile,
   onOpenAccount,
+  onUnreadCountChange,
 }: FriendsPageProps): React.ReactElement {
   const router = useRouter();
   const [overview, setOverview] = React.useState<FriendOverview | null>(null);
@@ -510,7 +513,7 @@ export default function FriendsPage({
                     cursor: 'pointer',
                   }}
                 >
-                  {OFFICIAL_MATCH_MODES.map((mode) => (
+                  {OFFICIAL_MATCH_MODES.filter((mode) => mode.id !== 'computer').map((mode) => (
                     <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#fff4d6' }}>{mode.label}</option>
                   ))}
                 </select>
@@ -606,6 +609,28 @@ export default function FriendsPage({
               />
             ))}
           </FriendSection>
+
+          {accountId && sessionToken ? (
+            <div style={{
+              marginTop: '4px',
+              borderRadius: '14px',
+              border: '1px solid rgba(255,180,60,0.12)',
+              background: 'rgba(255,255,255,0.02)',
+            }}>
+              <div style={{ padding: '12px 16px 0', color: '#ffcf72', fontSize: '11px', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase' }}>
+                Activity
+              </div>
+              <InboxPage
+                embedded
+                accountId={accountId}
+                sessionToken={sessionToken}
+                liveRefreshToken={liveRefreshToken}
+                onOpenProfile={onOpenProfile}
+                onOpenFriends={onOpenAccount}
+                onUnreadCountChange={onUnreadCountChange}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 

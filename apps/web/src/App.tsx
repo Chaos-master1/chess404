@@ -14,7 +14,7 @@ import type { PieceColor } from './types';
 export type AppPage =
   | 'Play' | 'Match' | 'Watch' | 'Rankings' | 'Profiles' | 'Account'
   | 'History' | 'Friends' | 'Inbox' | 'Cards' | 'Community' | 'Status'
-  | 'Admin' | 'Modes' | 'Queue' | 'Lobbies';
+  | 'Admin' | 'Queue';
 
 export default function App({ runtimeConfig, children }: { runtimeConfig?: { matchServiceHttpBase?: string; matchServiceWsBase?: string }, children?: React.ReactNode }) {
   configureMatchServiceRuntime({
@@ -64,7 +64,6 @@ export default function App({ runtimeConfig, children }: { runtimeConfig?: { mat
     else if (pathname === '/status') setActivePage('Status');
     else if (pathname === '/account') setActivePage('Account');
     else if (pathname === '/admin') setActivePage('Admin');
-    else if (pathname === '/lobbies') setActivePage('Lobbies');
     else if (pathname.startsWith('/match/')) setActivePage('Match');
   }, [pathname]);
 

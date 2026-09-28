@@ -36,6 +36,12 @@ func applyCancelCard(state *contracts.MatchState, intent contracts.PlayerIntent,
 	mechanic := state.PendingCard.Mechanic
 	cardID := state.PendingCard.CardID
 	state.PendingCard = nil
+	// Cancelling frees the turn's card slot again -- the card is back in the
+	// hand and nothing was played. Mirrors the client, which clears its
+	// cardUsedBy flag on cancel so the same turn still allows one card.
+	if state.CardUsedThisTurn != nil {
+		state.CardUsedThisTurn[owner] = false
+	}
 	state.DrawOfferedBy = ""
 	state.UpdatedAt = now.UTC()
 	return []contracts.ResolvedEvent{
@@ -52,6 +58,9 @@ func applyPlayCard(state *contracts.MatchState, intent contracts.PlayerIntent, n
 	if err := ensureActive(state); err != nil {
 		return nil, err
 	}
+	if state.CardUsedThisTurn == nil {
+		state.CardUsedThisTurn = map[string]bool{}
+	}
 
 	owner, err := requireIntentColor(state, intent.PlayerID, intent.PlayerSecret)
 	if err != nil {
@@ -59,6 +68,14 @@ func applyPlayCard(state *contracts.MatchState, intent contracts.PlayerIntent, n
 	}
 	if owner != state.Turn {
 		return nil, errors.New("cards can only be played on your turn")
+	}
+	// One card per player per turn, mirroring the client's cardUsedBy gate.
+	// The UI always enforced this; the server never did, so a crafted API
+	// client could play unlimited cards per turn. The canceller's flag is
+	// cleared by applyCancelCard (client parity), so a cancelled pending card
+	// keeps the turn's card slot free.
+	if state.CardUsedThisTurn[owner] {
+		return nil, errors.New("only one card per turn")
 	}
 	if state.DoubleMove != nil {
 		return nil, errors.New("resolve the active double move before playing another card")

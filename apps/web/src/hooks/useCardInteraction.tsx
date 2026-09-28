@@ -101,7 +101,7 @@ export interface UseCardInteractionProps {
   applyAuthoritativeSnapshot: (snapshot: MatchSnapshotMessage) => void;
   fireCardAnim: (type: CardAnimType, label?: string) => void;
   playMoveSound: (type?: 'move' | 'capture' | 'check' | 'castle' | 'card' | 'victory' | 'defeat' | 'lava' | 'bomb' | 'shield') => void;
-  playCardSound: (mechanic: CardMechanic) => void;
+  playCardSound: (mechanic?: CardMechanic) => void;
   analyse: (fen: string, turn: PieceColor) => void;
   isAttackedWithFusion: (b: Board, row: number, col: number, byColor: PieceColor) => boolean;
   checkEndGame: (nb: Board, next: PieceColor, newMv: Set<string>, newLm: { from: Sq; to: Sq } | null, newHmc: number, newPh: string[], posKey: string, fen: string, t: PieceColor) => void;
@@ -118,6 +118,11 @@ export interface UseCardInteractionProps {
   triggerSniperAnim: (sq: Sq, type: PieceType, color: PieceColor, mechanic: 'sniper' | 'badsniper') => void;
   triggerTransformAnim: (sq: Sq, dir: 'up' | 'down', from: PieceType, to: PieceType, color: PieceColor) => void;
   triggerFuseAnim: (anim: { sq1: Sq; sq2: Sq; type1: PieceType; type2: PieceType; color: PieceColor }) => void;
+  triggerSwapAnim: (sq1: Sq, sq2: Sq, color1?: string, color2?: string) => void;
+  triggerTeleportAnim: (fromSq: Sq, toSq: Sq, type: PieceType, color: PieceColor) => void;
+  triggerJumpAnim: (fromSq: Sq, toSq: Sq, type: PieceType, color: PieceColor, captured: boolean) => void;
+  triggerMindControlAnim: (targetSq: Sq, playerColor: PieceColor, pieceType: PieceType) => void;
+  triggerSacrificeAnim: (squares: Sq[]) => void;
   over: boolean;
   hostedRuntime: boolean | null;
   viewerSeatRef: React.MutableRefObject<PieceColor | null>;
@@ -136,7 +141,9 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     applyAuthoritativeSnapshot, fireCardAnim, playMoveSound, playCardSound, analyse,
     isAttackedWithFusion, checkEndGame, finishCardUse, removeCardFromHand, radarActive,
     setRadarActive, finalPositionRef, setOver, setWinner, setMovHist, setPosHist, setSnapshots,
-    triggerSniperAnim, triggerTransformAnim, triggerFuseAnim, over, hostedRuntime, viewerSeatRef
+    triggerSniperAnim, triggerTransformAnim, triggerFuseAnim,
+    triggerSwapAnim, triggerTeleportAnim, triggerJumpAnim, triggerMindControlAnim, triggerSacrificeAnim,
+    over, hostedRuntime, viewerSeatRef
   } = props;
 
   const jokerPickerRef = React.useRef<typeof jokerPicker>(null);
@@ -418,6 +425,9 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         } else if (mechanic === 'teleport') {
           const from = step === 2 ? (data.from as Sq | undefined) : undefined;
           if (from) {
+            triggerTeleportAnim(from, { row, col }, piece?.type ?? 'queen', playerColor);
+            fireCardAnim('teleport', `Teleported to ${FILES[col]}${RANKS[row]}`);
+            playMoveSound('move');
             setCardMsg(`Teleported to ${FILES[col]}${RANKS[row]}`);
           } else {
             setCardMsg('Now click destination square');
@@ -425,6 +435,9 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         } else if (mechanic === 'jump') {
           const from = step === 2 ? (data.from as Sq | undefined) : undefined;
           if (from) {
+            triggerJumpAnim(from, { row, col }, piece?.type ?? 'knight', playerColor, Boolean(piece));
+            fireCardAnim('teleport', `Jumped to ${FILES[col]}${RANKS[row]}`);
+            playMoveSound(piece ? 'capture' : 'move');
             setCardMsg(`Jumped to ${FILES[col]}${RANKS[row]}`);
           } else {
             setCardMsg('Now click landing square');
@@ -432,12 +445,26 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         } else if (mechanic === 'swapme' || mechanic === 'swapus' || mechanic === 'swaphim') {
           const sq1 = step === 2 ? (data.sq1 as Sq | undefined) : undefined;
           if (sq1) {
+            triggerSwapAnim(sq1, { row, col });
+            fireCardAnim('swap', `Swapped ${FILES[sq1.col]}${RANKS[sq1.row]} ↔ ${FILES[col]}${RANKS[row]}`);
+            playMoveSound('move');
             setCardMsg(`Swapped ${FILES[sq1.col]}${RANKS[sq1.row]} with ${FILES[col]}${RANKS[row]}`);
           } else {
             setCardMsg('Now click second piece to swap');
           }
-        } else if (mechanic === 'borrow' || mechanic === 'mindcontrol') {
+        } else if (mechanic === 'borrow') {
+          setCardMsg(`Borrowed piece on ${FILES[col]}${RANKS[row]}`);
+          if (piece) {
+            fireCardAnim('smallsacrifice', `Borrowed ${piece.type}`);
+            playCardSound('borrow');
+          }
+        } else if (mechanic === 'mindcontrol') {
           setCardMsg(`Converted piece on ${FILES[col]}${RANKS[row]}`);
+          if (piece) {
+            triggerMindControlAnim({ row, col }, playerColor, piece.type);
+            fireCardAnim('mindcontrol', `Controlled ${piece.type}`);
+            playCardSound('mindcontrol');
+          }
         } else if (mechanic === 'parasite') {
           const hostSq = step === 2 ? (data.hostSq as Sq | undefined) : undefined;
           if (hostSq) {
@@ -450,9 +477,17 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         } else if (mechanic === 'fakepiece') {
           setCardMsg(`Decoy placed at ${FILES[col]}${RANKS[row]}`);
         } else if (mechanic === 'smallsacrifice' || mechanic === 'bigsacrifice') {
+          const sq1 = step === 2 ? (data.sq1 as Sq | undefined) : undefined;
+          if (sq1) {
+            triggerSacrificeAnim([sq1, { row, col }]);
+          }
+          fireCardAnim('smallsacrifice', mechanic === 'bigsacrifice' ? 'Big Sacrifice' : 'Small Sacrifice');
+          playMoveSound('capture');
           setCardMsg(`Sacrifice completed on ${FILES[col]}${RANKS[row]}`);
         } else if (mechanic === 'blackhole') {
           setCardMsg(`Black hole consumed 3x3 at ${FILES[col]}${RANKS[row]}`);
+          fireCardAnim('blackhole', 'Black Hole');
+          playMoveSound('bomb');
         }
       }).catch(err => {
         const message = err instanceof Error ? err.message : 'Target selection failed';

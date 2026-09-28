@@ -3,6 +3,8 @@ package platform
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/chess404/realtime/internal/contracts"
 )
 
 func TestSQLiteGuestStoreEnsureGuestPersistsAndReloads(t *testing.T) {
@@ -70,19 +72,21 @@ func TestSQLiteGuestStoreFinalizeMatchIsIdempotent(t *testing.T) {
 
 	white, _ := store.EnsureGuest("guest_white", "")
 	black, _ := store.EnsureGuest("guest_black", "")
-	updatedWhite, updatedBlack, changed, err := store.FinalizeMatch("room_123", white.Guest.GuestID, black.Guest.GuestID, "white")
+	updatedWhite, updatedBlack, changed, err := store.FinalizeMatch("room_123", white.Guest.GuestID, black.Guest.GuestID, "white", contracts.MatchModeOpenCards)
 	if err != nil {
 		t.Fatalf("expected finalize to succeed, got %v", err)
 	}
-	if !changed || updatedWhite.Rating != 1216 || updatedBlack.Rating != 1184 {
+	// K decay: 0 games played -> novice K=40 (was K=32 flat before the
+	// FIDE-style curve; see eloKFactorForGames).
+	if !changed || updatedWhite.Rating != 1220 || updatedBlack.Rating != 1180 {
 		t.Fatalf("unexpected rating change %#v %#v changed=%v", updatedWhite, updatedBlack, changed)
 	}
 
-	repeatWhite, repeatBlack, changedAgain, err := store.FinalizeMatch("room_123", white.Guest.GuestID, black.Guest.GuestID, "white")
+	repeatWhite, repeatBlack, changedAgain, err := store.FinalizeMatch("room_123", white.Guest.GuestID, black.Guest.GuestID, "white", contracts.MatchModeOpenCards)
 	if err != nil {
 		t.Fatalf("expected repeated finalize to be harmless, got %v", err)
 	}
-	if changedAgain || repeatWhite.Rating != 1216 || repeatBlack.Rating != 1184 {
+	if changedAgain || repeatWhite.Rating != 1220 || repeatBlack.Rating != 1180 {
 		t.Fatalf("expected repeated finalize to be idempotent, got %#v %#v changed=%v", repeatWhite, repeatBlack, changedAgain)
 	}
 }
@@ -98,7 +102,7 @@ func TestSQLiteGuestStoreStatsReflectProfilesAndRatedResults(t *testing.T) {
 
 	white, _ := store.EnsureGuest("guest_white", "")
 	black, _ := store.EnsureGuest("guest_black", "")
-	if _, _, _, err := store.FinalizeMatch("room_stats", white.Guest.GuestID, black.Guest.GuestID, "draw"); err != nil {
+	if _, _, _, err := store.FinalizeMatch("room_stats", white.Guest.GuestID, black.Guest.GuestID, "draw", contracts.MatchModeOpenCards); err != nil {
 		t.Fatalf("expected finalize to succeed, got %v", err)
 	}
 

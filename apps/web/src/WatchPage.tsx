@@ -29,12 +29,23 @@ export default function WatchPage({ onWatchMatch, onOpenReplay }: WatchPageProps
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [notice, setNotice] = React.useState('');
+  // Tracks which filter combination already has data on screen. The 10s
+  // auto-refresh used to flip loading=true and replace the whole grid with
+  // "Loading public match feed..." every tick -- the watch-page reload
+  // flash. A refresh for a filter that is already showing data now updates
+  // the list in place; the loading UI only appears when that filter has no
+  // data yet (first visit or a filter switch).
+  const loadedKeyRef = React.useRef('');
 
   const refresh = React.useCallback(async () => {
-    setLoading(true);
+    const key = `${modeId}|${status}`;
+    if (loadedKeyRef.current !== key) {
+      setLoading(true);
+    }
     setError('');
     try {
       setMatches(await fetchArchivedMatches(24, modeId || undefined, status));
+      loadedKeyRef.current = key;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load public match feed.');
     } finally {

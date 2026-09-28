@@ -1020,6 +1020,21 @@ func applySelectTarget(state *contracts.MatchState, intent contracts.PlayerInten
 		"mechanic": pending.Mechanic,
 		"target":   targetPayload,
 	}
+	// Two-square mechanics (teleport, jump, swap*, sacrifice) resolve across a
+	// pending.Target -> intent.Target pair. Board-space animations need BOTH
+	// squares; without "from" the client can only draw half the effect.
+	if pending.Target != nil && intent.Target != nil {
+		payload["from"] = pending.Target
+		payload["to"] = intent.Target
+	}
+	// The moving piece's identity, resolved from the destination square on the
+	// post-mutation board, so the opponent's client can render the animation
+	// without knowing the hand that played it.
+	if intent.Target != nil {
+		if moved := pieceAt(state.Board, *intent.Target); moved != nil {
+			payload["piece"] = map[string]string{"type": moved.Type, "color": moved.Color}
+		}
+	}
 	if intent.SelectionID != "" {
 		payload["selectionId"] = intent.SelectionID
 	}

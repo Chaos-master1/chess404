@@ -1,6 +1,11 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildUpstreamHeaders, proxyInternalServiceStream } from "./internal-service";
+import {
+  buildUpstreamHeaders,
+  internalServiceToken,
+  internalServiceTokenForTarget,
+  proxyInternalServiceStream,
+} from "./internal-service";
 
 const streamConfig = {
   fallbackUrl: "http://platform-service.railway.internal:8080",
@@ -88,7 +93,92 @@ describe("buildUpstreamHeaders", () => {
       }
     }
   });
+
+  it("uses the match-specific token chain for the match target", () => {
+    withEnv(
+      { MATCH_INTERNAL_SERVICE_TOKEN: "match-specific", GATEWAY_INTERNAL_SERVICE_TOKEN: "gateway-specific" },
+      () => {
+        expect(internalServiceTokenForTarget("match")).toBe("match-specific");
+        const req = makeRequest({ host: "web.test" });
+        expect(buildUpstreamHeaders(req, "match").get("x-chess404-service-token")).toBe("match-specific");
+      },
+    );
+  });
+
+  it("uses the platform-specific token chain for the platform target", () => {
+    withEnv(
+      { PLATFORM_INTERNAL_SERVICE_TOKEN: "platform-specific", MATCH_INTERNAL_SERVICE_TOKEN: "match-specific" },
+      () => {
+        expect(internalServiceTokenForTarget("platform")).toBe("platform-specific");
+        const req = makeRequest({ host: "web.test" });
+        expect(buildUpstreamHeaders(req, "platform").get("x-chess404-service-token")).toBe("platform-specific");
+      },
+    );
+  });
+
+  it("falls back through each callee accept list in order", () => {
+    withEnv({ CHESS404_INTERNAL_SERVICE_TOKEN: "shared" }, () => {
+      expect(internalServiceTokenForTarget("match")).toBe("shared");
+      expect(internalServiceTokenForTarget("platform")).toBe("shared");
+      expect(internalServiceTokenForTarget("gateway")).toBe("shared");
+    });
+    withEnv({ INTERNAL_SERVICE_TOKEN: "legacy-shared" }, () => {
+      expect(internalServiceTokenForTarget("gateway")).toBe("legacy-shared");
+    });
+    withEnv({}, () => {
+      expect(internalServiceTokenForTarget("match")).toBe("");
+      expect(internalServiceTokenForTarget("platform")).toBe("");
+      expect(internalServiceTokenForTarget("gateway")).toBe("");
+    });
+  });
+
+  it("the gateway target never sends the match-specific token", () => {
+    withEnv({ MATCH_INTERNAL_SERVICE_TOKEN: "match-only" }, () => {
+      expect(internalServiceTokenForTarget("gateway")).toBe("");
+      expect(internalServiceTokenForTarget("match")).toBe("match-only");
+    });
+  });
+
+  it("the shared resolver keeps its legacy precedence (gateway first)", () => {
+    withEnv(
+      { GATEWAY_INTERNAL_SERVICE_TOKEN: "gw", MATCH_INTERNAL_SERVICE_TOKEN: "m", PLATFORM_INTERNAL_SERVICE_TOKEN: "p" },
+      () => {
+        expect(internalServiceToken()).toBe("gw");
+      },
+    );
+  });
 });
+
+function withEnv(env: Record<string, string | undefined>, fn: () => void): void {
+  const saved: Record<string, string | undefined> = {};
+  const keys = new Set([
+    ...Object.keys(env),
+    "MATCH_INTERNAL_SERVICE_TOKEN",
+    "PLATFORM_INTERNAL_SERVICE_TOKEN",
+    "GATEWAY_INTERNAL_SERVICE_TOKEN",
+    "CHESS404_INTERNAL_SERVICE_TOKEN",
+    "INTERNAL_SERVICE_TOKEN",
+  ]);
+  for (const key of keys) {
+    saved[key] = process.env[key];
+    if (key in env && env[key] !== undefined) {
+      process.env[key] = env[key] as string;
+    } else {
+      delete process.env[key];
+    }
+  }
+  try {
+    fn();
+  } finally {
+    for (const key of keys) {
+      if (saved[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = saved[key] as string;
+      }
+    }
+  }
+}
 
 describe("proxyInternalServiceStream", () => {
   function makeStreamRequest(): Request {

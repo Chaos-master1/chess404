@@ -1,8 +1,6 @@
 'use client';
 
 import React from 'react';
-import { OFFICIAL_MATCH_MODES } from '@chess404/contracts';
-import type { MatchModeId } from '@chess404/contracts';
 import {
   blockAccount,
   fetchAccountArchivedMatches,
@@ -12,6 +10,7 @@ import {
   submitPlayerReport,
   unblockAccount,
   type AccountProfile,
+  type AccountModeRating,
   type AccountBlockView,
   type AccountLeaderboardSummary,
   type AccountSeasonSummary,
@@ -32,10 +31,6 @@ interface ProfilesPageProps {
   onOpenAccount?: () => void;
 }
 
-function parseModeFilterValue(value: string): MatchModeId | '' {
-  return OFFICIAL_MATCH_MODES.some((mode) => mode.id === value as MatchModeId) ? (value as MatchModeId) : '';
-}
-
 function describeSeason(summary?: AccountSeasonSummary): string {
   if (!summary) {
     return 'No official season record yet';
@@ -48,6 +43,31 @@ function formatWinRate(wins: number, matchesPlayed: number): string {
     return '--';
   }
   return `${Math.round((wins / matchesPlayed) * 100)}%`;
+}
+
+function ProfileModeLadderTile({ label, ladder, accent }: { label: string; ladder?: AccountModeRating; accent: string }): React.ReactElement {
+  // Empty mode ladders show an em dash, never the blended rating: a
+  // borrowed number moves when unrelated rated/casual games land and the
+  // "unrated" tag next to it reads like a bug.
+  const unrated = !ladder || !ladder.matchesPlayed;
+  return (
+    <div style={{
+      padding: '12px 13px',
+      borderRadius: '12px',
+      background: 'rgba(255,255,255,0.03)',
+      border: `1px solid ${accent}33`,
+      opacity: unrated ? 0.75 : 1,
+    }}>
+      <div style={{ color: accent, fontSize: '10px', fontWeight: 800, letterSpacing: '0.8px', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ color: '#fff4d2', fontSize: '22px', fontWeight: 900, marginTop: '4px' }}>
+        {unrated ? '\u2014' : ladder.rating}
+        {unrated ? <span style={{ color: 'rgba(255,232,180,0.5)', fontSize: '11px', fontWeight: 700, marginLeft: '6px' }}>no rated games yet</span> : null}
+      </div>
+      <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '11px', marginTop: '4px' }}>
+        {unrated ? 'Rated results in this mode will build the ladder here.' : `${ladder.matchesPlayed} matches · ${ladder.wins}W ${ladder.losses}L ${ladder.draws}D`}
+      </div>
+    </div>
+  );
 }
 
 function describeMatchOutcome(entry: MatchArchiveEntry, accountId: string): string {
@@ -84,7 +104,6 @@ export default function ProfilesPage({
 }: ProfilesPageProps): React.ReactElement {
   const [searchInput, setSearchInput] = React.useState('');
   const [submittedQuery, setSubmittedQuery] = React.useState('');
-  const [selectedModeId, setSelectedModeId] = React.useState<MatchModeId | ''>('');
   const [selectedSeasonId, setSelectedSeasonId] = React.useState('');
   const [directory, setDirectory] = React.useState<AccountProfile[]>([]);
   const [seasons, setSeasons] = React.useState<SeasonOption[]>([]);
@@ -115,12 +134,14 @@ export default function ProfilesPage({
     setSearchInput(resolvedFocusHandle);
   }, [resolvedFocusHandle]);
 
-  const refreshDirectory = React.useCallback(async (query: string, modeId: MatchModeId | '') => {
+  // The directory shows every official mode's ladder side by side (per-mode
+  // Elo lives on each profile); there is no mode filter to narrow it by.
+  const refreshDirectory = React.useCallback(async (query: string) => {
     setDirectoryLoading(true);
     setDirectoryError('');
     setDirectorySummary(undefined);
     try {
-      const payload = await fetchAccountLeaderboard(40, 'rating', undefined, modeId || undefined, query || undefined);
+      const payload = await fetchAccountLeaderboard(40, 'rating', undefined, undefined, query || undefined);
       setDirectory(payload.accounts);
       setSeasons(payload.seasons);
       setDirectorySummary(payload.summary);
@@ -133,8 +154,8 @@ export default function ProfilesPage({
   }, []);
 
   React.useEffect(() => {
-    void refreshDirectory(submittedQuery, selectedModeId);
-  }, [refreshDirectory, selectedModeId, submittedQuery]);
+    void refreshDirectory(submittedQuery);
+  }, [refreshDirectory, submittedQuery]);
 
   React.useEffect(() => {
     if (!resolvedFocusHandle) {
@@ -148,7 +169,7 @@ export default function ProfilesPage({
     setProfileLoading(true);
     setProfileError('');
 
-    void fetchAccountByHandle(resolvedFocusHandle, selectedSeasonId || undefined, selectedModeId || undefined)
+    void fetchAccountByHandle(resolvedFocusHandle, selectedSeasonId || undefined)
       .then((nextProfile) => {
         if (cancelled) {
           return;
@@ -174,7 +195,7 @@ export default function ProfilesPage({
     return () => {
       cancelled = true;
     };
-  }, [resolvedFocusHandle, selectedModeId, selectedSeasonId]);
+  }, [resolvedFocusHandle, selectedSeasonId]);
 
   React.useEffect(() => {
     if (!profile?.accountId) {
@@ -188,7 +209,7 @@ export default function ProfilesPage({
     setRecentMatchesLoading(true);
     setRecentMatchesError('');
 
-    void fetchAccountArchivedMatches(profile.accountId, 8, selectedSeasonId || undefined, selectedModeId || undefined)
+    void fetchAccountArchivedMatches(profile.accountId, 8, selectedSeasonId || undefined)
       .then((matches) => {
         if (!cancelled) {
           setRecentMatches(matches);
@@ -209,7 +230,7 @@ export default function ProfilesPage({
     return () => {
       cancelled = true;
     };
-  }, [profile?.accountId, selectedModeId, selectedSeasonId]);
+  }, [profile?.accountId, selectedSeasonId]);
 
   React.useEffect(() => {
     if (!authenticatedViewer || !accountId || !sessionToken || !profile?.accountId || profile.accountId === accountId) {
@@ -486,30 +507,6 @@ export default function ProfilesPage({
                 </button>
               )}
             </div>
-
-            <select
-              aria-label="Filter by mode"
-              value={selectedModeId}
-              onChange={(event) => setSelectedModeId(parseModeFilterValue(event.target.value))}
-              style={{
-                padding: '9px 10px',
-                borderRadius: '10px',
-                border: '1px solid rgba(255,180,60,0.24)',
-                background: '#121824',
-                color: '#fff4d6',
-                colorScheme: 'dark',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              <option value="" style={{ background: '#121824', color: '#fff4d6' }}>All official modes</option>
-              {OFFICIAL_MATCH_MODES.map((mode) => (
-                <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#fff4d6' }}>
-                  {mode.label}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 
@@ -752,7 +749,7 @@ export default function ProfilesPage({
                   <div>
                     <div style={{ color: '#ffcf72', fontSize: '12px', fontWeight: 800, letterSpacing: '0.9px', textTransform: 'uppercase' }}>Competitive snapshot</div>
                     <div style={{ color: 'rgba(255,232,180,0.62)', fontSize: '12px', marginTop: '6px', lineHeight: 1.5 }}>
-                      {directorySummary?.seasonLabel ?? 'Current ladder'} · {selectedModeId ? OFFICIAL_MATCH_MODES.find((mode) => mode.id === selectedModeId)?.label ?? 'Official mode' : 'All official modes'}
+                      {directorySummary?.seasonLabel ?? 'Current ladder'}
                     </div>
                   </div>
                   {directorySummary?.leader?.accountId === profile.accountId && (
@@ -780,6 +777,12 @@ export default function ProfilesPage({
                     <div style={{ color: '#fff4d2', fontSize: '18px', fontWeight: 900, marginTop: '8px' }}>{recentForm}</div>
                     <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '11px', marginTop: '6px' }}>Last five rated decisions in this lane</div>
                   </div>
+                </div>
+                {/* Both mode ladders render unconditionally: an absent ladder
+                    shows its "unrated" state, which is information, not noise. */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
+                  <ProfileModeLadderTile label="Open Cards Elo" ladder={profile.openCards} accent="#ffcf72" />
+                  <ProfileModeLadderTile label="Hidden Cards Elo" ladder={profile.hiddenCards} accent="#9ed0ff" />
                 </div>
               </div>
 

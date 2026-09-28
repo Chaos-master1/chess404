@@ -22,6 +22,7 @@ export default function FriendsRoute() {
       liveRefreshToken={p.socialLiveToken ?? undefined}
       onOpenProfile={p.openProfileHandle}
       onOpenAccount={() => p.setActivePage('Account')}
+      onUnreadCountChange={p.setInboxUnreadCount}
     />
   );
 }

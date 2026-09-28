@@ -6,5 +6,6 @@ export async function proxyGateway(request: Request, path: string): Promise<Resp
     fallbackUrl: 'http://gateway.railway.internal:8080',
     envName: 'GATEWAY_INTERNAL_URL',
     serviceName: 'gateway',
+    target: 'gateway',
   });
 }

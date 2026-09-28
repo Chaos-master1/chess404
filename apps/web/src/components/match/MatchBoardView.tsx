@@ -2,7 +2,7 @@
 import React from 'react';
 import { GamePanel } from './GamePanel';
 import type { Board, PieceType, PieceColor, Sq, GameCard, CardPendingState, DoubleMove, BombPiece, LavaSquare, Rarity } from '../../types';
-import { RARITY_STYLE, RARITY_WEIGHTS, OPP, FILES, RANKS, SQ, MAX_HAND_SIZE, ABORT_SECS, DRAW_FROM, DRAW_EVERY, INITIAL_DEAL_ROUND, PIECE_VALUE } from '../../constants';
+import { RARITY_STYLE, RARITY_WEIGHTS, OPP, FILES, RANKS, SQ, MAX_HAND_SIZE, DRAW_FROM, DRAW_EVERY, INITIAL_DEAL_ROUND, PIECE_VALUE } from '../../constants';
 import { findKing, positionKey, toFEN, uciToSan } from '../../chessEngine';
 import { BoardCanvas, type TransformAnim, type SniperAnim, type TeleportAnim, type JumpAnim, type SacrificeAnim, type MindControlAnim, type FuseAnim, type BoardArrow } from '../../BoardCanvas';
 import CardHand from './CardHand';
@@ -136,9 +136,6 @@ export function MatchBoardView() {
     drawOffer,
     canRespondToDrawOffer,
     setDrawOffer,
-    abortActive,
-    abortCountdown,
-    stopAbortCountdown,
     activeFinishReasonLabel,
     authoritativeRematchBusy,
     canCreateDirectRematch,
@@ -174,7 +171,7 @@ export function MatchBoardView() {
     radarActive,
     finalPositionRef,
   } = useMatchEngineContext();
-  const { soundEnabled, toggleSound } = useSound();
+  const { soundEnabled, toggleSound, soundVolume, setSoundVolume } = useSound();
   const { colorBlindMode, toggleColorBlind } = useAccessibility();
 
   const boardWrapperRef = React.useRef<HTMLDivElement>(null);
@@ -185,6 +182,11 @@ export function MatchBoardView() {
   const [confirmResign, setConfirmResign] = React.useState<'idle' | 'prompting'>('idle');
   const [mobilePanel, setMobilePanel] = React.useState<'left' | 'right' | null>(null);
   const lastDrawOfferTime = React.useRef(0);
+  // A press on an ALREADY-selected square is a toggle-off gesture, but the
+  // paired mouseup on the same square runs onDrop(origin) and the real click
+  // that would otherwise toggle is swallowed by the post-drop 80ms window.
+  // Remember the press intent so onDrop can apply the toggle.
+  const pressToggleRef = React.useRef(false);
   const canAbortMatch = fmn === 1 && (movHist.length === 0 || (movHist.length === 1 && !movHist[0].b));
 
   React.useEffect(() => {
@@ -656,6 +658,7 @@ export function MatchBoardView() {
                 const canPremove = hostedRuntime && authoritativeMatchId && actingColor && turn !== actingColor && !over;
                 if (!isGhostDs && (!p || p.color !== actingColor)) return;
                 if (!isGhostDs && turn !== actingColor && !canPremove) return;
+                pressToggleRef.current = !!sel && sel.row === r && sel.col === c;
                 setDrag({ row: r, col: c });
                 setSel({ row: r, col: c });
                 setHints(getMoves(r, c));
@@ -663,7 +666,21 @@ export function MatchBoardView() {
                 setDragPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
               }}
               onDrop={(r, c) => {
-                if (!drag || isReviewing || cardPending) { setDrag(null); setDragPos(null); setSel(null); setHints([]); return; }
+                if (!drag || isReviewing || cardPending) { pressToggleRef.current = false; setDrag(null); setDragPos(null); setSel(null); setHints([]); return; }
+                const sameSquare = r === drag.row && c === drag.col;
+                // Press+release on the origin square is a click-select, not a
+                // drop: the mousedown already selected the piece and set its
+                // hints, and the browser click that follows is swallowed by
+                // the 80ms just-dropped window — so keep the selection (or
+                // toggle off for a re-press). Previously this path cleared
+                // sel/hints, which silently destroyed every click-click move
+                // whose mousedown state flushed before mouseup.
+                if (sameSquare) {
+                  if (pressToggleRef.current) { setSel(null); setHints([]); }
+                  pressToggleRef.current = false;
+                  setDrag(null); setDragPos(null);
+                  return;
+                }
                 const mv = getMoves(drag.row, drag.col);
                 const actingColor = (hostedRuntime || authoritativeMatchId) ? viewerSeat : turn;
                 const canPremove = hostedRuntime && authoritativeMatchId && actingColor && turn !== actingColor && !over;
@@ -680,6 +697,7 @@ export function MatchBoardView() {
                     setTimeout(() => setCardMsg(''), 1500);
                   }
                 }
+                pressToggleRef.current = false;
                 setDrag(null); setDragPos(null); setSel(null); setHints([]);
               }}
               doubleMove={doubleMove}
@@ -845,11 +863,9 @@ export function MatchBoardView() {
                     onClick={() => {
                       if (hostedActionLocked) return;
                       if (authoritativeMatchIdRef.current) {
-                        stopAbortCountdown();
                         void submitAuthoritativeIntent({ type: 'abort', ...authoritativeActorForColor(controlSender) });
                         return;
                       }
-                      stopAbortCountdown();
                       setWinner('aborted');
                       setOver(true);
                     }}
@@ -964,7 +980,7 @@ export function MatchBoardView() {
                 Live match sync is reconnecting, so updates may briefly fall back to slower refreshes until the stream is back.
               </div>
               <button
-                onClick={() => { void bootstrapAuthoritativeMatch(); }}
+                onClick={() => { void bootstrapAuthoritativeMatch({ force: true }); }}
                 style={{ padding:'6px 10px', background:'linear-gradient(180deg,#d97706,#92400e)', color:'#fff', border:'1px solid rgba(251,191,36,0.35)', borderRadius:'7px', cursor:'pointer', fontSize:'10px', fontWeight:800, whiteSpace:'nowrap' }}
               >
                 Retry Sync
@@ -1014,7 +1030,7 @@ export function MatchBoardView() {
               </div>
             ) : (
               <div style={{ textAlign:'center', padding:'4px 8px', borderRadius:'5px', background:`${RARITY_STYLE[lastDrawAnim.rarity].accent}22`, border:`1px solid ${RARITY_STYLE[lastDrawAnim.rarity].accent}66`, animation:'pulse 0.5s ease infinite' }}>
-                <span style={{ fontSize:'10px', fontWeight:800, color:RARITY_STYLE[lastDrawAnim.rarity].accent }}>🃏 Both players drew a {RARITY_STYLE[lastDrawAnim.rarity].label} card!</span>
+                <span style={{ fontSize:'10px', fontWeight:800, color:RARITY_STYLE[lastDrawAnim.rarity].accent }}>🃏 You drew a {RARITY_STYLE[lastDrawAnim.rarity].label} card — opponent drew face-down!</span>
               </div>
             )
           )}
@@ -1082,15 +1098,6 @@ export function MatchBoardView() {
                   }
                   setDrawOffer(null);
                 }} style={{ flex:1, padding:'5px', background:'linear-gradient(180deg,#c0392b,#96281b)', color:'#fff', border:'none', borderRadius:'5px', cursor:'pointer', fontWeight:'bold', fontSize:'12px' }}>✕ Decline</button>
-              </div>
-            </div>
-          )}
-
-          {abortActive && !over && !authoritativeMatchId && (
-            <div style={{ padding:'8px 12px', borderRadius:'6px', textAlign:'center', background:'linear-gradient(90deg, rgba(180,30,20,0.95) 0%, rgba(220,50,35,0.95) 100%)', border:'1px solid rgba(231,76,60,0.5)', boxShadow:'0 0 14px rgba(231,76,60,0.3)' }}>
-              <div style={{ color:'#fff', fontWeight:800, fontSize:'13px', marginBottom:'6px' }}>⚡ {movHist.length===0?'White':'Black'} must move — {abortCountdown}s left</div>
-              <div style={{ height:'5px', borderRadius:'3px', background:'rgba(0,0,0,0.35)', overflow:'hidden' }}>
-                <div style={{ height:'100%', borderRadius:'3px', width:`${(abortCountdown/ABORT_SECS)*100}%`, background: abortCountdown<=3?'#ff4444':abortCountdown<=6?'#f39c12':'#2ecc71', transition:'width 0.9s linear, background 0.3s' }} />
               </div>
             </div>
           )}
@@ -1178,11 +1185,9 @@ export function MatchBoardView() {
                       return;
                     }
                     if (authoritativeMatchIdRef.current) {
-                      stopAbortCountdown();
                       void submitAuthoritativeIntent({ type: 'abort', ...authoritativeActorForColor(controlSender) });
                       return;
                     }
-                    stopAbortCountdown();
                     setWinner('aborted');
                     setOver(true);
                   }}
@@ -1244,6 +1249,22 @@ export function MatchBoardView() {
           }}>
             {soundEnabled ? '🔊 Sound On' : '🔇 Sound Off'}
           </button>
+          <label style={{
+            display:'inline-flex', alignItems:'center', gap:'6px', padding:'0 10px', minHeight:'40px',
+            fontSize:'11px', fontWeight:700, color:'rgba(200,200,220,0.6)',
+          }}>
+            Vol
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={soundVolume}
+              onChange={e => setSoundVolume(Number(e.target.value))}
+              style={{ width:'90px', accentColor:'#4ade80', cursor:'pointer' }}
+              aria-label="Sound volume"
+            />
+          </label>
           <button onClick={toggleColorBlind} style={{
             padding:'8px 14px', minHeight:'40px', fontSize:'12px', fontWeight:700, cursor:'pointer',
             background: colorBlindMode ? 'rgba(96,165,250,0.12)' : 'rgba(100,100,120,0.15)',

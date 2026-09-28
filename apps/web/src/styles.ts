@@ -172,5 +172,24 @@ export const GLOBAL_STYLES = `
     transform: translateY(-8px) scale(1.04);
     filter: drop-shadow(0 12px 24px rgba(255,160,40,0.5));
   }
+
+  /* ── Mobile shell viewport fixes ──
+     100vh on phones includes the area behind the browser's dynamic toolbar,
+     so a 100vh shell leaves its bottom permanently unreachable. dvh tracks
+     the real visible viewport. */
+  @supports (height: 100dvh) {
+    #main-content { height: 100dvh !important; }
+  }
+  /* The fixed bottom nav covers the viewport's last ~72px on phones. Page
+     scroll containers are inline-styled with overflowY auto, so give each
+     one bottom clearance — otherwise the last content row scrolls under the
+     nav and can never be reached. Match pages hide the bottom nav entirely
+     and their chat/move logs + slide-up drawers manage their own space, so
+     those are excluded here. */
+  @media (max-width: 768px) {
+    #main-content div[style*="overflow-y"]:not(.chat-log):not(.moves-log):not(.match-layout__left):not(.match-layout__right) {
+      padding-bottom: 96px !important;
+    }
+  }
 `;
 

@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import PlayHubPage from '../../src/PlayHubPage';
 import { usePlatform } from '../../src/contexts/PlatformContext';
 
 export default function PlayRoute() {
@@ -9,7 +8,7 @@ export default function PlayRoute() {
 
   React.useEffect(() => {
     platform.setActivePage('Play');
-  }, [platform.setActivePage]);
+  }, [platform.setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps -- mount-once page shim; the context object identity is irrelevant here
 
   return null;
 }

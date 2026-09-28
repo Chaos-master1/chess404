@@ -1,4 +1,4 @@
-import { internalServiceToken } from '../../_lib/internal-service';
+import { internalServiceTokenForTarget } from '../../_lib/internal-service';
 
 const backendBaseUrl = resolveBackendBaseUrl(
   process.env.MATCH_SERVICE_INTERNAL_URL,
@@ -60,7 +60,7 @@ function filterHeaders(headers: Headers): Headers {
 
 function buildUpstreamHeaders(headers: Headers): Headers {
   const next = filterHeaders(headers);
-  const token = internalServiceToken();
+  const token = internalServiceTokenForTarget('match');
   if (token) {
     next.set('x-chess404-service-token', token);
   }

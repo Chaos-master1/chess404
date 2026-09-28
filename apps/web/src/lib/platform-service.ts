@@ -36,6 +36,9 @@ export interface GuestProfile {
   guestId: string;
   displayName: string;
   rating: number;
+  /** Per-mode guest ladders from the server (0/undefined = no games in that mode yet). */
+  ratingOpen?: number;
+  ratingHidden?: number;
   matchesPlayed: number;
   wins: number;
   losses: number;
@@ -43,6 +46,18 @@ export interface GuestProfile {
   createdAt: string;
   lastSeenAt: string;
 }
+
+/**
+ * Rating to display for a guest in a given mode: the mode's own ladder when
+ * it exists (open/hidden have separate Elo), falling back to the blended
+ * rating for guests whose games predate the per-mode split.
+ */
+export const guestRatingForMode = (profile: GuestProfile | null | undefined, modeId?: string | null): number | undefined => {
+  if (!profile) return undefined;
+  if (modeId === 'hidden_cards' && profile.ratingHidden && profile.ratingHidden > 0) return profile.ratingHidden;
+  if (modeId === 'open_cards' && profile.ratingOpen && profile.ratingOpen > 0) return profile.ratingOpen;
+  return profile.rating;
+};
 
 export interface GuestSession {
   guest: GuestProfile;
@@ -149,6 +164,23 @@ export interface AccountProfile {
   selectedSeason?: AccountSeasonSummary;
   ratingHistory?: AccountRatingHistoryEntry[];
   seasonHistory?: AccountSeasonSummary[];
+  // Per-mode ladders (hidden_cards / open_cards). Nil server-side when the
+  // player has no games in that mode yet; the blended `rating` is the legacy
+  // fallback for accounts predating the split.
+  hiddenCards?: AccountModeRating;
+  openCards?: AccountModeRating;
+  // Rating resolved for the leaderboard's requested mode (per-mode ladder
+  // when present, else the blended rating).
+  modeRating?: number;
+}
+
+export interface AccountModeRating {
+  rating: number;
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  updatedAt?: string;
 }
 
 export interface AccountSession {
@@ -634,6 +666,25 @@ export async function claimMatchSeat(input: {
   sessionToken?: string;
 }): Promise<MatchSeatClaim> {
   const response = await fetch(`${httpBaseUrl}/match-claims`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  return unwrapResponse<MatchSeatClaim>(response);
+}
+
+// Resolves the guest's CURRENT active seat claim, if any (404 when none).
+// Used by queue recovery: a paired match outlives its ticket (claims keep a
+// 12h lease), so a vanished ticket does NOT mean a vanished match.
+export async function fetchActiveMatchClaim(input: {
+  guestId: string;
+  sessionSecret?: string;
+  sessionToken?: string;
+}): Promise<MatchSeatClaim> {
+  const response = await fetch(`${httpBaseUrl}/match-claims/active`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1451,6 +1502,18 @@ export async function finalizeAccountMatch(input: {
   return unwrapResponse<AccountResultResponse>(response);
 }
 
+// Callers key retry/UX decisions on the HTTP status (e.g. the match facade
+// separates "gone room" from "network down" via err.status). Without the
+// status a definitive 404 looked identical to an offline blip.
+export interface HttpError extends Error {
+  status?: number;
+}
+
+function withStatus(error: Error, status: number): HttpError {
+  (error as HttpError).status = status;
+  return error;
+}
+
 async function unwrapResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = `Request failed with ${response.status}`;
@@ -1480,9 +1543,9 @@ async function unwrapResponse<T>(response: Response): Promise<T> {
     }
     if (response.status === 429) {
       const header = response.headers.get('Retry-After');
-      throw new Error(`${message} (rate limited, retry after ${header ?? 'unknown'}s)`);
+      throw withStatus(new Error(`${message} (rate limited, retry after ${header ?? 'unknown'}s)`), response.status);
     }
-    throw new Error(message);
+    throw withStatus(new Error(message), response.status);
   }
 
   return response.json() as Promise<T>;

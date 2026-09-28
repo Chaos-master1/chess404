@@ -64,7 +64,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
 
   const {
     topSeat, bottomSeat,
-    check, over, movHist, chatMessages,
+    check, over, movHist, chatMessages, winner,
     timeW, timeB, tickingState, clockActive, authoritativeLive,
     cardAnim, cardAnimLbl, setCardAnim,
     renderJokerPicker,
@@ -120,10 +120,16 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
 
   React.useEffect(() => {
     if (over && over !== prevOverRef.current) {
-      playSound('game_over');
+      // Outcome-aware end sound: Victory/Defeat/Draw from the viewer's seat.
+      const result =
+        winner === 'draw' ? 'draw' as const
+        : (winner === 'white' || winner === 'black') && viewerSeat
+          ? winner === viewerSeat ? 'win' as const : 'loss' as const
+          : undefined;
+      playSound('game_over', { result });
     }
     prevOverRef.current = over;
-  }, [over]);
+  }, [over, winner, viewerSeat]);
 
   React.useEffect(() => {
     if (movHist.length > prevMoveLenRef.current) {
@@ -213,7 +219,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
     return (
       <div style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        minHeight: '100vh', background: '#0a0d16', color: '#ffbe5a', gap: '16px'
+        minHeight: '100dvh', background: '#0a0d16', color: '#ffbe5a', gap: '16px'
       }}>
         <div style={{ fontSize: '28px', fontWeight: 800, letterSpacing: '2px' }}>♟ CHESS404</div>
         <div style={{
@@ -243,9 +249,9 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
     )}
 
     <main id="main-content" style={{
-      display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden',
+      display:'flex', flexDirection:'column', height:'100dvh', overflow:'hidden',
       fontFamily:"'Segoe UI', sans-serif",
-      backgroundImage:'url(/background.png)',
+      backgroundImage:'url(/background.webp)',
       backgroundSize:'cover',
       backgroundPosition:'center',
       backgroundRepeat:'no-repeat',
@@ -385,9 +391,8 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
                   <div style={{ color:'rgba(255,232,180,0.72)', fontSize:'14px', lineHeight:1.6, marginBottom:'20px' }}>
                     If this room was shared with you, ask your opponent for a fresh invite link.
                   </div>
-                  <div style={{ display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap' }}>
-                    <button
-                      onClick={() => { engine.setMatchLoadError(null); void engine.bootstrapAuthoritativeMatch(); }}
+                  <div style={{ display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap' }}>                      <button
+                        onClick={() => { engine.setMatchLoadError(null); void engine.bootstrapAuthoritativeMatch({ force: true }); }}
                       style={{
                         padding:'12px 22px',
                         background:'linear-gradient(180deg, #c8860a 0%, #7a5008 100%)',

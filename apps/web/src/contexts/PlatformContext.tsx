@@ -4,7 +4,7 @@ import React, { createContext, useContext } from 'react';
 import type { GuestProfile } from '../lib/platform-service';
 import type { StoredRoomMeta } from '../lib/match-service';
 
-export type AppPage = 'Play' | 'Watch' | 'Rankings' | 'History' | 'Cards' | 'Friends' | 'Inbox' | 'Community' | 'Account' | 'Status' | 'Admin' | 'Match' | 'Profiles' | 'Modes' | 'Queue' | 'Lobbies';
+export type AppPage = 'Play' | 'Watch' | 'Rankings' | 'History' | 'Cards' | 'Friends' | 'Inbox' | 'Community' | 'Account' | 'Status' | 'Admin' | 'Match' | 'Profiles' | 'Queue';
 
 export interface PlatformContextShape {
   hostedRuntime: boolean | null;

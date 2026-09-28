@@ -100,6 +100,11 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
       const lower = raw.toLowerCase();
       if (lower.includes('unauthorized guest') || lower.includes('unknown guest') || lower.includes('unauthorized')) {
         setError('Your hosted player session expired. Please refresh the page to start a new game.');
+      } else if (lower.includes('already has an active computer match')) {
+        // Server-side one-active-game guard (409): a stacked computer game
+        // would never be joined by anyone. Point the player at their live
+        // game instead of surfacing the raw rejection.
+        setError('You already have a computer game in progress — finish or resign it first. Your active match is available from the play hub.');
       } else if (lower.includes('rate limit') || lower.includes('retry after')) {
         setError('Too many recent requests — wait a few seconds and try again.');
       } else if (lower.includes('context deadline') || lower.includes('match-service unreachable')) {

@@ -71,6 +71,24 @@ func resolvePrimaryGuestID(account platform.AccountProfile) string {
 	return ""
 }
 
+// renameLinkedGuestToHandle keeps the guest row linked to an account in
+// sync with the account identity: the match-creation chain names players
+// from the guest displayName, so a signed-in player whose guest still
+// carried a generated placeholder ("Ivory Bishop 101") would show that
+// placeholder in every match instead of their handle. Best-effort: the
+// guest row may not exist yet, and a rename failure must never block
+// authentication.
+func renameLinkedGuestToHandle(guests platform.GuestDirectory, account platform.AccountProfile) {
+	guestID := strings.TrimSpace(account.PrimaryGuestID)
+	handle := strings.TrimSpace(account.Handle)
+	if guestID == "" || handle == "" {
+		return
+	}
+	if _, err := guests.RenameGuest(guestID, handle); err != nil && err != os.ErrNotExist {
+		log.Printf("[platform] WARN: could not rename guest %s to handle %s: %v", guestID, handle, err)
+	}
+}
+
 func resumeGuestFromPayload(guests platform.GuestDirectory, guestID, sessionSecret, sessionToken string) (platform.GuestSession, error) {
 	resolvedGuestID := strings.TrimSpace(guestID)
 	if resolvedGuestID == "" {

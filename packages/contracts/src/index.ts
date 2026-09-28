@@ -228,6 +228,8 @@ export interface MatchState {
   doubleMove?: DoubleMove | null;
   undoAgainst?: PieceColor | null;
   turn: PieceColor;
+  /** One card per player per turn, enforced server-side (mirrors cardUsedBy). */
+  cardUsedThisTurn?: { white?: boolean; black?: boolean } | null;
   moved: string[];
   lastMove: { from: Sq; to: Sq } | null;
   halfMoveClock: number;
@@ -246,6 +248,11 @@ export interface MatchState {
   finishReason?: MatchFinishReason | null;
   drawOfferedBy?: PieceColor | null;
   pendingCard?: PendingCardState | null;
+  /** Serialized by the Go MatchState on every snapshot (kept for client-side freshness checks and debugging). */
+  createdAt?: string;
+  updatedAt?: string;
+  drawOfferTime?: string | null;
+  seenClientMoveIds?: string[];
 }
 
 export interface MatchPresenceRequest {

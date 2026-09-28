@@ -5,8 +5,15 @@ import { readStoredGuestIdentity } from './session-storage';
 const gatewayBaseUrl = '/api/gateway';
 let httpBaseUrl = '/api/realtime';
 let wsBaseUrl = '';
-const MATCH_POLL_INTERVAL_MS = 750;
-const MATCH_POLL_RETRY_INTERVAL_MS = 900;
+// Both floors keep one spectator under the Go services' 60 req/min global
+// per-IP limiter (rate_limit.DefaultGlobalIPLimit): 1000ms = 60/min exactly,
+// so the idle poll sits just under it and leaves headroom for the REST of the
+// client's traffic (bootstrap, presence, tickets) sharing the same IP bucket.
+// The old 750ms floor (80 req/min) meant a few clients behind one NAT -- or
+// one client whose WS had died -- hit 429 walls during exactly the degraded
+// period when the poll fallback was doing its job.
+const MATCH_POLL_INTERVAL_MS = 1100;
+const MATCH_POLL_RETRY_INTERVAL_MS = 1000;
 
 const latestSeqByMatch = new Map<string, number>();
 const wsConnections = new Map<string, WebSocket>();
@@ -30,6 +37,7 @@ export interface CreateMatchInput {
   matchId?: string;
   seed?: number;
   clockSeconds?: number;
+  clockIncrement?: number;
   starterHandMode?: 'starter_three' | 'full_catalog';
   queue?: 'casual' | 'rated' | 'direct';
   modeId?: MatchModeId;
@@ -94,9 +102,20 @@ export async function fetchAuthToken(matchId: string, playerId: string, playerSe
   }
 }
 
-export async function fetchMatch(matchId: string, signal?: AbortSignal): Promise<MatchSnapshotMessage> {
+// Hard budget for one fetchMatch attempt. Callers pass their own external
+// signal (component-scoped aborts must always win); the per-attempt controller
+// only enforces this cap so a wedged proxy cannot hang the caller forever.
+const MATCH_FETCH_ATTEMPT_TIMEOUT_MS = 15_000;
+// Prod has observed 12-16s stalls under load (dev compiles behave the same),
+// so a single 15s attempt aborts right as the upstream would have answered.
+// Retrying with backoff lets a slow-but-alive upstream win eventually instead
+// of surfacing "Match could not load" to both players.
+const MATCH_FETCH_RETRIES = 3;
+const MATCH_FETCH_RETRY_BASE_MS = 400;
+
+async function fetchMatchOnce(matchId: string, signal?: AbortSignal): Promise<MatchSnapshotMessage> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), MATCH_FETCH_ATTEMPT_TIMEOUT_MS);
   const combinedSignal = signal ? anySignal([signal, controller.signal]) : controller.signal;
   try {
     const response = await fetch(`${httpBaseUrl}/matches/${matchId}`, {
@@ -109,6 +128,38 @@ export async function fetchMatch(matchId: string, signal?: AbortSignal): Promise
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function fetchMatch(matchId: string, signal?: AbortSignal): Promise<MatchSnapshotMessage> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MATCH_FETCH_RETRIES; attempt++) {
+    if (signal?.aborted) {
+      throw new DOMException('fetchMatch aborted', 'AbortError');
+    }
+    try {
+      return await fetchMatchOnce(matchId, signal);
+    } catch (err) {
+      lastError = err;
+      // Never retry deterministic failures: the match does not exist or the
+      // viewer is not allowed to see it. A retry only delays the inevitable.
+      const errStatus = err instanceof Error ? (err as HttpError).status : undefined;
+      if (typeof errStatus === 'number' && errStatus >= 400 && errStatus < 500) {
+        throw err;
+      }
+      if (err instanceof Error && /\b404\b|\b403\b/.test(err.message) && !/rate limited/i.test(err.message)) {
+        throw err;
+      }
+      // Caller cancelled (unmount/navigation) -- stop immediately.
+      if (err instanceof DOMException && err.name === 'AbortError' && signal?.aborted) {
+        throw err;
+      }
+      if (attempt < MATCH_FETCH_RETRIES) {
+        const backoff = MATCH_FETCH_RETRY_BASE_MS * 2 ** attempt;
+        await new Promise(resolve => setTimeout(resolve, backoff));
+      }
+    }
+  }
+  throw lastError;
 }
 
 function anySignal(signals: AbortSignal[]): AbortSignal {
@@ -258,10 +309,44 @@ export function writeStoredRoomMeta(matchId: string, meta: StoredRoomMeta | null
     window.localStorage.removeItem(key);
     return;
   }
-  window.localStorage.setItem(key, JSON.stringify({
+  // Empty-string credentials are NOT credentials: a claim whose playerSecret
+  // came back "" (server refused/omitted it) must not be stored as if the
+  // browser held the seat secret -- downstream code checks
+  // `playerSecret?.trim()` and a stored "" both reads as "present" to
+  // Object.entries and as "absent" to trim checks, producing the worst
+  // combination (heartbeat attempts that can never authenticate + fallback
+  // paths that think a secret exists). Store undefined instead so every
+  // "is this credential present?" check agrees.
+  const sanitized: StoredRoomMeta = {
     ...meta,
-    modeId: meta.modeId ?? DEFAULT_MATCH_MODE_ID,
+    whitePlayerSecret: normalizeSecret(meta.whitePlayerSecret) || undefined,
+    blackPlayerSecret: normalizeSecret(meta.blackPlayerSecret) || undefined,
+    whiteClaimToken: normalizeSecret(meta.whiteClaimToken) || undefined,
+    blackClaimToken: normalizeSecret(meta.blackClaimToken) || undefined,
+  };
+  window.localStorage.setItem(key, JSON.stringify({
+    ...sanitized,
+    modeId: sanitized.modeId ?? DEFAULT_MATCH_MODE_ID,
   }));
+}
+
+// "Gone" = the server answered definitively that this match is finished or
+// archived and this browser can no longer read it (404/410). Cached for this
+// page session so revisiting the room does not re-fail on every navigation
+// and every reconciliation poll. Module-scoped on purpose: cleared by a page
+// reload, so a re-created match with a recycled ID is still reachable after a
+// refresh. The 404 from our own proxy for an unreadable private match is
+// indistinguishable from a true match-gone 404 at this layer, so anything that
+// must retry through it passes { force: true }.
+const goneMatchIds = new Set<string>();
+
+export function markMatchGone(matchId: string): void {
+  const trimmed = matchId?.trim();
+  if (trimmed) goneMatchIds.add(trimmed);
+}
+
+export function isMatchGone(matchId: string): boolean {
+  return goneMatchIds.has(matchId?.trim() ?? '');
 }
 
 export function connectToMatchStream(
@@ -281,6 +366,44 @@ export function connectToMatchStream(
   let lastSeqNum = 0;
   let isWsConnected = false;
   let pollFailures = 0;
+  // Set once ANY authoritative snapshot has been applied for this match.
+  // Distinguishes "the room existed and is now gone" (finished/archived:
+  // stop polling) from "we could never see it at all" (auth/creds problem:
+  // keep retrying, a reconnect may fix it).
+  let sawLiveSnapshot = false;
+  // Terminal-state latch: once a snapshot with status "finished" has been
+  // delivered, the stream is done. The server stops broadcasting after the
+  // final state, so without this latch every reconnect attempt, poll tick
+  // and watchdog fired forever -- the post-game "Reconnecting…" banner +
+  // ping loop on finished matches.
+  let finished = false;
+  // Zombie-socket watchdog: the server pings every 20s (browser answers
+  // automatically) and the 1s tick broadcasts snapshots, so a HEALTHY stream
+  // delivers a message at least every ~2s. If nothing arrives for 45s while
+  // the socket claims to be open, the connection is silently dead (NAT
+  // timeout, proxy drop) -- close it so the reconnect path takes over
+  // instead of the UI sitting on a frozen board believing it is live.
+  let lastStreamMessageAt = 0;
+  let watchdogTimer: number | null = null;
+  const STREAM_WATCHDOG_MS = 45_000;
+
+  const startWatchdog = () => {
+    stopWatchdog();
+    lastStreamMessageAt = Date.now();
+    watchdogTimer = window.setInterval(() => {
+      if (disposed || finished || !isWsConnected) return;
+      if (Date.now() - lastStreamMessageAt <= STREAM_WATCHDOG_MS) return;
+      console.warn('[match-stream] no messages for ' + STREAM_WATCHDOG_MS / 1000 + 's on an open socket; forcing reconnect');
+      try { socket?.close(); } catch { /* already closing */ }
+    }, 5_000);
+  };
+
+  const stopWatchdog = () => {
+    if (watchdogTimer !== null) {
+      window.clearInterval(watchdogTimer);
+      watchdogTimer = null;
+    }
+  };
 
   const clearReconnectTimer = () => {
     if (reconnectTimer !== null) {
@@ -315,8 +438,14 @@ export function connectToMatchStream(
         const snapshot = await fetchMatch(matchId);
         if (!disposed) {
           pollFailures = 0;
+          sawLiveSnapshot = true;
           if (snapshot.seqNum) recordMatchSeqNum(matchId, snapshot.seqNum);
           handlers.onSnapshot(snapshot);
+          if (snapshot.match?.status === 'finished') {
+            finished = true;
+            clearPollTimer();
+            handlers.onStatusChange?.('connected');
+          }
           handlers.onStatusChange?.('connected');
         }
       } catch (error) {
@@ -329,24 +458,37 @@ export function connectToMatchStream(
           nextDelay = Math.min(30_000, MATCH_POLL_RETRY_INTERVAL_MS * 2 ** Math.min(pollFailures - 1, 5));
           const retryAfter = error instanceof Error ? /retry after (\d+)s/.exec(error.message) : null;
           if (retryAfter) nextDelay = Math.max(nextDelay, (parseInt(retryAfter[1], 10) || 1) * 1000);
+          // A definitive 404/410 after the match has delivered real snapshots
+          // means the room was archived/GC'd out from under us -- usually
+          // because it FINISHED and the server stopped serving it to this
+          // viewer. Polling it forever produced the post-game 404 storm and
+          // the stuck reconnect banner. Treat it as a graceful terminal stop,
+          // exactly like a finished snapshot.
+          const errStatus = (error as { status?: number } | null)?.status;
+          const definitiveGone = (errStatus === 404 || errStatus === 410) && sawLiveSnapshot;
+          if (definitiveGone) {
+            finished = true;
+            clearPollTimer();
+            handlers.onStatusChange?.('connected');
+            return;
+          }
           // After ten straight failures stop pretending to recover: surface
           // the manual ↻ Reconnect affordance. The loop keeps trying slowly
           // in the background so a transient outage still self-heals.
           handlers.onStatusChange?.(pollFailures >= 10 ? 'disconnected' : 'reconnecting');
         }
       } finally {
-        if (!disposed) schedulePoll(nextDelay);
+        if (!disposed && !finished) schedulePoll(nextDelay);
       }
     }, delay);
   };
 
   const maxReconnectAttempts = 10;
   const scheduleReconnect = () => {
-    if (disposed) {
+    if (disposed || finished) {
       return;
     }
     if (reconnectAttempt >= maxReconnectAttempts) {
-      // eslint-disable-next-line no-console
       console.warn('max reconnect attempts reached, falling back to polling');
       handlers.onStatusChange?.('connected');
       schedulePoll(0);
@@ -427,6 +569,8 @@ export function connectToMatchStream(
             authReceived = true;
             reconnectAttempt = 0;
             isWsConnected = true;
+            lastStreamMessageAt = Date.now();
+            startWatchdog();
             handlers.onStatusChange?.('connected');
             return;
           }
@@ -436,6 +580,7 @@ export function connectToMatchStream(
             return;
           }
           if (!authReceived) return;
+          lastStreamMessageAt = Date.now();
           if (msg.type === 'match.snapshot' && msg.payload) {
             const snapshot = msg.payload;
             if (snapshot.seqNum && lastSeqNum > 0 && snapshot.seqNum > lastSeqNum + 1) {
@@ -448,7 +593,20 @@ export function connectToMatchStream(
               lastSeqNum = snapshot.seqNum;
               recordMatchSeqNum(matchId, snapshot.seqNum);
             }
+            sawLiveSnapshot = true;
             handlers.onSnapshot(snapshot);
+            if (snapshot.match?.status === 'finished' && !finished) {
+              // Final state delivered: stop quietly. Closing the socket here
+              // must NOT enter the reconnect loop -- that loop was the
+              // post-game "Reconnecting…" banner + sound ping on finished
+              // matches.
+              finished = true;
+              stopWatchdog();
+              clearPollTimer();
+              clearReconnectTimer();
+              try { nextSocket.close(); } catch { /* already closing */ }
+              handlers.onStatusChange?.('connected');
+            }
           }
         } catch {
           // Ignore malformed payloads.
@@ -465,7 +623,8 @@ export function connectToMatchStream(
         if (socket === nextSocket) socket = null;
         if (wsConnections.get(matchId) === nextSocket) wsConnections.delete(matchId);
         isWsConnected = false;
-        if (!disposed) scheduleReconnect();
+        stopWatchdog();
+        if (!disposed && !finished) scheduleReconnect();
       });
     }).catch(() => {
       if (!disposed) schedulePoll(0);
@@ -493,6 +652,7 @@ export function connectToMatchStream(
       disposed = true;
       clearReconnectTimer();
       clearPollTimer();
+      stopWatchdog();
       handlers.onStatusChange?.('disconnected');
       if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
         socket.close();

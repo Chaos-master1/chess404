@@ -86,6 +86,47 @@ describe('private match snapshot route', () => {
     await expect(response.json()).resolves.toEqual({ error: 'match is not public' });
   });
 
+  // A platform-service outage must never be read as an authorization verdict:
+  // answering 404 tells clients the terminal "match is gone" verdict for what
+  // may be a live private match, and the client then drops its seat state.
+  it('answers 503 (not 404) when the claims service is down and the match is not public-readable', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === claimsUrl) return new Response(JSON.stringify({ error: 'internal' }), { status: 500 });
+      expect(url).toBe(matchUrl);
+      return new Response(JSON.stringify(snapshot()));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(new Request(`https://web.example/api/realtime/matches/${matchId}`, {
+      headers: {
+        'x-chess404-white-guest-id': 'white-guest',
+        'x-chess404-white-session-secret': 'wrong-secret',
+      },
+    }), { params: Promise.resolve({ matchId }) });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'match access check unavailable' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers 503 when the claims service is unreachable over the network', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === claimsUrl) throw new TypeError('fetch failed');
+      expect(url).toBe(matchUrl);
+      return new Response(JSON.stringify(snapshot()));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(new Request(`https://web.example/api/realtime/matches/${matchId}`, {
+      headers: {
+        'x-chess404-white-guest-id': 'white-guest',
+        'x-chess404-white-session-secret': 'wrong-secret',
+      },
+    }), { params: Promise.resolve({ matchId }) });
+
+    expect(response.status).toBe(503);
+  });
+
   it('defensively removes bearer secrets from public spectator snapshots', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       expect(url).toBe(matchUrl);

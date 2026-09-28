@@ -3,6 +3,7 @@ package matchmaking
 import (
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,11 +11,17 @@ import (
 )
 
 type captureMatchCreator struct {
+	mu          sync.Mutex
 	assignments []MatchAssignment
 }
 
+// CreateMatch is called without the queue's mutex held (two-phase pairing),
+// so concurrent pairings can invoke it simultaneously -- the append needs its
+// own lock.
 func (c *captureMatchCreator) CreateMatch(assignment MatchAssignment) error {
+	c.mu.Lock()
 	c.assignments = append(c.assignments, assignment)
+	c.mu.Unlock()
 	return nil
 }
 
@@ -60,10 +67,10 @@ func TestQueueMatchAssignmentCarriesAccountIDs(t *testing.T) {
 	creator := &captureMatchCreator{}
 	service.SetMatchCreator(creator)
 
-	if _, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_a", 1200, "Alpha", "acct_alpha"); err != nil {
+	if _, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_a", 1200, "Alpha", "acct_alpha", 0, 0); err != nil {
 		t.Fatalf("enqueue first ticket: %v", err)
 	}
-	if _, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_b", 1210, "Bravo", "acct_bravo"); err != nil {
+	if _, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_b", 1210, "Bravo", "acct_bravo", 0, 0); err != nil {
 		t.Fatalf("enqueue second ticket: %v", err)
 	}
 
@@ -85,7 +92,7 @@ func TestQueueCancelQueuedTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue ticket: %v", err)
 	}
-	cancelled, ok, err := service.Cancel(ticket.TicketID)
+	cancelled, ok, err := service.Cancel(ticket.TicketID, ticket.CancelSecret)
 	if !ok {
 		t.Fatalf("expected cancel to find ticket")
 	}
@@ -147,11 +154,11 @@ func TestQueueRejectsSecondActiveTicketInDifferentQueue(t *testing.T) {
 func TestQueueFindActiveTicketSupportsGuestAndAccountRecovery(t *testing.T) {
 	service := NewService()
 
-	guestTicket, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_a", 1200, "Alpha", "acct_alpha")
+	guestTicket, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_a", 1200, "Alpha", "acct_alpha", 0, 0)
 	if err != nil {
 		t.Fatalf("enqueue guest ticket: %v", err)
 	}
-	accountTicket, err := service.EnqueueWithAccount(QueueCasual, contracts.MatchModeOpenCards, "guest_b", 1210, "Bravo", "acct_bravo")
+	accountTicket, err := service.EnqueueWithAccount(QueueCasual, contracts.MatchModeOpenCards, "guest_b", 1210, "Bravo", "acct_bravo", 0, 0)
 	if err != nil {
 		t.Fatalf("enqueue account ticket: %v", err)
 	}
@@ -188,7 +195,7 @@ func TestQueuePrunesTerminalTicketsAfterRecoveryTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue cancellable ticket: %v", err)
 	}
-	if _, _, err := service.Cancel(cancelled.TicketID); err != nil {
+	if _, _, err := service.Cancel(cancelled.TicketID, cancelled.CancelSecret); err != nil {
 		t.Fatalf("cancel queued ticket: %v", err)
 	}
 
@@ -211,6 +218,19 @@ func TestQueuePrunesTerminalTicketsAfterRecoveryTTL(t *testing.T) {
 		t.Fatalf("expected matched ticket to stay recoverable during TTL, got %#v ok=%v", recovered, ok)
 	}
 
+	// Matched tickets must outlive the legacy 3-minute window: the paired
+	// guest still has create + claim + client-claim-retry to get through.
+	service.now = func() time.Time { return base.Add(3 * time.Minute) }
+	if _, ok := service.Get(firstMatched.TicketID); !ok {
+		t.Fatalf("expected matched ticket to survive past the legacy 3-minute window")
+	}
+	if _, ok := service.Get(secondMatched.TicketID); !ok {
+		t.Fatalf("expected second matched ticket to survive past the legacy 3-minute window")
+	}
+	if queuedTicket, ok := service.Get(queued.TicketID); !ok || queuedTicket.Status != StatusQueued {
+		t.Fatalf("expected queued ticket to survive pruning inside its own TTL, got %#v ok=%v", queuedTicket, ok)
+	}
+
 	service.now = func() time.Time { return base.Add(defaultMatchedRecoveryTTL + time.Second) }
 	if _, ok := service.Get(firstMatched.TicketID); ok {
 		t.Fatalf("expected first matched ticket to be pruned after recovery TTL")
@@ -221,14 +241,14 @@ func TestQueuePrunesTerminalTicketsAfterRecoveryTTL(t *testing.T) {
 	if _, ok := service.FindActiveTicket("guest_a", ""); ok {
 		t.Fatalf("expected matched recovery to disappear after TTL")
 	}
-	if stats := service.Stats(); stats.TotalTickets != 1 || stats.Casual.QueuedCount != 1 || stats.Rated.MatchedCount != 0 {
-		t.Fatalf("expected only queued ticket to remain after pruning, got %#v", stats)
-	}
 	if items := service.List(QueueRated, contracts.MatchModeOpenCards); len(items) != 0 {
 		t.Fatalf("expected stale matched tickets removed from list, got %#v", items)
 	}
-	if queuedTicket, ok := service.Get(queued.TicketID); !ok || queuedTicket.Status != StatusQueued {
-		t.Fatalf("expected queued ticket to survive pruning, got %#v ok=%v", queuedTicket, ok)
+	// The queued ticket's OWN 10-minute TTL has also elapsed by +15m1s, so
+	// the store is empty here; the +3m assertions above pin its mid-window
+	// survival.
+	if stats := service.Stats(); stats.TotalTickets != 0 {
+		t.Fatalf("expected all tickets pruned after their TTLs, got %#v", stats)
 	}
 }
 
@@ -325,11 +345,11 @@ func TestSQLiteQueueStorePersistsAccountIDsAcrossReload(t *testing.T) {
 	}
 	defer func() { _ = service.Close() }()
 
-	first, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_a", 1200, "Alpha", "acct_alpha")
+	first, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_a", 1200, "Alpha", "acct_alpha", 0, 0)
 	if err != nil {
 		t.Fatalf("enqueue first ticket: %v", err)
 	}
-	second, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_b", 1210, "Bravo", "acct_bravo")
+	second, err := service.EnqueueWithAccount(QueueRated, contracts.MatchModeOpenCards, "guest_b", 1210, "Bravo", "acct_bravo", 0, 0)
 	if err != nil {
 		t.Fatalf("enqueue second ticket: %v", err)
 	}
@@ -366,7 +386,7 @@ func TestQueueStatsReflectTicketState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue casual ticket: %v", err)
 	}
-	if _, _, err := service.Cancel(casual.TicketID); err != nil {
+	if _, _, err := service.Cancel(casual.TicketID, casual.CancelSecret); err != nil {
 		t.Fatalf("cancel casual ticket: %v", err)
 	}
 

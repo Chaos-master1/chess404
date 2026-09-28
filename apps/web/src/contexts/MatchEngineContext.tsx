@@ -102,9 +102,6 @@ export interface MatchEngineContextShape {
   drawOffer: any | null;
   canRespondToDrawOffer: boolean;
   setDrawOffer: (offer: any | null) => void;
-  abortActive: boolean;
-  abortCountdown: number | null;
-  stopAbortCountdown: () => void;
   activeFinishReasonLabel: string;
   authoritativeRematchBusy: boolean;
   canCreateDirectRematch: boolean;
@@ -124,7 +121,7 @@ export interface MatchEngineContextShape {
   showHostedReconnectWarning: boolean;
   intentInFlight: boolean;
   activeDisconnectGraceFor: string | null;
-  bootstrapAuthoritativeMatch: (id: string) => void;
+  bootstrapAuthoritativeMatch: (options?: { force?: boolean }) => void;
   showHostedSoloBanner: boolean;
   isAttackedWithFusion: (sq: Sq) => boolean;
   checkEndGame: () => void;

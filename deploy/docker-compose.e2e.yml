@@ -1,0 +1,162 @@
+# Local E2E stack: mirrors the production topology (web -> gateway ->
+# match-service + platform-service[/matchmaking] + Postgres + Redis) so specs
+# run against real services without touching production. Used by
+# scripts/e2e-local.sh.
+
+x-go-env: &go-env
+  INTERNAL_SERVICE_TOKEN: local-e2e-token
+  MATCH_SERVICE_INTERNAL_URL: http://match-service:8080
+  PLATFORM_SERVICE_INTERNAL_URL: http://platform-service:8080
+  MATCHMAKING_SERVICE_INTERNAL_URL: http://matchmaking-service:8080
+  POSTGRES_URL: postgres://test:test@postgres:5432/chess404_e2e?sslmode=disable
+  REDIS_URL: redis://redis:6379/0
+
+x-go-build: &go-build
+  context: ..
+  cache_from:
+    - type=local,src=/tmp/.buildx-cache-e2e
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: chess404_e2e
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: pg_isready -U test -d chess404_e2e
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: redis-cli ping
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  match-service:
+    build:
+      <<: *go-build
+      dockerfile: deploy/railway/match-service.Dockerfile
+    environment:
+      <<: *go-env
+      MATCH_SERVICE_ADDR: :8080
+      MATCH_STATE_BACKEND: memory
+      MATCH_ARCHIVE_BACKEND: postgres
+      GUEST_STORE_BACKEND: postgres
+      COMPUTER_OPPONENT: search
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "58082:8080"
+    healthcheck:
+      test: curl -f http://localhost:8080/readyz || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  gateway:
+    build:
+      <<: *go-build
+      dockerfile: deploy/railway/gateway.Dockerfile
+    environment:
+      <<: *go-env
+      GATEWAY_ADDR: :8080
+      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    depends_on:
+      match-service:
+        condition: service_healthy
+    ports:
+      - "58090:8080"
+    healthcheck:
+      test: curl -f http://localhost:8080/readyz || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  platform-service:
+    build:
+      <<: *go-build
+      dockerfile: deploy/railway/platform-service.Dockerfile
+    environment:
+      <<: *go-env
+      PLATFORM_ADDR: :8080
+      MATCH_ARCHIVE_BACKEND: postgres
+      MATCH_CLAIM_STORE_BACKEND: redis
+      MATCH_CLAIM_STORE_REDIS_URL: redis://redis:6379/0
+      GUEST_STORE_BACKEND: postgres
+      ACCOUNT_STORE_BACKEND: postgres
+      MATCHMAKING_TICKET_STORE_BACKEND: redis
+      MATCHMAKING_TICKET_STORE_REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_BACKEND: memory
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "58083:8080"
+    healthcheck:
+      test: curl -f http://localhost:8080/readyz || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  matchmaking-service:
+    build:
+      <<: *go-build
+      dockerfile: deploy/railway/matchmaking-service.Dockerfile
+    environment:
+      <<: *go-env
+      MATCHMAKING_ADDR: :8080
+      MATCHMAKING_TICKET_STORE_BACKEND: redis
+      MATCHMAKING_TICKET_STORE_REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_BACKEND: memory
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "58084:8080"
+    healthcheck:
+      test: curl -f http://localhost:8080/readyz || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/railway/web.Dockerfile
+    environment:
+      GATEWAY_INTERNAL_URL: http://gateway:8080
+      MATCH_SERVICE_INTERNAL_URL: http://match-service:8080
+      PLATFORM_SERVICE_INTERNAL_URL: http://platform-service:8080
+      MATCHMAKING_SERVICE_INTERNAL_URL: http://matchmaking-service:8080
+      INTERNAL_SERVICE_TOKEN: local-e2e-token
+      NODE_ENV: production
+    depends_on:
+      gateway:
+        condition: service_healthy
+      platform-service:
+        condition: service_healthy
+      matchmaking-service:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: curl -f http://localhost:3000/ || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 12

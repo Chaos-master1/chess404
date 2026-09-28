@@ -2,24 +2,20 @@
 
 import React from 'react';
 import type { PieceColor } from '@chess404/contracts';
-import { CLOCK_START, ABORT_SECS } from '../constants';
+import { CLOCK_START } from '../constants';
 
 export interface UseMatchTimerProps {
   initialClockStart?: number;
-  initialAbortSecs?: number;
   over?: boolean;
   authoritativeLive?: boolean;
   onTimeout?: (loser: PieceColor) => void;
-  onAbort?: () => void;
 }
 
 export function useMatchTimer({
   initialClockStart = CLOCK_START,
-  initialAbortSecs = ABORT_SECS,
   over = false,
   authoritativeLive = false,
   onTimeout = () => {},
-  onAbort = () => {},
 }: UseMatchTimerProps = {}) {
   // timeW/timeB are milliseconds, matching the server's clock.whiteMs/blackMs.
   // initialClockStart (CLOCK_START) is in seconds.
@@ -30,73 +26,38 @@ export function useMatchTimer({
   const tickingRef = React.useRef<PieceColor | null>(null);
   const [tickingState, setTickingState] = React.useState<PieceColor | null>(null);
 
-  const [abortCountdown, setAbortCountdown] = React.useState(initialAbortSecs);
-  const [abortActive, setAbortActive] = React.useState(true);
-  const abortRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-
   // Use refs for callbacks to avoid stale closures in intervals
   const onTimeoutRef = React.useRef(onTimeout);
   onTimeoutRef.current = onTimeout;
-  const onAbortRef = React.useRef(onAbort);
-  onAbortRef.current = onAbort;
 
   const setTicking = React.useCallback((v: PieceColor | null) => {
     tickingRef.current = v;
     setTickingState(v);
   }, []);
 
-  const stopAbortCountdown = React.useCallback((resetToDefault = false) => {
-    if (abortRef.current) {
-      clearInterval(abortRef.current);
-      abortRef.current = null;
-    }
-    setAbortActive(false);
-    if (resetToDefault) {
-      setAbortCountdown(initialAbortSecs);
-    }
-  }, [initialAbortSecs]);
-
-  const startAbortCountdown = React.useCallback((onStart?: () => void) => {
-    if (abortRef.current) clearInterval(abortRef.current);
-    setAbortCountdown(initialAbortSecs);
-    setAbortActive(true);
-    if (onStart) onStart();
-    
-    let remaining = initialAbortSecs;
-    abortRef.current = setInterval(() => {
-      remaining -= 1;
-      setAbortCountdown(remaining);
-      if (remaining <= 0) {
-        clearInterval(abortRef.current!);
-        abortRef.current = null;
-        setAbortActive(false);
-        onAbortRef.current();
-      }
-    }, 1000);
-  }, [initialAbortSecs]);
-
   const resetTimer = React.useCallback(() => {
     setTimeW(initialClockStart * 1000);
     setTimeB(initialClockStart * 1000);
-    if (abortRef.current) clearInterval(abortRef.current);
-    abortRef.current = null;
     setTicking(null);
     setClockActive(false);
-    setAbortCountdown(initialAbortSecs);
-    setAbortActive(true);
-  }, [initialClockStart, initialAbortSecs, setTicking]);
+  }, [initialClockStart, setTicking]);
 
-  // Clock display is server-driven only — no local countdown.
-  // timeW/timeB are updated exclusively from authoritative snapshots or local game ticks.
+  // The abort countdown was removed: aborts are server-decided (aborts are
+  // legal before Black's first reply), and the old local 10-second timer was
+  // pure theater -- it ticked down to nothing in hosted matches, flashed a
+  // fake "must move" banner before the first snapshot, and could even fire a
+  // self-abort callback that no longer matches server rules. Clock display is
+  // server-driven only; timeW/timeB are updated exclusively from
+  // authoritative snapshots or local game ticks.
+  void over;
+  void authoritativeLive;
+  void onTimeoutRef;
 
   return {
     timeW, setTimeW,
     timeB, setTimeB,
     clockActive, setClockActive,
     tickingState, tickingRef, setTicking,
-    abortCountdown, setAbortCountdown,
-    abortActive, setAbortActive,
-    startAbortCountdown, stopAbortCountdown, resetTimer,
-    abortRef, setTickingState,
+    resetTimer,
   };
 }

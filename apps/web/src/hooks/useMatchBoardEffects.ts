@@ -182,8 +182,7 @@ export function useMatchBoardEffects({
         return next;
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [processBombs]);
+  }, [processBombs]); // eslint-disable-line react-hooks/exhaustive-deps -- legacy board effect, see lint policy in eslint.config.mjs
 
   const resetBoardEffects = React.useCallback(() => {
     setLavaSquares([]);

@@ -171,21 +171,33 @@ func filterStateForColor(state contracts.MatchState, color string) contracts.Mat
 	// viewer, the reveal is delivered server-side by replacing the stubs with
 	// the opponent's real cards. RadarRevealFor is cleared as soon as the
 	// viewer's turn ends, so a stale flag cannot keep the hand revealed.
+	// Open-cards matches are the whole point of the mode: both hands are
+	// public, so skip stubbing entirely (except radar, which is the same
+	// no-op either way). Hidden mode stubs as before.
+	// This must be an EXACT comparison, not NormalizeMatchModeID: that
+	// helper maps an unset/legacy ModeID to open_cards when CREATING a
+	// match, but treating an unknown mode as open here would ship both
+	// hands unstubbed to every viewer of any match whose stored mode
+	// predates the field. Unknown means hidden.
+	openMode := state.ModeID == contracts.MatchModeOpenCards
 	if color == "white" {
-		if state.RadarRevealFor == "white" {
+		if openMode || state.RadarRevealFor == "white" {
 			// full reveal: keep BlackHand as-is
 		} else {
 			state.BlackHand = stubHiddenHand(len(state.BlackHand))
 		}
 	} else if color == "black" {
-		if state.RadarRevealFor == "black" {
+		if openMode || state.RadarRevealFor == "black" {
 			// full reveal: keep WhiteHand as-is
 		} else {
 			state.WhiteHand = stubHiddenHand(len(state.WhiteHand))
 		}
 	} else {
-		state.WhiteHand = nil
-		state.BlackHand = nil
+		// Spectators see both hands in open-cards mode; hidden stays nil.
+		if !openMode {
+			state.WhiteHand = nil
+			state.BlackHand = nil
+		}
 	}
 	if state.InvisiblePiece != nil && state.InvisiblePiece.OwnerColor != color {
 		state.InvisiblePiece = nil

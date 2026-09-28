@@ -1,6 +1,11 @@
 .app-root {
   display: flex;
-  min-height: 100vh;
+  /* min-height: 0 — this chain sits inside the outer shell (#main-content,
+     height:100vh, overflow:hidden) BELOW the topbar. Any min-height:100vh
+     here makes the stack measure topbar + 100vh, pushing its bottom row
+     permanently past the clip edge on every page. The flex parent sizes it;
+     the chain just fills. */
+  min-height: 0;
   background:
     radial-gradient(circle at top left, rgba(200, 134, 10, 0.12), transparent 34%),
     radial-gradient(circle at bottom right, rgba(73, 112, 173, 0.1), transparent 28%),
@@ -10,7 +15,12 @@
 .app-shell {
   display: flex;
   flex: 1;
-  min-height: 100vh;
+  min-height: 0;
+  /* Without this, a wide fixed-min-content descendant (e.g. the cards
+     page's nowrap filter bar) inflates the shell to its content width and
+     the whole app scrolls sideways on phones instead of the bar scrolling
+     internally. */
+  min-width: 0;
   position: relative;
   z-index: 1;
 }
@@ -50,6 +60,14 @@
     0 12px 24px rgba(200, 134, 10, 0.22),
     inset 0 1px 0 rgba(255, 244, 210, 0.35),
     inset 0 -6px 12px rgba(60, 36, 4, 0.35);
+}
+
+.app-shell__brand-mark-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 
 .app-shell__brand-mark svg {
@@ -185,7 +203,7 @@
   display: flex;
   flex: 1;
   min-width: 0;
-  min-height: 100vh;
+  min-height: 0;
   flex-direction: column;
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
+	"github.com/chess404/realtime/internal/envutil"
 	"github.com/chess404/realtime/internal/httputil"
 	"github.com/chess404/realtime/internal/matchmaking"
 	"github.com/chess404/realtime/internal/metrics"
@@ -24,7 +26,11 @@ import (
 )
 
 func main() {
-	mux := http.NewServeMux()
+	internalToken := matchmakingInternalServiceToken()
+	envutil.WarnSharedInternalToken("matchmaking-service",
+		os.Getenv("MATCHMAKING_INTERNAL_SERVICE_TOKEN"), "MATCHMAKING_INTERNAL_SERVICE_TOKEN",
+		[]string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"})
+
 	service, err := openMatchmakingService()
 	if err != nil {
 		log.Fatalf("failed to initialize matchmaking service: %v", err)
@@ -35,217 +41,8 @@ func main() {
 		log.Fatalf("failed to initialize rate limiter: %v", err)
 	}
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	mux := buildMatchmakingMux(service, internalToken)
 
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-
-	mux.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-
-	mux.Handle("/metrics", metrics.Handler())
-
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":    "ok",
-			"service":   "matchmaking-service",
-			"checkedAt": time.Now().UTC(),
-			"stats":     service.Stats(),
-		})
-	})
-
-	mux.HandleFunc("/api/queues/default", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"queue":        "rated",
-			"status":       "open",
-			"architecture": "region-aware-authoritative",
-		})
-	})
-
-	mux.HandleFunc("/api/queues/snapshots", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		queueFilter := parseOptionalQueueName(r.URL.Query().Get("queue"))
-		modeFilter := parseOptionalModeID(r.URL.Query().Get("modeId"))
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"snapshots": queueSnapshots(service, queueFilter, modeFilter),
-			"checkedAt": time.Now().UTC(),
-		})
-	})
-
-	mux.HandleFunc("/api/queues/tickets", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			guestID := strings.TrimSpace(r.URL.Query().Get("guestId"))
-			accountID := strings.TrimSpace(r.URL.Query().Get("accountId"))
-			if guestID != "" || accountID != "" {
-				ticket, ok := service.FindActiveTicket(guestID, accountID)
-				if !ok {
-					http.NotFound(w, r)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"ticket":   ticket,
-					"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
-				})
-				return
-			}
-			queue := parseQueueName(r.URL.Query().Get("queue"))
-			modeID := parseModeID(r.URL.Query().Get("modeId"))
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"tickets": service.List(queue, modeID),
-			})
-		case http.MethodPost:
-			var payload struct {
-				Queue       string `json:"queue"`
-				ModeID      string `json:"modeId"`
-				GuestID     string `json:"guestId"`
-				AccountID   string `json:"accountId"`
-				DisplayName string `json:"displayName"`
-				Rating      int    `json:"rating"`
-			}
-			if r.Body != nil {
-				defer r.Body.Close()
-				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-					log.Printf("[matchmaking] ERROR: invalid queue payload: %v", err)
-					http.Error(w, `{"error":"invalid queue payload"}`, http.StatusBadRequest)
-					return
-				}
-			}
-			if payload.GuestID == "" {
-				log.Printf("[matchmaking] ERROR: guestId is required")
-				http.Error(w, `{"error":"guestId is required"}`, http.StatusBadRequest)
-				return
-			}
-			if payload.Rating <= 0 {
-				payload.Rating = 1200
-			}
-			modeID := parseModeID(payload.ModeID)
-			queue := parseQueueName(payload.Queue)
-			if queue == matchmaking.QueueRated && strings.TrimSpace(payload.AccountID) == "" {
-				http.Error(w, `{"error":"rated queue requires an accountId"}`, http.StatusUnauthorized)
-				return
-			}
-
-			if restricted, kind := checkAccountRestriction(r.Context(), matchmakingPlatformServiceURL(), matchmakingInternalServiceToken(), payload.AccountID); restricted {
-				log.Printf("[matchmaking] BLOCKED enqueue for account=%s restriction=%s", payload.AccountID, kind)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"error":           "account is " + kind + " and cannot enter the queue",
-					"restrictionKind": kind,
-				})
-				return
-			}
-
-			log.Printf("[matchmaking] Enqueue request: guest=%s, queue=%s, mode=%s, rating=%d",
-				payload.GuestID, queue, modeID, payload.Rating)
-
-			ticket, err := service.EnqueueWithAccount(
-				queue,
-				modeID,
-				payload.GuestID,
-				payload.Rating,
-				payload.DisplayName,
-				strings.TrimSpace(payload.AccountID),
-			)
-			if err != nil {
-				var activeErr matchmaking.ActiveTicketError
-				if errors.As(err, &activeErr) {
-					log.Printf("[matchmaking] Guest %s already has active ticket %s", payload.GuestID, activeErr.Ticket.TicketID)
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					_ = json.NewEncoder(w).Encode(map[string]any{
-						"error":    err.Error(),
-						"ticket":   activeErr.Ticket,
-						"snapshot": service.Snapshot(activeErr.Ticket.Queue, activeErr.Ticket.ModeID),
-					})
-					return
-				}
-				log.Printf("[matchmaking] ERROR: failed to enqueue guest %s: %v", payload.GuestID, err)
-				http.Error(w, fmt.Sprintf(`{"error":"failed to persist queue ticket: %s"}`, err.Error()), http.StatusInternalServerError)
-				return
-			}
-
-			log.Printf("[matchmaking] Created ticket %s for guest %s (status=%s, room=%s)",
-				ticket.TicketID, ticket.GuestID, ticket.Status, ticket.AssignedRoom)
-
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ticket":   ticket,
-				"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
-			})
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-
-	mux.HandleFunc("/api/queues/tickets/", func(w http.ResponseWriter, r *http.Request) {
-		ticketID := strings.TrimPrefix(r.URL.Path, "/api/queues/tickets/")
-		if ticketID == "" {
-			http.NotFound(w, r)
-			return
-		}
-		switch r.Method {
-		case http.MethodGet:
-			ticket, ok := service.Get(ticketID)
-			if !ok {
-				http.NotFound(w, r)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ticket":   ticket,
-				"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
-			})
-		case http.MethodDelete:
-			ticket, ok, err := service.Cancel(ticketID)
-			if !ok {
-				http.NotFound(w, r)
-				return
-			}
-			if err != nil {
-				http.Error(w, `{"error":"failed to persist queue cancellation"}`, http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ticket":   ticket,
-				"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
-			})
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-
-	internalToken := matchmakingInternalServiceToken()
 	addr := httputil.ListenAddr("MATCHMAKING_ADDR", 8084)
 	srv := &http.Server{
 		Addr:              addr,
@@ -297,7 +94,39 @@ func matchmakingPlatformServiceURL() string {
 	)
 }
 
+// matchmakingInternalServiceToken is the FIRST token this service accepts
+// from callers (rate-limit trusted bypass). The service-specific name comes
+// first; shared envs remain accepted so the per-service token migration can
+// proceed one service at a time.
 func matchmakingInternalServiceToken() string {
+	for _, name := range []string{"MATCHMAKING_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// matchmakingInternalServiceTokens is the full accept set: every non-empty
+// token env this service recognizes. Per-caller rotation (RUNBOOK.md,
+// stage 4) stages distinct values per caller; the ticket-list auth must
+// accept any of them, not just the first.
+func matchmakingInternalServiceTokens() []string {
+	var tokens []string
+	for _, name := range []string{"MATCHMAKING_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			tokens = append(tokens, value)
+		}
+	}
+	return tokens
+}
+
+// platformServiceCallerToken is the credential this service SENDS to
+// platform-service (its accept list, in precedence order). Deliberately
+// independent of the inbound chain: staging
+// MATCHMAKING_INTERNAL_SERVICE_TOKEN here must not change what we send to
+// platform-service.
+func platformServiceCallerToken() string {
 	for _, name := range []string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 			return value
@@ -378,6 +207,278 @@ func resolveInternalServiceURL(explicit, fallback string) string {
 	return value
 }
 
+// buildMatchmakingMux registers every HTTP route. Extracted from main so
+// tests can exercise the REAL handlers (cancel-secret redaction, internal
+// auth gating) via ServeHTTP instead of rebuilding approximations of them
+// -- the same pattern buildMatchServiceMux uses in match-service.
+func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	mux.Handle("/metrics", metrics.Handler())
+
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":    "ok",
+			"service":   "matchmaking-service",
+			"checkedAt": time.Now().UTC(),
+			"stats":     service.Stats(),
+		})
+	})
+
+	mux.HandleFunc("/api/queues/default", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"queue":        "rated",
+			"status":       "open",
+			"architecture": "region-aware-authoritative",
+		})
+	})
+
+	mux.HandleFunc("/api/queues/snapshots", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		queueFilter := parseOptionalQueueName(r.URL.Query().Get("queue"))
+		modeFilter := parseOptionalModeID(r.URL.Query().Get("modeId"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"snapshots": queueSnapshots(service, queueFilter, modeFilter),
+			"checkedAt": time.Now().UTC(),
+		})
+	})
+
+	mux.HandleFunc("/api/queues/tickets", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			guestID := strings.TrimSpace(r.URL.Query().Get("guestId"))
+			accountID := strings.TrimSpace(r.URL.Query().Get("accountId"))
+			if guestID != "" || accountID != "" {
+				ticket, ok := service.FindActiveTicket(guestID, accountID)
+				if !ok {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ticket":   redactTicketCancelSecret(ticket),
+					"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
+				})
+				return
+			}
+			// Full ticket list exposes every guest ID and rating. Web clients
+			// never see it (the proxy returns an empty list in production);
+			// direct anonymous access to this port must not leak it either.
+			if !hasInternalServiceAccess(r, internalToken) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "ticket list requires internal service access"})
+				return
+			}
+			queue := parseQueueName(r.URL.Query().Get("queue"))
+			modeID := parseModeID(r.URL.Query().Get("modeId"))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tickets": service.List(queue, modeID),
+			})
+		case http.MethodPost:
+		var payload struct {
+			Queue          string `json:"queue"`
+			ModeID         string `json:"modeId"`
+			GuestID        string `json:"guestId"`
+			AccountID      string `json:"accountId"`
+			DisplayName    string `json:"displayName"`
+			Rating         int    `json:"rating"`
+			ClockSeconds   int64  `json:"clockSeconds"`
+			ClockIncrement int64  `json:"clockIncrement"`
+		}
+			if r.Body != nil {
+				defer r.Body.Close()
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					log.Printf("[matchmaking] ERROR: invalid queue payload: %v", err)
+					http.Error(w, `{"error":"invalid queue payload"}`, http.StatusBadRequest)
+					return
+				}
+			}
+			if payload.GuestID == "" {
+				log.Printf("[matchmaking] ERROR: guestId is required")
+				http.Error(w, `{"error":"guestId is required"}`, http.StatusBadRequest)
+				return
+			}
+			if payload.Rating <= 0 {
+				payload.Rating = 1200
+			}
+			modeID := parseModeID(payload.ModeID)
+			queue := parseQueueName(payload.Queue)
+			if queue == matchmaking.QueueRated && strings.TrimSpace(payload.AccountID) == "" {
+				http.Error(w, `{"error":"rated queue requires an accountId"}`, http.StatusUnauthorized)
+				return
+			}
+
+			if restricted, kind := checkAccountRestriction(r.Context(), matchmakingPlatformServiceURL(), platformServiceCallerToken(), payload.AccountID); restricted {
+				log.Printf("[matchmaking] BLOCKED enqueue for account=%s restriction=%s", payload.AccountID, kind)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error":           "account is " + kind + " and cannot enter the queue",
+					"restrictionKind": kind,
+				})
+				return
+			}
+
+			log.Printf("[matchmaking] Enqueue request: guest=%s, queue=%s, mode=%s, rating=%d, clock=%d+%d",
+				payload.GuestID, queue, modeID, payload.Rating, payload.ClockSeconds, payload.ClockIncrement)
+
+			ticket, err := service.EnqueueWithAccount(
+				queue,
+				modeID,
+				payload.GuestID,
+				payload.Rating,
+				payload.DisplayName,
+				strings.TrimSpace(payload.AccountID),
+				payload.ClockSeconds,
+				payload.ClockIncrement,
+			)
+			if err != nil {
+				var activeErr matchmaking.ActiveTicketError
+				if errors.As(err, &activeErr) {
+					log.Printf("[matchmaking] Guest %s already has active ticket %s", payload.GuestID, activeErr.Ticket.TicketID)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusConflict)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"error":    err.Error(),
+						// The requester supplied only a guestId (public in every snapshot and
+				// directory), so this response must not re-reveal the cancel
+				// credential: knowing a guestId must not grant ticket cancellation.
+				"ticket":   redactTicketCancelSecret(activeErr.Ticket),
+						"snapshot": service.Snapshot(activeErr.Ticket.Queue, activeErr.Ticket.ModeID),
+					})
+					return
+				}
+				log.Printf("[matchmaking] ERROR: failed to enqueue guest %s: %v", payload.GuestID, err)
+				http.Error(w, fmt.Sprintf(`{"error":"failed to persist queue ticket: %s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+
+			log.Printf("[matchmaking] Created ticket %s for guest %s (status=%s, room=%s)",
+				ticket.TicketID, ticket.GuestID, ticket.Status, ticket.AssignedRoom)
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ticket":   ticket,
+				"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
+			})
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/queues/tickets/", func(w http.ResponseWriter, r *http.Request) {
+		ticketID := strings.TrimPrefix(r.URL.Path, "/api/queues/tickets/")
+		if ticketID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			ticket, ok := service.Get(ticketID)
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			// The ticket ID is the only credential this read requires, and
+			// ticket IDs travel through URLs and logs, so the requester may
+			// be anyone. The cancel secret is issued exactly once, on the
+			// POST create response, to the enqueuing client -- never here.
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ticket":   redactTicketCancelSecret(ticket),
+				"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
+			})
+		case http.MethodDelete:
+			// Cancelling is a mutation on someone else's ticket otherwise:
+			// require the cancel secret issued to the enqueuing client, or an
+			// internal service token (moderation / service ops).
+			//
+			// Precedence matters: the web proxy injects its internal service
+			// token into EVERY forwarded request, so a token alone cannot
+			// mean "service caller" on the user path. A presented ticket
+			// secret always demotes the request to the user path, where the
+			// secret is verified against the stored one.
+			ticketSecret := strings.TrimSpace(r.Header.Get("X-Chess404-Ticket-Secret"))
+			if ticketSecret == "" {
+				ticketSecret = strings.TrimSpace(r.URL.Query().Get("cancelSecret"))
+			}
+			if ticketSecret == "" && !hasInternalServiceAccess(r, internalToken) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "ticket cancel requires the ticket cancel secret"})
+				return
+			}
+			var cancelled matchmaking.Ticket
+			var ok bool
+			var err error
+			if ticketSecret != "" {
+				cancelled, ok, err = service.Cancel(ticketID, ticketSecret)
+			} else {
+				cancelled, ok, err = service.CancelByService(ticketID)
+			}
+			if err != nil {
+				if errors.Is(err, matchmaking.ErrCancelUnauthorized) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					_ = json.NewEncoder(w).Encode(map[string]any{"error": "ticket cancel secret missing or wrong"})
+					return
+				}
+				http.Error(w, `{"error":"failed to persist queue cancellation"}`, http.StatusInternalServerError)
+				return
+			}
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ticket":   redactTicketCancelSecret(cancelled),
+				"snapshot": service.Snapshot(cancelled.Queue, cancelled.ModeID),
+			})
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	return mux
+}
+
 func openMatchmakingService() (*matchmaking.Service, error) {
 	matchServiceURL := matchmakingMatchServiceURL()
 	log.Printf("[matchmaking] Initializing with match service URL: %s", matchServiceURL)
@@ -441,6 +542,30 @@ func parseOptionalModeID(value string) contracts.MatchModeID {
 	return contracts.NormalizeMatchModeID(value)
 }
 
+func hasInternalServiceAccess(r *http.Request, token string) bool {
+	// `token` is the first accepted token (kept for the not-configured
+	// check and compatibility); any configured token env also authenticates,
+	// so per-caller rotation can stage additional values.
+	if strings.TrimSpace(token) == "" {
+		return false
+	}
+	provided := strings.TrimSpace(r.Header.Get("X-Chess404-Service-Token"))
+	for _, expected := range append(matchmakingInternalServiceTokens(), token) {
+		if expected != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// redactTicketCancelSecret strips the cancel credential from any ticket
+// embedded in an API response; only the POST /tickets create response ever
+// carries it, exactly once, to the enqueuing client.
+func redactTicketCancelSecret(ticket matchmaking.Ticket) matchmaking.Ticket {
+	ticket.CancelSecret = ""
+	return ticket
+}
+
 func queueSnapshots(service *matchmaking.Service, queueFilter matchmaking.QueueName, modeFilter contracts.MatchModeID) []matchmaking.QueueSnapshot {
 	queues := []matchmaking.QueueName{matchmaking.QueueCasual, matchmaking.QueueRated}
 	if queueFilter != "" {
@@ -476,9 +601,21 @@ func (c *httpMatchCreator) CreateMatch(assignment matchmaking.MatchAssignment) e
 		client = &http.Client{Timeout: 3 * time.Second}
 	}
 
+	clockSeconds := assignment.ClockSeconds
+	if clockSeconds <= 0 {
+		// Legacy assignments (or a direct service call) without a clock fall
+		// back to the same default the queue normalizes to.
+		clockSeconds = 600
+	}
+	increment := assignment.ClockIncrement
+	if increment < 0 {
+		increment = 0
+	}
+
 	payload := map[string]any{
 		"matchId":           assignment.RoomID,
-		"clockSeconds":      600,
+		"clockSeconds":      clockSeconds,
+		"clockIncrement":    increment,
 		"starterHandMode":   "starter_three",
 		"queue":             string(assignment.Queue),
 		"modeId":            string(assignment.ModeID),

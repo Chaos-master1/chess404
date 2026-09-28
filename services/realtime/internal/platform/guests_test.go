@@ -4,6 +4,8 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/chess404/realtime/internal/contracts"
 )
 
 func TestGuestStoreEnsureGuestPersistsAndReloads(t *testing.T) {
@@ -63,7 +65,7 @@ func TestGuestStoreFinalizeMatchIsIdempotent(t *testing.T) {
 
 	white, _ := store.EnsureGuest("guest_white", "")
 	black, _ := store.EnsureGuest("guest_black", "")
-	updatedWhite, updatedBlack, changed, err := store.FinalizeMatch("room_123", white.Guest.GuestID, black.Guest.GuestID, "white")
+	updatedWhite, updatedBlack, changed, err := store.FinalizeMatch("room_123", white.Guest.GuestID, black.Guest.GuestID, "white", contracts.MatchModeOpenCards)
 	if err != nil {
 		t.Fatalf("expected finalize to succeed, got %v", err)
 	}
@@ -74,7 +76,7 @@ func TestGuestStoreFinalizeMatchIsIdempotent(t *testing.T) {
 		t.Fatalf("expected match stats to update, got %#v %#v", updatedWhite, updatedBlack)
 	}
 
-	repeatWhite, repeatBlack, changedAgain, err := store.FinalizeMatch("room_123", white.Guest.GuestID, black.Guest.GuestID, "white")
+	repeatWhite, repeatBlack, changedAgain, err := store.FinalizeMatch("room_123", white.Guest.GuestID, black.Guest.GuestID, "white", contracts.MatchModeOpenCards)
 	if err != nil {
 		t.Fatalf("expected repeated finalize to be harmless, got %v", err)
 	}
@@ -95,10 +97,10 @@ func TestGuestStoreListGuestsByRating(t *testing.T) {
 	bravo, _ := store.EnsureGuest("guest_bravo", "")
 	charlie, _ := store.EnsureGuest("guest_charlie", "")
 
-	if _, _, _, err := store.FinalizeMatch("room_1", alpha.Guest.GuestID, bravo.Guest.GuestID, "white"); err != nil {
+	if _, _, _, err := store.FinalizeMatch("room_1", alpha.Guest.GuestID, bravo.Guest.GuestID, "white", contracts.MatchModeOpenCards); err != nil {
 		t.Fatalf("expected first finalize to succeed, got %v", err)
 	}
-	if _, _, _, err := store.FinalizeMatch("room_2", charlie.Guest.GuestID, bravo.Guest.GuestID, "white"); err != nil {
+	if _, _, _, err := store.FinalizeMatch("room_2", charlie.Guest.GuestID, bravo.Guest.GuestID, "white", contracts.MatchModeOpenCards); err != nil {
 		t.Fatalf("expected second finalize to succeed, got %v", err)
 	}
 
@@ -173,12 +175,87 @@ func TestGuestStoreStatsReflectProfilesAndRatedResults(t *testing.T) {
 
 	white, _ := store.EnsureGuest("guest_white", "")
 	black, _ := store.EnsureGuest("guest_black", "")
-	if _, _, _, err := store.FinalizeMatch("room_stats", white.Guest.GuestID, black.Guest.GuestID, "draw"); err != nil {
+	if _, _, _, err := store.FinalizeMatch("room_stats", white.Guest.GuestID, black.Guest.GuestID, "draw", contracts.MatchModeOpenCards); err != nil {
 		t.Fatalf("expected finalize to succeed, got %v", err)
 	}
 
 	stats := store.Stats()
 	if stats.GuestCount != 2 || stats.FinalizedMatchCount != 1 || stats.RankedPlayers != 2 {
 		t.Fatalf("unexpected guest store stats %#v", stats)
+	}
+}
+
+// Per-mode guest ladders: open and hidden rated games maintain separate Elo
+// ratings alongside the blended one. First game in a mode seeds the ladder
+// from the blended rating; computer matches leave both ladders untouched.
+// Regression: guests previously had a single rating forever, so the mode
+// filter on rankings/profiles had nothing real to show for guest players.
+func TestGuestStorePerModeRatingsUpdateIndependently(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := NewGuestStore(filepath.Join(tempDir, "guest-profiles.json"))
+	if err != nil {
+		t.Fatalf("expected guest store to initialize, got %v", err)
+	}
+
+	white, _ := store.EnsureGuest("guest_mode_white", "")
+	black, _ := store.EnsureGuest("guest_mode_black", "")
+	whiteID, blackID := white.Guest.GuestID, black.Guest.GuestID
+	blendWhite, blendBlack := white.Guest.Rating, black.Guest.Rating
+
+	// Open-cards win for white: white's open ladder rises above its seeded
+	// blend, black's falls below. Blended ratings move too.
+	if _, _, changed, err := store.FinalizeMatch("mode_open_1", whiteID, blackID, "white", contracts.MatchModeOpenCards); err != nil || !changed {
+		t.Fatalf("expected open-cards finalize to apply, changed=%v err=%v", changed, err)
+	}
+	whiteNow, _ := store.GetGuest(whiteID)
+	blackNow, _ := store.GetGuest(blackID)
+	if whiteNow.RatingOpen <= blendWhite {
+		t.Fatalf("expected white open ladder to rise above seed %d, got %d", blendWhite, whiteNow.RatingOpen)
+	}
+	if blackNow.RatingOpen >= blendBlack {
+		t.Fatalf("expected black open ladder to fall below seed %d, got %d", blendBlack, blackNow.RatingOpen)
+	}
+	if whiteNow.RatingHidden != 0 || blackNow.RatingHidden != 0 {
+		t.Fatalf("expected hidden ladders untouched by open game, got %#v %#v", whiteNow.RatingHidden, blackNow.RatingHidden)
+	}
+
+	// Hidden-cards loss for white: hidden ladder moves, open ladder frozen.
+	whiteBeforeOpen := whiteNow.RatingOpen
+	blackBeforeOpen := blackNow.RatingOpen
+	if _, _, changed, err := store.FinalizeMatch("mode_hidden_1", whiteID, blackID, "black", contracts.MatchModeHiddenCards); err != nil || !changed {
+		t.Fatalf("expected hidden-cards finalize to apply, changed=%v err=%v", changed, err)
+	}
+	whiteNow, _ = store.GetGuest(whiteID)
+	blackNow, _ = store.GetGuest(blackID)
+	if whiteNow.RatingHidden >= blendWhite || blackNow.RatingHidden <= blendBlack {
+		t.Fatalf("expected hidden ladders to move from seeds (%d/%d), got %d/%d", blendWhite, blendBlack, whiteNow.RatingHidden, blackNow.RatingHidden)
+	}
+	if whiteNow.RatingOpen != whiteBeforeOpen || blackNow.RatingOpen != blackBeforeOpen {
+		t.Fatalf("expected open ladders frozen during hidden game, got %d/%d want %d/%d", whiteNow.RatingOpen, blackNow.RatingOpen, whiteBeforeOpen, blackBeforeOpen)
+	}
+
+	// Computer matches carry no mode ladder (unrated for open/hidden, like
+	// accounts) but DO move the blended rating -- the pre-existing behavior
+	// this test pins so nobody "fixes" it asymmetrically between guest and
+	// account stores.
+	before, _ := store.GetGuest(whiteID)
+	if _, _, changed, err := store.FinalizeMatch("mode_computer_1", whiteID, blackID, "white", contracts.MatchModeComputer); err != nil || !changed {
+		t.Fatalf("expected computer finalize to record result, changed=%v err=%v", changed, err)
+	}
+	after, _ := store.GetGuest(whiteID)
+	if after.RatingOpen != before.RatingOpen || after.RatingHidden != before.RatingHidden {
+		t.Fatalf("expected computer match to leave both ladders untouched, before=%#v after=%#v", before, after)
+	}
+	if after.Rating <= before.Rating {
+		t.Fatalf("expected computer win to move blended rating up (pre-existing semantics), before=%d after=%d", before.Rating, after.Rating)
+	}
+
+	// Repeat finalize of the same match is idempotent (no double Elo).
+	if _, _, changed, err := store.FinalizeMatch("mode_open_1", whiteID, blackID, "white", contracts.MatchModeOpenCards); err != nil || changed {
+		t.Fatalf("expected repeat finalize to be a no-op, changed=%v err=%v", changed, err)
+	}
+	idempotent, _ := store.GetGuest(whiteID)
+	if idempotent.RatingOpen != whiteBeforeOpen {
+		t.Fatalf("expected idempotent open ladder %d, got %d", whiteBeforeOpen, idempotent.RatingOpen)
 	}
 }

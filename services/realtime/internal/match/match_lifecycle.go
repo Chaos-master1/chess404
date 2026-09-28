@@ -15,6 +15,45 @@ import (
 	v1 "github.com/chess404/realtime/internal/engine/v1"
 )
 
+// ErrActiveComputerMatch is returned by CreateComputerMatch when the owner
+// already has a live game vs the computer: one at a time, finish or resign
+// before starting another. The gateway maps it to a 409 so the client shows
+// "finish your current game first" instead of silently stacking games.
+var ErrActiveComputerMatch = errors.New("player already has an active computer match")
+
+// CreateComputerMatch wraps CreateMatch with the one-active-game-per-player
+// guard. Only the computer mode routes through it: queue/private matches are
+// pairwise by construction.
+func (s *Service) CreateComputerMatch(req contracts.CreateMatchRequest, now time.Time) (contracts.MatchSnapshotResponse, error) {
+	if contracts.NormalizeMatchModeID(string(req.ModeID)) != contracts.MatchModeComputer {
+		return s.CreateMatch(req, now), nil
+	}
+	ownerID := strings.TrimSpace(req.WhiteGuestID)
+	if ownerID == "" {
+		ownerID = strings.TrimSpace(req.BlackGuestID)
+	}
+	if ownerID != "" {
+		duplicate := false
+		s.matches.Range(func(_ string, c *matchContainer) bool {
+			c.mu.Lock()
+			sameOwner := c.state.ModeID == contracts.MatchModeComputer &&
+				c.state.Status == "active" &&
+				(c.state.WhiteGuestID == ownerID || c.state.BlackGuestID == ownerID)
+			c.mu.Unlock()
+			if sameOwner {
+				duplicate = true
+				return false
+			}
+			return true
+		})
+		if duplicate {
+			s.Log.Info("match:create: blocked duplicate computer match", "ownerID", ownerID)
+			return contracts.MatchSnapshotResponse{}, ErrActiveComputerMatch
+		}
+	}
+	return s.CreateMatch(req, now), nil
+}
+
 // redactToken replaces common token and secret patterns with [REDACTED].
 func redactToken(s string) string {
 	re := regexp.MustCompile(`(?i)([?&](?:playerSecret|token|secret|s)=)[^&\s]+`)
@@ -40,6 +79,7 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 	}
 
 	startedAt := now.UnixMilli()
+	rngSeed := chooseSeed(req.Seed, startedAt)
 	hasWhiteSeat := strings.TrimSpace(req.WhiteGuestID) != ""
 	hasBlackSeat := strings.TrimSpace(req.BlackGuestID) != ""
 	hasPartialSeats := hasWhiteSeat != hasBlackSeat
@@ -55,7 +95,7 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 	state := &contracts.MatchState{
 		MatchID:           matchID,
 		RulesVersion:      rulesVersion,
-		RNGSeed:           chooseSeed(req.Seed, startedAt),
+		RNGSeed:           rngSeed,
 		Queue:             req.Queue,
 		ModeID:            contracts.NormalizeMatchModeID(string(req.ModeID)),
 		WhiteGuestID:      strings.TrimSpace(req.WhiteGuestID),
@@ -71,8 +111,8 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 		Moved:             []string{},
 		HalfMoveClock:     0,
 		FullMoveNum:       1,
-		WhiteHand:         cloneCardsWithOwner(starterHandCardsForMode(req.StarterHandMode), "white"),
-		BlackHand:         cloneCardsWithOwner(starterHandCardsForMode(req.StarterHandMode), "black"),
+		WhiteHand:         cloneCardsWithOwner(starterHandForSeed(req.StarterHandMode, rngSeed, "white"), "white"),
+		BlackHand:         cloneCardsWithOwner(starterHandForSeed(req.StarterHandMode, rngSeed, "black"), "black"),
 		MoveHistory:       []string{},
 		ChatMessages:      []contracts.ChatMessage{},
 		Clock: contracts.MatchClock{
@@ -131,8 +171,7 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 	persistSnap := buildSnapshotWithPresence(c.state, c.presence, len(c.events), c.events, now)
 	c.mu.Unlock()
 
-	s.persistSnapshot(persistSnap)
-	s.saveToRedis(persistSnap, c.presence)
+	s.flushCommit(persistSnap, c.presence)
 	s.Log.Info("match:create: ok", "matchID", matchID, "status", broadcastSnap.Match.Status, "turn", broadcastSnap.Match.Turn, "whiteFingerprint", redactPlayerSecret(broadcastSnap.Match.WhitePlayerSecret), "blackFingerprint", redactPlayerSecret(broadcastSnap.Match.BlackPlayerSecret), "computers", c.computer != nil)
 
 	return broadcastSnap
@@ -293,8 +332,12 @@ func (s *Service) JoinMatchSeat(matchID string, req contracts.JoinMatchSeatReque
 		c.events = append(c.events, events...)
 		snapshot := buildSnapshotWithPresence(state, presence, len(c.events), events, now)
 		persistSnap := buildSnapshotWithPresence(state, presence, len(c.events), c.events, now)
-		s.persistSnapshot(persistSnap)
-		s.saveToRedis(persistSnap, presence)
+		if state.Status == "finished" {
+			s.flushCommit(persistSnap, presence)
+		} else {
+			s.persistSnapshot(persistSnap)
+			s.saveToRedis(persistSnap, presence)
+		}
 		s.broadcastLocked(c, snapshot)
 		return contracts.JoinMatchSeatResponse{
 			Match:              snapshot,
@@ -306,8 +349,12 @@ func (s *Service) JoinMatchSeat(matchID string, req contracts.JoinMatchSeatReque
 
 	fullSnapshot := buildSnapshotWithPresence(state, presence, len(c.events), nil, now)
 	if updated {
-		s.persistSnapshot(fullSnapshot)
-		s.saveToRedis(fullSnapshot, presence)
+		if state.Status == "finished" {
+			s.flushCommit(fullSnapshot, presence)
+		} else {
+			s.persistSnapshot(fullSnapshot)
+			s.saveToRedis(fullSnapshot, presence)
+		}
 	}
 	return contracts.JoinMatchSeatResponse{
 		Match:              fullSnapshot,
@@ -361,16 +408,24 @@ func (s *Service) ApplyIntent(intent contracts.PlayerIntent, now time.Time) (con
 			c.events = append(c.events, events...)
 			snapshot := buildSnapshotWithPresence(state, presence, len(c.events), events, now)
 			persistSnap := buildSnapshot(state, len(c.events), c.events, now)
-			s.persistSnapshot(persistSnap)
-			s.saveToRedis(persistSnap, presence)
+			if state.Status == "finished" {
+				s.flushCommit(persistSnap, presence)
+			} else {
+				s.persistSnapshot(persistSnap)
+				s.saveToRedis(persistSnap, presence)
+			}
 			s.broadcastLocked(c, snapshot)
 			return snapshot, nil
 		}
 		c.events = append(c.events, timeoutEvents...)
 		snapshot := buildSnapshotWithPresence(state, presence, len(c.events), timeoutEvents, now)
 		persistSnap := buildSnapshot(state, len(c.events), c.events, now)
-		s.persistSnapshot(persistSnap)
-		s.saveToRedis(persistSnap, presence)
+		if state.Status == "finished" {
+			s.flushCommit(persistSnap, presence)
+		} else {
+			s.persistSnapshot(persistSnap)
+			s.saveToRedis(persistSnap, presence)
+		}
 		s.broadcastLocked(c, snapshot)
 		return snapshot, nil
 	}
@@ -408,8 +463,12 @@ func (s *Service) ApplyIntent(intent contracts.PlayerIntent, now time.Time) (con
 	c.events = append(c.events, events...)
 	snapshot := buildSnapshotWithPresence(state, presence, len(c.events), events, now)
 	persistSnap := buildSnapshot(state, len(c.events), c.events, now)
-	s.persistSnapshot(persistSnap)
-	s.saveToRedis(persistSnap, presence)
+	if state.Status == "finished" {
+		s.flushCommit(persistSnap, presence)
+	} else {
+		s.persistSnapshot(persistSnap)
+		s.saveToRedis(persistSnap, presence)
+	}
 	s.broadcastLocked(c, snapshot)
 
 	s.autoPlayComputer(c, now)
@@ -503,8 +562,12 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 		c.events = append(c.events, timeoutEvents...)
 		snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), timeoutEvents, now)
 		persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
-		s.persistSnapshot(persistSnap)
-		s.saveToRedis(persistSnap, c.presence)
+		if c.state.Status == "finished" {
+			s.flushCommit(persistSnap, c.presence)
+		} else {
+			s.persistSnapshot(persistSnap)
+			s.saveToRedis(persistSnap, c.presence)
+		}
 		s.broadcastLocked(c, snapshot)
 		return
 	}
@@ -556,8 +619,12 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 	c.events = append(c.events, events...)
 	snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), events, now)
 	persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
-	s.persistSnapshot(persistSnap)
-	s.saveToRedis(persistSnap, c.presence)
+	if c.state.Status == "finished" {
+		s.flushCommit(persistSnap, c.presence)
+	} else {
+		s.persistSnapshot(persistSnap)
+		s.saveToRedis(persistSnap, c.presence)
+	}
 	s.broadcastLocked(c, snapshot)
 
 	if c.state.Turn == compColor && c.state.Status == "active" {
@@ -604,8 +671,12 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 		c.events = append(c.events, finishEvents...)
 		snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), finishEvents, now)
 		persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
-		s.persistSnapshot(persistSnap)
-		s.saveToRedis(persistSnap, c.presence)
+		if c.state.Status == "finished" {
+			s.flushCommit(persistSnap, c.presence)
+		} else {
+			s.persistSnapshot(persistSnap)
+			s.saveToRedis(persistSnap, c.presence)
+		}
 		s.broadcastLocked(c, snapshot)
 		return
 	}
@@ -635,8 +706,12 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 	c.events = append(c.events, events...)
 	snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), events, now)
 	persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
-	s.persistSnapshot(persistSnap)
-	s.saveToRedis(persistSnap, c.presence)
+	if c.state.Status == "finished" {
+		s.flushCommit(persistSnap, c.presence)
+	} else {
+		s.persistSnapshot(persistSnap)
+		s.saveToRedis(persistSnap, c.presence)
+	}
 	s.broadcastLocked(c, snapshot)
 }
 
@@ -769,6 +844,13 @@ func opposite(color string) string {
 	return "white"
 }
 
+// chooseSeed deliberately IGNORES the request's seed field and always draws
+// a crypto-random match seed. The request shape is reachable from public
+// create routes; a client-pinned seed would let a hidden-cards player compute
+// the opponent's opening hand (seed*31+7 stream) AND every future round draw
+// (seed + fullMoveNum*1000 + offset) before they happen. Replay
+// reproducibility does not need client seeds: the match stores its RNGSeed
+// and replays reuse the STORED seed.
 func chooseSeed(_ int64, _ int64) int64 {
 	var buf [8]byte
 	if _, err := rand.Read(buf[:]); err == nil {
@@ -1132,7 +1214,13 @@ func evaluatePresenceRuntime(state *contracts.MatchState, presence *matchPresenc
 	if deadline.IsZero() {
 		deadline = now.Add(disconnectGracePeriod)
 	}
-	if presence.DisconnectGraceFor != disconnectedColor || presence.DisconnectGraceDeadline == nil || !presence.DisconnectGraceDeadline.Equal(deadline) {
+	// Arm the grace window once per disconnect episode and keep the FIRST
+	// deadline until it expires or the player heartbeats back. Re-deriving and
+	// re-arming whenever the computed deadline drifted (the old behavior) made
+	// a MarkDisconnected seat -- whose LastSeenAt is zeroed, yielding a
+	// now-relative deadline -- slide its forfeit forward every tick and never
+	// actually fire.
+	if presence.DisconnectGraceFor != disconnectedColor || presence.DisconnectGraceDeadline == nil {
 		presence.DisconnectGraceFor = disconnectedColor
 		presence.DisconnectGraceDeadline = &deadline
 		if now.Before(deadline) {

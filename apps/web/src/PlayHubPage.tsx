@@ -79,6 +79,7 @@ export default function PlayHubPage({
   // a click here would be a silent no-op. Surface that state instead.
   const identityReady = Boolean(identity?.guestId);
   const [computerMatchState, setComputerMatchState] = React.useState<'idle' | 'starting' | 'error'>('idle');
+  const [computerMatchNotice, setComputerMatchNotice] = React.useState('');
   const computerStarting = computerMatchState === 'starting';
 
   const handlePlayComputer = useCallback(() => {
@@ -113,9 +114,15 @@ export default function PlayHubPage({
         blackClaimExpiresAt: result.seatColor === 'black' ? result.claim?.expiresAt : undefined,
       });
       router.push(`/match/${encodeURIComponent(result.matchId)}`);
-    }).catch(() => {
+    }).catch((err) => {
       // Never leave the button stuck in its starting state; the visitor can retry.
       setComputerMatchState('error');
+      // Distinguish the one-active-game guard (409) from transient failures:
+      // pointing the player at their live game beats a generic "error".
+      const raw = err instanceof Error ? err.message : '';
+      if (/already has an active computer match/i.test(raw)) {
+        setComputerMatchNotice('You already have a computer game in progress — finish or resign it first. It is available from your active match link.');
+      }
     });
   }, [identity, router, computerMatchState]);
 
@@ -133,6 +140,12 @@ export default function PlayHubPage({
             Choose an official mode, enter casual or rated quick pair, or open one clean invite room for a friend. The live board only opens when a real match is ready.
           </div>
         </div>
+
+        {computerMatchNotice && (
+          <div style={{ color: '#ffd28a', fontSize: '13px', fontWeight: 700, padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(255,180,60,0.35)', background: 'rgba(200,134,10,0.14)' }}>
+            {computerMatchNotice}
+          </div>
+        )}
 
         <button
           data-testid="btn-play-computer"

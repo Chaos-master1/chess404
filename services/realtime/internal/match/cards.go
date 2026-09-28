@@ -450,14 +450,64 @@ func cardTemplateByMechanic(mechanic string) contracts.GameCard {
 }
 
 func starterHandCardsForMode(mode string) []contracts.GameCard {
-	if strings.EqualFold(strings.TrimSpace(mode), starterHandModeStarterThree) {
-		return []contracts.GameCard{
-			cardTemplateByMechanic("freeze"),
-			cardTemplateByMechanic("shield"),
-			cardTemplateByMechanic("smallsacrifice"),
-		}
+	return starterHandForSeed(mode, 0, "")
+}
+
+// starterHandForSeed deals the opening hand for one seat from the match's
+// RNGSeed. White and black draw from differently-seeded streams so the two
+// hands differ. An empty seed falls back to time-based randomness (used by
+// tests that do not pin a seed).
+func starterHandForSeed(mode string, seed int64, owner string) []contracts.GameCard {
+	if !strings.EqualFold(strings.TrimSpace(mode), starterHandModeStarterThree) {
+		return getStarterCards()
 	}
-	return getStarterCards()
+	if seed == 0 {
+		seed = time.Now().UnixNano() + int64(len(owner)) // different streams per seat even unseeded
+	} else if owner == "black" {
+		seed = seed*31 + 7
+	}
+	return randomOpeningHand(seed)
+}
+
+// starterOpeningHandSize is how many cards each side starts a match with.
+// Every match previously dealt the SAME hardcoded hand (freeze, shield,
+// smallsacrifice) to both players, so the computer opponent always opened by
+// freezing the strongest enemy piece -- players read it as "the engine always
+// draws freeze". Deals are now seeded per match (RNGSeed), so hands are
+// random per game while replays stay reproducible.
+const starterOpeningHandSize = 3
+
+// openerExcludedMechanics cannot resolve without a live board context an
+// opening hand cannot provide (mirror copies itself, joker needs a target
+// list, mindcontrol/parasite need an enemy piece), so they are not dealt as
+// opening cards.
+var openerExcludedMechanics = map[string]struct{}{
+	"mirror": {}, "joker": {}, "mindcontrol": {}, "parasite": {},
+}
+
+func randomOpeningHand(seed int64) []contracts.GameCard {
+	pool := getStarterCards()
+	if len(pool) == 0 {
+		return nil
+	}
+	rng := mrand.New(mrand.NewSource(seed))
+	pickable := make([]contracts.GameCard, 0, len(pool))
+	for _, card := range pool {
+		if _, excluded := openerExcludedMechanics[card.Mechanic]; excluded {
+			continue
+		}
+		pickable = append(pickable, card)
+	}
+	if len(pickable) == 0 {
+		pickable = pool
+	}
+	hand := make([]contracts.GameCard, 0, starterOpeningHandSize)
+	for i := 0; i < starterOpeningHandSize && len(pickable) > 0; i++ {
+		idx := rng.Intn(len(pickable))
+		hand = append(hand, pickable[idx])
+		pickable = append(pickable[:idx], pickable[idx+1:]...)
+	}
+	return hand
 }
 
 func cloneCardsWithOwner(cards []contracts.GameCard, owner string) []contracts.GameCard {
@@ -483,6 +533,14 @@ func cardFromHand(state *contracts.MatchState, owner string, cardID string) (con
 	return contracts.GameCard{}, false
 }
 
+// removeCardFromHand removes a card from a player's hand and consumes that
+// player's one-card-per-turn slot. Removing the card is exactly the moment
+// the client's finishCardUse sets its cardUsedBy flag, so both sides agree on
+// when the slot is spent. Pending cards that stay in the hand (joker and
+// other target-selection mechanics) do not consume the slot until their
+// target resolves, which keeps the designed abandon-and-switch of a same-
+// player pending card working. Every path that plays a card funnels through
+// here, so the server-side gate in applyPlayCard covers all card types.
 func removeCardFromHand(state *contracts.MatchState, owner string, cardID string) {
 	hand := state.WhiteHand
 	if owner == "black" {
@@ -499,6 +557,10 @@ func removeCardFromHand(state *contracts.MatchState, owner string, cardID string
 	} else {
 		state.WhiteHand = filtered
 	}
+	if state.CardUsedThisTurn == nil {
+		state.CardUsedThisTurn = map[string]bool{}
+	}
+	state.CardUsedThisTurn[owner] = true
 }
 
 func addRewardCards(state *contracts.MatchState, owner string, count int, now time.Time) []contracts.GameCard {

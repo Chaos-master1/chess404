@@ -37,7 +37,7 @@ func resolveMatchSeatSecret(matchID, guestID string) (string, error) {
 	if baseURL == "" {
 		return "", fmt.Errorf("match service URL is not configured")
 	}
-	token := configuredInternalServiceToken()
+	token := matchServiceCallerToken()
 	if token == "" {
 		return "", fmt.Errorf("internal service token is not configured")
 	}
@@ -74,6 +74,20 @@ func resolveMatchSeatSecret(matchID, guestID string) (string, error) {
 		return "", fmt.Errorf("match service returned an empty seat secret")
 	}
 	return secret, nil
+}
+
+// matchServiceCallerToken is the credential this service SENDS to
+// match-service (match-service's accept list, in precedence order).
+// Deliberately independent of the inbound chain: per-target rotation
+// (RUNBOOK.md stage 4) stages MATCH_INTERNAL_SERVICE_TOKEN for the
+// platform->match hop without touching what platform accepts itself.
+func matchServiceCallerToken() string {
+	for _, name := range []string{"MATCH_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // seatSecretIsRedacted reports whether a snapshot-carried seat secret is

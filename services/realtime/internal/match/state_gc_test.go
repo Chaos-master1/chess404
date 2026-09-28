@@ -1,6 +1,7 @@
 package match
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -74,5 +75,68 @@ func TestGCFinishedMatchesKeepsFreshMatches(t *testing.T) {
 
 	if _, ok := service.matches.Load("gc_fresh"); !ok {
 		t.Fatal("match evicted before its TTL elapsed")
+	}
+}
+
+// Regression test for the finalizeAbandonedMatch data race.
+//
+// finalizeAbandonedMatch used to release c.mu BEFORE calling flushCommit and
+// broadcastLocked. broadcastLocked -> deliverToSubscribersLocked reads c.subs
+// (a map) and c.seqNum without the lock, so a player reconnecting exactly as
+// the zombie GC finalized their match produced a concurrent map read+write --
+// a fatal runtime panic that killed the whole match-service process, not just
+// one request. Run under -race, this test hammers Subscribe/ApplyIntent while
+// the GC finalizes an abandoned match and fails if the two ever race.
+func TestGCFinalizeAbandonedDoesNotRaceSubscribers(t *testing.T) {
+	service := NewService()
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+
+	createTestMatch(service, contracts.CreateMatchRequest{MatchID: "zombie_race", Queue: "casual"}, now)
+	c := service.getMatchContainer("zombie_race")
+	c.mu.Lock()
+	c.state.Status = "active"
+	// Older than the activeAbandonTTL so the GC treats it as a zombie, and
+	// presence-less so the legacy wall-clock rule applies (zombiePresenceLocked
+	// returns true for containers without presence tracking).
+	c.presence = nil
+	c.state.UpdatedAt = now
+	c.mu.Unlock()
+
+	const workers = 8
+	const iterations = 200
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// Concurrent reconnect storm: each worker repeatedly subscribes (taking
+	// c.mu and writing c.subs) and unsubscribes. Without the fix this is the
+	// racing writer against the GC's unlocked deliverToSubscribersLocked.
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_, unsubscribe, _, err := service.Subscribe("zombie_race", "", "")
+				if err == nil && unsubscribe != nil {
+					unsubscribe()
+				}
+			}
+		}()
+	}
+
+	// The GC pass finalizes the zombie while subscribers churn.
+	service.gcFinishedMatches(now.Add(11 * time.Minute))
+	close(stop)
+	wg.Wait()
+
+	c.mu.Lock()
+	status := c.state.Status
+	c.mu.Unlock()
+	if status != "finished" {
+		t.Fatalf("expected zombie match finalized as finished, got %q", status)
 	}
 }

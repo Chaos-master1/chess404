@@ -8,6 +8,7 @@ import {
   connectToMatchStream,
   fetchMatch,
   readStoredRoomMeta,
+  recordMatchSeqNum,
   sendMatchPresenceHeartbeat,
   writeStoredRoomMeta,
 } from '../lib/match-service';
@@ -69,7 +70,6 @@ export interface UseMatchConnectionProps {
   applyGatewayAccountSessions: (sessions?: GatewayBootstrapAccountSessions) => void;
 
   onSnapshot: (snapshot: MatchSnapshotMessage) => void;
-  stopAbortCountdown: (manual?: boolean) => void;
   authoritativeActorForColor: (color: PieceColor) => {
     playerId: string;
     playerSecret?: string;
@@ -94,7 +94,6 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     applyGatewayMatchClaims,
     applyGatewayAccountSessions,
     onSnapshot,
-    stopAbortCountdown,
     authoritativeActorForColor,
   } = props;
 
@@ -120,6 +119,9 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
   // (not depended-on) by the fallback poll effect below so that effect can
   // skip its network call whenever the primary channel is already healthy.
   const wsConnectedRef = React.useRef(false);
+  // Mirrors `over` for the reconciliation poll's interval closure so the
+  // hook's rules are respected (refs must not be created inside effects).
+  const reconcileOverRef = React.useRef(over);
 
   const createAuthoritativeRematchRoom = React.useCallback(async () => {
     const matchId = authoritativeMatchIdRef.current;
@@ -204,7 +206,6 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
       return;
     }
 
-    stopAbortCountdown(true);
     const streamIdentity = hostedRuntime && viewerSeat ? authoritativeActorForColor(viewerSeat) : null;
     if (hostedRuntime && viewerSeat && (!streamIdentity?.playerId || (!streamIdentity.playerSecret && !streamIdentity.playerClaimToken))) {
       setAuthoritativeLive(false);
@@ -247,11 +248,50 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
 
     manualRetryRef.current = retry;
 
+    // ── Stale-stream reconciliation poll ─────────────────────────────────
+    // The WS can go stale WITHOUT closing: a network blip that drops the
+    // path without a TCP FIN, or the server's slow-subscriber drop (buffer
+    // overflow removes the subscription while the socket stays open). In
+    // both cases the tab sits frozen -- the opponent's move arrives on the
+    // server but never renders until a manual reload. The existing "no
+    // messages" watchdog cannot catch these because the socket LOOKS alive.
+    //
+    // Every 15s while the stream is up, fetch the authoritative snapshot
+    // over HTTP and feed it through the normal onSnapshot path. When the
+    // stream is healthy the seqNum tier classifies it same-seq/cosmetic and
+    // it is a no-op; when the stream is lying, the truth (opponent's move,
+    // clocks, presence) applies immediately.
+    let reconcileTimer: number | null = null;
+    const stopReconcile = () => {
+      if (reconcileTimer !== null) {
+        window.clearInterval(reconcileTimer);
+        reconcileTimer = null;
+      }
+    };
+    reconcileOverRef.current = over;
+    if (hostedRuntime) {
+      reconcileTimer = window.setInterval(async () => {
+        if (reconcileOverRef.current || !wsConnectedRef.current || !authoritativeMatchId) return;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+        try {
+          const truth = await fetchMatch(authoritativeMatchId);
+          if (!reconcileOverRef.current && wsConnectedRef.current) {
+            if (truth.seqNum) recordMatchSeqNum(authoritativeMatchId, truth.seqNum);
+            onSnapshot(truth);
+          }
+        } catch {
+          // Poll failures are expected during transient gateway issues; the
+          // WS watchdog and poll fallback still cover the hard cases.
+        }
+      }, 15_000);
+    }
+
     return () => {
+      stopReconcile();
       wsConnectedRef.current = false;
       disconnect();
     };
-  }, [authoritativeActorForColor, authoritativeMatchId, onSnapshot, hostedRuntime, stopAbortCountdown, viewerSeat]);
+  }, [authoritativeActorForColor, authoritativeMatchId, onSnapshot, hostedRuntime, viewerSeat]);
 
   // ── Presence heartbeat effect ─────────────────────────────────────────────
   React.useEffect(() => {

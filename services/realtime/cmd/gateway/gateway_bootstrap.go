@@ -30,7 +30,7 @@ func resolveGatewaySeatSecret(matchID, guestID string) (string, error) {
 	if baseURL == "" {
 		return "", fmt.Errorf("match service URL is not configured")
 	}
-	token := gatewayInternalServiceToken()
+	token := gatewayMatchServiceCallerToken()
 	if token == "" {
 		return "", fmt.Errorf("internal service token is not configured")
 	}
@@ -120,10 +120,99 @@ func buildGatewayBootstrapPayload(config GatewayConfig, client *http.Client, req
 	}
 }
 
+// sessionCookieSide holds the per-seat credentials the HttpOnly session
+// cookies carry. The guest id cookie is what makes a cookie-only resume
+// possible: the secret alone cannot identify which guest row to resume.
+type sessionCookieSide struct {
+	GuestID       string
+	SessionSecret string
+}
+
+func (c sessionCookieSide) empty() bool {
+	return c.GuestID == "" && c.SessionSecret == ""
+}
+
+// foldSessionCookieIdentities backfills each seat's identity from the
+// HttpOnly session cookies this gateway/web dual-write minted on earlier
+// bootstrap responses. This is the read side of the cookie migration
+// (RUNBOOK.md): the browser never sees these cookies' contents, but it
+// sends them on every request, so a caller that has moved off localStorage
+// (or lost it to a strict storage purge) still resumes its session instead
+// of minting a fresh guest pair. JSON credentials always win per field: the
+// caller explicitly presenting a credential is the stronger signal, and
+// existing clients keep their exact behavior.
+func foldSessionCookieIdentities(request GatewayBootstrapRequest, r *http.Request) GatewayBootstrapRequest {
+	cookies := parseSessionCookies(r.Header.Get("Cookie"))
+	if cookies["white"].empty() && cookies["black"].empty() {
+		return request
+	}
+	fold := func(identity *GatewayGuestIdentity, cookie sessionCookieSide) *GatewayGuestIdentity {
+		if cookie.empty() {
+			return identity
+		}
+		if identity == nil {
+			return &GatewayGuestIdentity{GuestID: cookie.GuestID, SessionSecret: cookie.SessionSecret}
+		}
+		if strings.TrimSpace(identity.GuestID) == "" {
+			identity.GuestID = cookie.GuestID
+		}
+		if strings.TrimSpace(identity.SessionSecret) == "" && strings.TrimSpace(identity.SessionToken) == "" {
+			identity.SessionSecret = cookie.SessionSecret
+		}
+		return identity
+	}
+	request.White = fold(request.White, cookies["white"])
+	request.Black = fold(request.Black, cookies["black"])
+	return request
+}
+
+// parseSessionCookies extracts the per-seat guest ids and session secrets
+// from a Cookie header. Pure string handling so tests can pin the parsing.
+func parseSessionCookies(cookieHeader string) map[string]sessionCookieSide {
+	cookies := map[string]sessionCookieSide{}
+	for _, part := range strings.Split(cookieHeader, ";") {
+		name, value, found := strings.Cut(strings.TrimSpace(part), "=")
+		if !found {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		var side string
+		isSecret := false
+		isGuestID := false
+		if prefix := "session_secret_"; strings.HasPrefix(name, prefix) {
+			side = strings.TrimPrefix(name, prefix)
+			isSecret = true
+		} else if prefix := "session_guest_"; strings.HasPrefix(name, prefix) {
+			side = strings.TrimPrefix(name, prefix)
+			isGuestID = true
+		}
+		if side != "white" && side != "black" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if decoded, err := url.PathUnescape(value); err == nil {
+			value = decoded
+		}
+		if value == "" {
+			continue
+		}
+		entry := cookies[side]
+		if isSecret {
+			entry.SessionSecret = value
+		} else if isGuestID {
+			entry.GuestID = value
+		}
+		cookies[side] = entry
+	}
+	return cookies
+}
+
 // bootstrapResumedSuppliedGuest reports whether this seat's session is the very
 // one the caller already holds credentials for. Only then can the response omit
 // the secret. A caller whose identity failed to resume gets a brand-new guest
 // back, and must be handed that new guest's secret or it can never authenticate.
+// Cookie-supplied credentials count as supplied: the browser holds them
+// HttpOnly precisely so they can resume the session without exposing them.
 func bootstrapResumedSuppliedGuest(request GatewayBootstrapRequest, side, resolvedGuestID string) bool {
 	identity := request.White
 	if side == "black" {

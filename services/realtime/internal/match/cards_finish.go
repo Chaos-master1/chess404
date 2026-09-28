@@ -85,7 +85,17 @@ func evaluateAutomaticMatchFinish(state *contracts.MatchState) (string, string) 
 	}
 
 	_, isMate, isStale := gameStatusWithFusion(state.Board, state.Turn, state.LastMove, sliceToSet(state.Moved), state.FortressZones)
-	if isMate || isStale {
+	if isMate {
+		// Checkmate ends the match unconditionally (product decision after the
+		// clock-kept-ticking-after-mate report): the mated side's hand no
+		// longer delays the finish, so the clock cannot run past a mate in any
+		// mode. markMatchFinished clears the clock and pending effects.
+		return opposite(state.Turn), "checkmate"
+	}
+	if isStale {
+		// Stalemate keeps the hand window: unlike mate, a Reverse/Joker in the
+		// stalemated side's hand can still legitimately change the position,
+		// and a draw is the safe default while that option exists.
 		hand := state.WhiteHand
 		if state.Turn == "black" {
 			hand = state.BlackHand
@@ -93,11 +103,6 @@ func evaluateAutomaticMatchFinish(state *contracts.MatchState) (string, string) 
 		if len(hand) > 0 && state.ModeID != "computer" {
 			return "", ""
 		}
-	}
-	if isMate {
-		return opposite(state.Turn), "checkmate"
-	}
-	if isStale {
 		return "draw", "stalemate"
 	}
 	if insufficientMaterialForState(state) {

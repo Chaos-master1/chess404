@@ -23,6 +23,15 @@ func ensureGatewayPrivateGuestSession(config GatewayConfig, client *http.Client,
 	log.Printf("gw:guest-bootstrap: starting guestID=%q sessionSecret=%s platformServiceURL=%q",
 		identity.GuestID, redactSecret(identity.SessionSecret), config.PlatformServiceURL)
 	session, errMessage := bootstrapGuestSessionForSide(config, client, &identity, r)
+	// bootstrapGuestSessionForSide re-mints a fresh guest when the platform
+	// rejects supplied credentials. For private-match access that replacement
+	// must not be honored: a rejected identity would otherwise walk in as a
+	// brand-new guest and claim the open seat as a phantom opponent. Refuse
+	// instead; the client clears its stale credentials and retries explicitly.
+	if session != nil && strings.TrimSpace(identity.GuestID) != "" && session.Guest.GuestID != strings.TrimSpace(identity.GuestID) {
+		log.Printf("gw:guest-bootstrap: REFUSED replacement session supplied=%q minted=%q", identity.GuestID, session.Guest.GuestID)
+		return nil, http.StatusUnauthorized, errors.New("unauthorized guest session")
+	}
 	if session != nil {
 		log.Printf("gw:guest-bootstrap: ok guestID=%q accountID=%q", session.Guest.GuestID, accountIDOf(session))
 		return session, http.StatusOK, nil
@@ -195,7 +204,7 @@ func fetchGatewayJSONRequestWithContext(ctx context.Context, client *http.Client
 	if payload != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	if token := gatewayInternalServiceToken(); token != "" {
+	if token := outboundServiceToken(url); token != "" {
 		request.Header.Set("X-Chess404-Service-Token", token)
 	}
 	// Set the Origin header on the outgoing request to match the public
@@ -306,6 +315,10 @@ func bootstrapMessage(status GatewaySystemStatus) string {
 	return "Gateway online, but some backend services are degraded: " + strings.Join(problems, ", ")
 }
 
+// gatewayInternalServiceToken is the FIRST token the gateway accepts from
+// web callers (rate-limit trusted bypass). It is deliberately NOT the
+// outbound credential: the gateway SENDS per-target tokens from the
+// gatewayXServiceCallerToken helpers below.
 func gatewayInternalServiceToken() string {
 	for _, name := range []string{"GATEWAY_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
@@ -313,6 +326,54 @@ func gatewayInternalServiceToken() string {
 		}
 	}
 	return ""
+}
+
+// Outbound caller chains, one per backend, each mirroring that backend's
+// accept list in the same precedence order. Staging a callee's specific env
+// on the gateway then makes the gateway present the right credential
+// without any code change (RUNBOOK.md stage 4).
+func gatewayMatchServiceCallerToken() string {
+	for _, name := range []string{"MATCH_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func gatewayPlatformServiceCallerToken() string {
+	for _, name := range []string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func gatewayMatchmakingServiceCallerToken() string {
+	for _, name := range []string{"MATCHMAKING_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// outboundServiceToken selects the caller credential for an outgoing
+// request by its target backend URL. The gateway sends a token to EVERY
+// backend hop, and each backend accepts its own env chain, so the
+// credential must be chosen per destination, not from one global value.
+func outboundServiceToken(targetURL string) string {
+	u := strings.TrimSpace(targetURL)
+	matchmakingURL := strings.TrimSpace(gatewayConfigFromEnv().MatchmakingServiceURL)
+	matchURL := strings.TrimSpace(gatewayConfigFromEnv().MatchServiceURL)
+	if matchmakingURL != "" && strings.HasPrefix(u, matchmakingURL) {
+		return gatewayMatchmakingServiceCallerToken()
+	}
+	if matchURL != "" && strings.HasPrefix(u, matchURL) {
+		return gatewayMatchServiceCallerToken()
+	}
+	return gatewayPlatformServiceCallerToken()
 }
 
 func gatewayConfigFromEnv() GatewayConfig {

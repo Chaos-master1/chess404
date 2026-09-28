@@ -19,6 +19,10 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  icons: {
+    icon: [{ url: '/favicon.ico' }, { url: '/logo-mark.png', type: 'image/png', sizes: '256x256' }],
+    apple: '/apple-touch-icon.png',
+  },
   title: 'Chess404',
   description: 'Chess404 is competitive online chess with curated card powers.'
 };

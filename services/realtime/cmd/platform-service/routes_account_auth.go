@@ -60,6 +60,7 @@ func registerAccountAuthRoutes(mux *http.ServeMux, guests platform.GuestDirector
 			return
 		}
 		recordAccountSecurityEvent(securityAudit, accountSession.Account.AccountID, platform.AccountSecurityEventKindAccountClaimed, accountSession.Account.Handle)
+		renameLinkedGuestToHandle(guests, accountSession.Account)
 		accountsCache.Invalidate()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -351,6 +352,7 @@ func registerAccountAuthRoutes(mux *http.ServeMux, guests platform.GuestDirector
 			return
 		}
 		recordAccountSecurityEvent(securityAudit, accountSession.Account.AccountID, platform.AccountSecurityEventKindAccountClaimed, accountSession.Account.Handle)
+		renameLinkedGuestToHandle(guests, accountSession.Account)
 		recordAccountSecurityEvent(securityAudit, accountSession.Account.AccountID, platform.AccountSecurityEventKindPasswordLoginEnabled, strings.TrimSpace(payload.Email))
 
 		var (
@@ -573,6 +575,7 @@ func registerAccountAuthRoutes(mux *http.ServeMux, guests platform.GuestDirector
 			return
 		}
 		recordAccountSecurityEvent(securityAudit, accountSession.Account.AccountID, platform.AccountSecurityEventKindPasswordLoginSucceeded, accountSession.Account.Handle)
+		renameLinkedGuestToHandle(guests, accountSession.Account)
 		guestSession, err := guests.IssueGuestSession(resolvePrimaryGuestID(accountSession.Account))
 		if err != nil {
 			http.Error(w, `{"error":"failed to restore account guest session"}`, http.StatusInternalServerError)

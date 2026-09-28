@@ -15,3 +15,6 @@ apps/web/.env.local
 **/.env.local
 services/realtime/data
 redis-unstable
+services/realtime/bin
+test-results
+playwright-report

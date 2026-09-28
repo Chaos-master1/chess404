@@ -22,6 +22,9 @@ func newSecurityTestMatch(t *testing.T, service *Service, matchID string, now ti
 		BlackGuestID:      "guest_black",
 		WhitePlayerSecret: whiteTestSecret,
 		BlackPlayerSecret: blackTestSecret,
+		// Hand-visibility assertions below assume the hidden-cards mode; an
+		// unset mode normalizes to open_cards, where hands are public.
+		ModeID: contracts.MatchModeHiddenCards,
 	}, now)
 }
 
@@ -155,5 +158,62 @@ func TestJoinMatchSeatRejectsIdentityRewriteWithoutSecret(t *testing.T) {
 		PlayerSecret: whiteTestSecret,
 	}, now); err != nil {
 		t.Fatalf("legitimate seat owner should still be able to join: %v", err)
+	}
+}
+
+// requireIntentColor's auth order is security-relevant and pinned here:
+//
+//  1. If the playerID matches a seat's guest id, the secret is checked
+//     against THAT seat -- an id claiming to be guest_b can NEVER
+//     authenticate with white's secret, even though the caller holds a
+//     valid (other seat's) credential. Guest ids are public; secrets are
+//     not; the id chooses the seat, the secret must prove it.
+//  2. If the id matches NO seat (legacy clients send placeholder ids),
+//     the secret alone resolves the seat via the final fallback -- the
+//     bearer credential identifies its owner.
+//  3. A wrong or empty secret never authenticates, in any path.
+//
+// Changing any of this must be a conscious decision, not a refactor slip.
+func TestRequireIntentColorSecretOnlyFallbackIsPinned(t *testing.T) {
+	state := &contracts.MatchState{
+		MatchID:           "pin_secret_fallback",
+		WhiteGuestID:      "guest_w",
+		BlackGuestID:      "guest_b",
+		WhitePlayerSecret: "white-secret",
+		BlackPlayerSecret: "black-secret",
+	}
+
+	// (1) Correct id + correct secret: resolves.
+	color, err := requireIntentColor(state, "guest_w", "white-secret")
+	if err != nil || color != "white" {
+		t.Fatalf("expected white for correct id+secret, got %s err=%v", color, err)
+	}
+
+	// (1) A seat-matching id is checked against ITS OWN seat only: the
+	// opponent's public guest id cannot ride white's secret.
+	if _, err := requireIntentColor(state, "guest_b", "white-secret"); err == nil {
+		t.Fatal("guest_b id must NOT authenticate with white's secret")
+	}
+
+	// (2) Placeholder id (matches no seat) + valid secret: resolves via the
+	// secret-only fallback.
+	color, err = requireIntentColor(state, "legacy-client-placeholder", "black-secret")
+	if err != nil || color != "black" {
+		t.Fatalf("placeholder id with valid secret must resolve via fallback, got %s err=%v", color, err)
+	}
+	color, err = requireIntentColor(state, "", "white-secret")
+	if err != nil || color != "white" {
+		t.Fatalf("empty id with valid secret resolves via fallback (pinned), got %s err=%v", color, err)
+	}
+
+	// (3) Wrong or empty secret: never resolves, in any path.
+	if _, err := requireIntentColor(state, "guest_w", "black-secret"); err == nil {
+		t.Fatal("wrong secret must be rejected even with a matching id")
+	}
+	if _, err := requireIntentColor(state, "guest_w", ""); err == nil {
+		t.Fatal("empty secret must be rejected")
+	}
+	if _, err := requireIntentColor(state, "legacy-placeholder", "no-such-secret"); err == nil {
+		t.Fatal("wrong secret must be rejected via the fallback path too")
 	}
 }

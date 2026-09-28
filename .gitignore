@@ -61,3 +61,7 @@ __pycache__/
 
 # Deployment hygiene
 lichess repo/
+
+# Compiled Go binaries (build artifacts)
+services/realtime/bin/
+services/realtime/gateway

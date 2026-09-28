@@ -33,6 +33,24 @@ jobs:
           cache-dependency-path: services/realtime/go.sum
       - run: go test ./internal/... ./cmd/... -v -count=1 -timeout 300s
 
+  go-race:
+    # The plain go-test job cannot see data races: -race builds fail only
+    # where the scheduler actually interleaves the racy goroutines. This job
+    # reruns the suite under the race detector (slower, ~10x on the hot
+    # packages) so lock-discipline regressions like the GC broadcast race are
+    # caught in CI, not by a process crash in production.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/realtime
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: services/realtime/go.sum
+      - run: go test -race ./internal/... ./cmd/... -count=1 -timeout 900s
+
   go-vuln:
     runs-on: ubuntu-latest
     defaults:
@@ -141,6 +159,25 @@ jobs:
       - run: corepack enable && pnpm install
       - run: pnpm --filter @chess404/contracts run lint
       - run: pnpm --filter @chess404/game-core run lint
+      # The Go server embeds its own copy of the shared card catalog. Fail
+      # fast here if the generated copies have drifted, before the client is
+      # built against a catalog the server never sees.
+      - run: node packages/game-core/scripts/sync-cards-json.mjs
+      - run: git diff --exit-code services/realtime/internal/match/cards.json
+
+  web-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: corepack enable && pnpm install
+      # Runs lint-types (next typegen + tsc) and the vitest unit suite.
+      - run: pnpm test
 
   web-build:
     runs-on: ubuntu-latest

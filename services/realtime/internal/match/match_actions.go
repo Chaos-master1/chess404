@@ -139,6 +139,11 @@ func applyMove(state *contracts.MatchState, intent contracts.PlayerIntent, now t
 	notation := moveNotation(state.Board, *intent.From, *intent.To, piece, captureOccurred)
 	state.Moved = append(state.Moved, keyForSquare(*intent.From))
 	state.LastMove = &contracts.LastMove{From: *intent.From, To: *intent.To}
+	// SAN check/mate suffix: computed after Moved/LastMove are updated so the
+	// mated side's legal-move probe matches the server's own finish logic,
+	// and appended before FirstNote is captured below.
+	notationSuffix := suffixForMove(state.Board, opposite(state.Turn), state.LastMove, sliceToSet(state.Moved), state.FortressZones)
+	notation += notationSuffix
 	state.DrawOfferedBy = ""
 	state.HalfMoveClock = nextHalfMoveClock(state.HalfMoveClock, piece.Type, captureOccurred)
 	if state.DoubleMove != nil {
@@ -196,6 +201,9 @@ func applyMove(state *contracts.MatchState, intent contracts.PlayerIntent, now t
 	}
 	justMovedColor := state.Turn
 	state.Turn = opposite(state.Turn)
+	if state.CardUsedThisTurn != nil {
+		state.CardUsedThisTurn[state.Turn] = false
+	}
 	cleanupTemporaryEffects(state, justMovedColor)
 	resolveFogEffects(state, justMovedColor)
 	resolveFortressEffects(state, justMovedColor)
@@ -259,10 +267,11 @@ func applyMove(state *contracts.MatchState, intent contracts.PlayerIntent, now t
 	}
 
 	payload := map[string]any{
-		"from":     intent.From,
-		"to":       intent.To,
-		"notation": notation,
-		"nextTurn": state.Turn,
+		"from":       intent.From,
+		"to":         intent.To,
+		"notation":   notation,
+		"nextTurn":   state.Turn,
+		"moveSuffix": notationSuffix,
 	}
 	if promotion != "" {
 		payload["promotion"] = promotion
@@ -405,6 +414,9 @@ func applyInvisibleMove(state *contracts.MatchState, intent contracts.PlayerInte
 	}
 	justMovedColor := state.Turn
 	state.Turn = opposite(state.Turn)
+	if state.CardUsedThisTurn != nil {
+		state.CardUsedThisTurn[state.Turn] = false
+	}
 	cleanupTemporaryEffects(state, justMovedColor)
 	resolveFogEffects(state, justMovedColor)
 	resolveFortressEffects(state, justMovedColor)

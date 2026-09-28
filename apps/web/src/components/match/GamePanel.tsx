@@ -33,7 +33,11 @@ export function GamePanel({
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Contain the scroll to the chat list: scrollIntoView() walks up and
+    // scrolls EVERY scrollable ancestor, so on phones each incoming chat
+    // message yanked the whole match page back down while the player was
+    // reading the board. Scrolling only the container keeps the page still.
+    messagesEndRef.current?.parentElement?.scrollTo({ top: messagesEndRef.current.parentElement.scrollHeight, behavior: 'smooth' });
   }, [chatMessages]);
   
   return (

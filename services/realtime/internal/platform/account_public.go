@@ -73,6 +73,25 @@ type PublicAccountProfile struct {
 	GuestCount     int                   `json:"guestCount"`
 	CurrentSeason  *AccountSeasonSummary `json:"currentSeason,omitempty"`
 	SelectedSeason *AccountSeasonSummary `json:"selectedSeason,omitempty"`
+	// Per-mode ladders (hidden/open). HiddenCards/OpenCards are nil when the
+	// player has no games in that mode yet.
+	HiddenCards *AccountModeRating `json:"hiddenCards,omitempty"`
+	OpenCards   *AccountModeRating `json:"openCards,omitempty"`
+	// ModeRating is Rating resolved for the leaderboard's requested mode
+	// (per-mode ladder when present, else the blended rating).
+	ModeRating int `json:"modeRating,omitempty"`
+}
+
+// EffectiveRatingForMode returns the rating a leaderboard filtered to one
+// mode should sort by: the per-mode ladder when the player has games there,
+// falling back to the blended legacy rating for accounts that predate the
+// split (so mode-filtered views never come up empty just because an account
+// last played before the split).
+func (p PublicAccountProfile) EffectiveRatingForMode(modeID contracts.MatchModeID) int {
+	if p.ModeRating != 0 {
+		return p.ModeRating
+	}
+	return p.Rating
 }
 
 type DetailedPublicAccountProfile struct {
@@ -106,6 +125,22 @@ func BuildPublicAccountProfileForSeasonAndMode(account AccountProfile, guests Gu
 		Losses:         account.Losses,
 		Draws:          account.Draws,
 		GuestCount:     len(account.LinkedGuestIDs),
+		HiddenCards:    account.modeRatingFor("hidden_cards"),
+		OpenCards:      account.modeRatingFor("open_cards"),
+	}
+	if modeID != "" {
+		// Leaderboards filtered by mode sort by that mode's ladder, with the
+		// blended rating as the legacy fallback.
+		switch contracts.NormalizeMatchModeID(string(modeID)) {
+		case contracts.MatchModeHiddenCards:
+			if public.HiddenCards != nil {
+				public.ModeRating = public.HiddenCards.Rating
+			}
+		case contracts.MatchModeOpenCards:
+			if public.OpenCards != nil {
+				public.ModeRating = public.OpenCards.Rating
+			}
+		}
 	}
 
 	var (
@@ -145,14 +180,17 @@ func BuildPublicAccountProfileForSeasonAndMode(account AccountProfile, guests Gu
 		}
 	}
 
+	// The account handle is the account's single player-facing username.
+	// The linked guest's auto-minted display name ("Hollow Bishop 108")
+	// must never leak into account surfaces; guest names stay guest-only
+	// (live match seats, community guest lists). Stats may still come from
+	// the linked guest for accounts predating direct account stats.
 	switch {
 	case primaryFound:
-		public.DisplayName = primaryGuest.DisplayName
 		if !accountHasDirectStats(account) {
 			public.Rating = primaryGuest.Rating
 		}
 	case fallbackFound:
-		public.DisplayName = fallback.DisplayName
 		if !accountHasDirectStats(account) {
 			public.Rating = fallback.Rating
 		}

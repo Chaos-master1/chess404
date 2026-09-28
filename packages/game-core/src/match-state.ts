@@ -1,7 +1,7 @@
 import type { MatchState, PieceColor, PlayerIntent, ResolvedEvent, Sq } from '@chess404/contracts';
 import { RULES_VERSION, CLOCK_START, OPP } from './constants';
 import { createMulberry32 } from './rng';
-import { cloneBoard, legalMoves, makeBoard, moveNotation } from './chess-engine';
+import { cloneBoard, gameStatus, legalMoves, makeBoard, moveNotation } from './chess-engine';
 
 export interface ApplyIntentResult {
   match: MatchState;
@@ -108,7 +108,7 @@ const applyMoveIntent = (
     nextBoard[intent.from.row][intent.to.col] = null;
   }
 
-  const notation = moveNotation(
+  let notation = moveNotation(
     match.board,
     intent.from.row,
     intent.from.col,
@@ -117,6 +117,12 @@ const applyMoveIntent = (
     piece,
     Boolean(capturedPiece)
   );
+  // SAN check/mate suffix, computed on the post-move board with the moved
+  // set updated -- mirroring the server's suffixForMove in match/chess.go.
+  const nextMoved = [...match.moved, `${intent.from.row}-${intent.from.col}`];
+  const status = gameStatus(nextBoard, OPP[match.turn], { from: intent.from, to: intent.to }, new Set(nextMoved));
+  if (status.isMate) notation += '#';
+  else if (status.isCheck) notation += '+';
 
   const nextTurn: PieceColor = OPP[match.turn];
   const nextHalfMoveClock = piece.type === 'pawn' || capturedPiece ? 0 : match.halfMoveClock + 1;

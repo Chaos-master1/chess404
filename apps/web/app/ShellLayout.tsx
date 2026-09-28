@@ -4,15 +4,11 @@ import React from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import AppShell, { ShellNavGroup, ShellNavItem } from '../src/components/layout/AppShell';
 import {
-  AdminIcon,
   CardsIcon,
   CommunityIcon,
-  FriendsIcon,
   HistoryIcon,
-  InboxIcon,
   PlayIcon,
   ProfileIcon,
-  StatusIcon,
   WatchIcon,
 } from '../src/components/layout/icons';
 
@@ -42,7 +38,7 @@ const utilityGroups: ShellNavGroup[] = [
 export function ShellLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [accountOpen, setAccountOpen] = React.useState(false);
+  const [, setAccountOpen] = React.useState(false);
 
   // In a real implementation, pageMeta would be dynamic based on pathname
   const pageMeta = {

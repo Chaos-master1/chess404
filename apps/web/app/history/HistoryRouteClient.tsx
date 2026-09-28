@@ -18,7 +18,7 @@ export default function HistoryRouteClient({
   React.useLayoutEffect(() => {
     p.setHistoryFocusMatchId(replayMatchId);
     p.setHistoryFocusGuestId(guestId);
-  }, [guestId, p.setHistoryFocusGuestId, p.setHistoryFocusMatchId, replayMatchId]);
+  }, [guestId, p.setHistoryFocusGuestId, p.setHistoryFocusMatchId, replayMatchId]); // eslint-disable-line react-hooks/exhaustive-deps -- route-focus sync; context member identities churn by design
 
   return (
     <HistoryPage

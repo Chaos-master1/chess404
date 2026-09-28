@@ -19,6 +19,8 @@ const ROUTES = [
   '/account',
   '/status',
   '/admin',
+  '/privacy',
+  '/terms',
 ];
 
 // Routes that must NOT be reachable in production.

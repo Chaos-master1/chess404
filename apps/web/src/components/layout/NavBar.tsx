@@ -43,11 +43,10 @@ export function NavBar({
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: '180px' }}>
         <div style={{
           width: '38px', height: '38px', borderRadius: '8px',
-          background: 'linear-gradient(135deg, #c8860a 0%, #8b5e0a 100%)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '20px', boxShadow: '0 0 18px rgba(200,134,10,0.6)',
+          overflow: 'hidden', boxShadow: '0 0 18px rgba(200,134,10,0.6)',
           border: '1px solid rgba(255,180,60,0.5)',
-        }}>♛</div>
+        }}><img src="/logo-mark.png" alt="Chess404" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /></div>
         <span style={{ fontSize: '22px', fontWeight: 800, letterSpacing: '1px', color: '#fff1c7' }}>CardChess</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 auto', flexWrap: 'wrap' }}>

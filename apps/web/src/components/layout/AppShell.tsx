@@ -3,7 +3,6 @@
 import React from 'react';
 import {
   AccountIcon,
-  BrandCrestIcon,
   ReturnIcon,
   ToolsIcon,
 } from './icons';
@@ -93,7 +92,8 @@ export default function AppShell({
         <aside className="app-shell__sidebar">
           <div className="app-shell__brand">
             <div className="app-shell__brand-mark">
-              <BrandCrestIcon />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-mark.png" alt="" className="app-shell__brand-mark-img" />
             </div>
             <div className="app-shell__brand-copy">
               <div className="app-shell__brand-title">{brandTitle}</div>

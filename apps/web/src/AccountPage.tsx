@@ -29,6 +29,7 @@ import {
   type AccountEmailDeliveryOverview,
   type AccountProfile,
   type AccountRatingHistoryEntry,
+  type AccountModeRating,
   type AccountPasswordResetRequestResult,
   type AccountSecurityEventOverview,
   type AccountSession,
@@ -1210,6 +1211,20 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
               <div style={{ color: 'rgba(244,232,200,0.72)', fontSize: '13px' }}>
                 Ladder: {activeAccount.rating ?? 1200} · {activeAccount.matchesPlayed ?? 0} matches · {activeAccount.wins ?? 0}W {activeAccount.losses ?? 0}L {activeAccount.draws ?? 0}D
               </div>
+              {(activeAccount.openCards || activeAccount.hiddenCards) ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px', marginTop: '4px' }}>
+                  <ModeLadderTile
+                    label="Open Cards Elo"
+                    ladder={activeAccount.openCards}
+                    accent="#ffcf72"
+                  />
+                  <ModeLadderTile
+                    label="Hidden Cards Elo"
+                    ladder={activeAccount.hiddenCards}
+                    accent="#9ed0ff"
+                  />
+                </div>
+              ) : null}
               <div style={{ color: 'rgba(244,232,200,0.72)', fontSize: '13px' }}>
                 Last seen: {formatDateTime(activeAccount.lastSeenAt)}
               </div>
@@ -2233,6 +2248,36 @@ function RatingHistoryRow({ entry }: { entry: AccountRatingHistoryEntry }): Reac
         Match {entry.matchId}
         {entry.opponentAccountId ? ` - opponent ${entry.opponentAccountId}` : ''}
       </div>
+    </div>
+  );
+}
+
+function ModeLadderTile({ label, ladder, accent }: { label: string; ladder?: AccountModeRating; accent: string }): React.ReactElement {
+  // No rated games in this mode yet: show an em dash, never a borrowed
+  // number. Falling back to the blended rating here made the tile LOOK
+  // rated -- the number moved whenever a rated game in the OTHER mode
+  // (or a casual game) shifted the blended Elo -- and the "unrated" tag
+  // next to a moving number confused players. An empty mode ladder has
+  // no rating yet, so it displays none.
+  const unrated = !ladder || !ladder.matchesPlayed;
+  return (
+    <div style={{
+      padding: '10px 12px',
+      borderRadius: '10px',
+      background: 'rgba(255,255,255,0.03)',
+      border: `1px solid ${accent}44`,
+      opacity: unrated ? 0.75 : 1,
+    }}>
+      <div style={{ color: accent, fontSize: '10px', fontWeight: 800, letterSpacing: '0.8px', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ color: '#fff2c8', fontSize: '20px', fontWeight: 900, marginTop: '2px' }}>
+        {unrated ? '\u2014' : ladder.rating}
+        {unrated ? <span style={{ color: 'rgba(244,232,200,0.5)', fontSize: '11px', fontWeight: 700, marginLeft: '6px' }}>no rated games yet</span> : null}
+      </div>
+      {!unrated && (
+        <div style={{ color: 'rgba(244,232,200,0.6)', fontSize: '11px', marginTop: '2px' }}>
+          {ladder.matchesPlayed} matches · {ladder.wins}W {ladder.losses}L {ladder.draws}D
+        </div>
+      )}
     </div>
   );
 }

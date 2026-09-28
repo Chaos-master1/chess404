@@ -43,7 +43,7 @@ func (s *sqliteTicketStore) backend() string {
 
 func (s *sqliteTicketStore) load() (map[string]Ticket, error) {
 	rows, err := s.db.Query(`
-		select ticket_id, guest_id, account_id, display_name, queue, mode_id, status, rating, created_at, updated_at, matched_at, matched_with, seat_color, opponent_name, assigned_room
+		select ticket_id, guest_id, account_id, display_name, queue, mode_id, status, rating, clock_seconds, clock_increment, cancel_secret, created_at, updated_at, matched_at, matched_with, seat_color, opponent_name, assigned_room
 		from tickets
 	`)
 	if err != nil {
@@ -60,6 +60,9 @@ func (s *sqliteTicketStore) load() (map[string]Ticket, error) {
 			queue        string
 			modeID       sql.NullString
 			status       string
+			clockSeconds int64
+			clockIncrement int64
+			cancelSecret sql.NullString
 			createdAt    string
 			updatedAt    string
 			matchedAt    sql.NullString
@@ -77,6 +80,9 @@ func (s *sqliteTicketStore) load() (map[string]Ticket, error) {
 			&modeID,
 			&status,
 			&ticket.Rating,
+			&clockSeconds,
+			&clockIncrement,
+			&cancelSecret,
 			&createdAt,
 			&updatedAt,
 			&matchedAt,
@@ -100,6 +106,11 @@ func (s *sqliteTicketStore) load() (map[string]Ticket, error) {
 			ticket.ModeID = normalizeModeID(ticket.ModeID)
 		}
 		ticket.Status = TicketStatus(status)
+		ticket.ClockSeconds = clockSeconds
+		ticket.ClockIncrement = clockIncrement
+		if cancelSecret.Valid {
+			ticket.CancelSecret = cancelSecret.String
+		}
 		parsedCreatedAt, err := time.Parse(time.RFC3339Nano, createdAt)
 		if err != nil {
 			return nil, err
@@ -179,9 +190,13 @@ func (s *sqliteTicketStore) persist(tickets map[string]Ticket) error {
 		if ticket.AssignedRoom != "" {
 			assignedRoom = ticket.AssignedRoom
 		}
+		var cancelSecret any
+		if ticket.CancelSecret != "" {
+			cancelSecret = ticket.CancelSecret
+		}
 		if _, err := tx.Exec(`
-			insert into tickets(ticket_id, guest_id, account_id, display_name, queue, mode_id, status, rating, created_at, updated_at, matched_at, matched_with, seat_color, opponent_name, assigned_room)
-			values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			insert into tickets(ticket_id, guest_id, account_id, display_name, queue, mode_id, status, rating, clock_seconds, clock_increment, cancel_secret, created_at, updated_at, matched_at, matched_with, seat_color, opponent_name, assigned_room)
+			values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			ticket.TicketID,
 			ticket.GuestID,
@@ -191,6 +206,9 @@ func (s *sqliteTicketStore) persist(tickets map[string]Ticket) error {
 			modeID,
 			string(ticket.Status),
 			ticket.Rating,
+			ticket.ClockSeconds,
+			ticket.ClockIncrement,
+			cancelSecret,
 			ticket.CreatedAt.UTC().Format(time.RFC3339Nano),
 			ticket.UpdatedAt.UTC().Format(time.RFC3339Nano),
 			matchedAt,
@@ -226,6 +244,9 @@ func (s *sqliteTicketStore) init() error {
 			mode_id text,
 			status text not null,
 			rating integer not null,
+			clock_seconds integer,
+			clock_increment integer,
+			cancel_secret text,
 			created_at text not null,
 			updated_at text not null,
 			matched_at text,
@@ -244,6 +265,9 @@ func (s *sqliteTicketStore) init() error {
 		`alter table tickets add column mode_id text`,
 		`alter table tickets add column seat_color text`,
 		`alter table tickets add column opponent_name text`,
+		`alter table tickets add column cancel_secret text`,
+		`alter table tickets add column clock_seconds integer`,
+		`alter table tickets add column clock_increment integer`,
 	}
 	for _, stmt := range migrations {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {

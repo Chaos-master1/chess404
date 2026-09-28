@@ -77,10 +77,17 @@ func buildGatewayMux(config GatewayConfig, client *http.Client) http.Handler {
 					return
 				}
 			}
-			payload = buildGatewayBootstrapPayload(config, client, request, r)
 		} else {
-			payload = buildGatewayBootstrapPayload(config, client, GatewayBootstrapRequest{}, r)
+			request = GatewayBootstrapRequest{}
 		}
+		// Fold HttpOnly session cookies into each seat's identity BEFORE the
+		// resume attempt: a browser that no longer carries secrets in
+		// localStorage still resumes instead of minting a fresh guest pair.
+		// Folding here (not inside buildGatewayBootstrapPayload) means the
+		// resumed-supplied strip check below sees the same folded request the
+		// payload was built from.
+		request = foldSessionCookieIdentities(request, r)
+		payload = buildGatewayBootstrapPayload(config, client, request, r)
 
 		// Set HttpOnly cookies for account session tokens as defense-in-depth.
 		// TODO: Migrate to cookie-based auth and remove tokens from JSON body.

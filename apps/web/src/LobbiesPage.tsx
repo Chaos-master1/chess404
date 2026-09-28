@@ -105,7 +105,7 @@ export default function LobbiesPage({ identity, displayName, hostedRuntime, embe
             <label style={{ display: 'grid', gap: '8px' }}>
               <span style={{ color: '#dbe8ff', fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Mode</span>
               <select className="input input-glow" value={modeId} onChange={event => setModeId(event.target.value as MatchModeId)} style={selectStyle}>
-                {OFFICIAL_MATCH_MODES.map(mode => (
+                {OFFICIAL_MATCH_MODES.filter(mode => mode.id !== 'computer').map(mode => (
                   <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#eef4ff' }}>{mode.label}</option>
                 ))}
               </select>

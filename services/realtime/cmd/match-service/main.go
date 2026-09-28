@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,7 +35,13 @@ func redactToken(s string) string {
 }
 
 func main() {
-	envutil.Require("PLATFORM_SERVICE_INTERNAL_URL", "ALLOWED_ORIGINS", "INTERNAL_SERVICE_TOKEN")
+	envutil.Require("PLATFORM_SERVICE_INTERNAL_URL", "ALLOWED_ORIGINS")
+	// INTERNAL_SERVICE_TOKEN used to be a hard boot requirement; the token
+	// migration now prefers per-service tokens, so any accepted token env
+	// satisfies the requirement instead of the shared one specifically.
+	if internalServiceToken() == "" {
+		log.Fatalf("FATAL: missing required environment variables: one of MATCH_INTERNAL_SERVICE_TOKEN, PLATFORM_INTERNAL_SERVICE_TOKEN, CHESS404_INTERNAL_SERVICE_TOKEN, INTERNAL_SERVICE_TOKEN")
+	}
 	archive, err := openArchiveStore()
 	if err != nil {
 		log.Fatalf("failed to initialize archive store: %v", err)
@@ -54,6 +61,9 @@ func main() {
 		log.Println("auth token store: redis backend")
 	}
 	service := match.NewServiceWithStoreBroadcasterAndTokenStore(finArchive, store, broadcaster, tokenStore)
+	envutil.WarnSharedInternalToken("match-service",
+		os.Getenv("MATCH_INTERNAL_SERVICE_TOKEN"), "MATCH_INTERNAL_SERVICE_TOKEN",
+		[]string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"})
 	rl, err := rate_limit.NewRateLimiter()
 	if err != nil {
 		log.Fatalf("failed to initialize rate limiter: %v", err)
@@ -83,7 +93,7 @@ func main() {
 	// well under 1 KiB). Excess closes the connection.
 	const wsReadLimit int64 = 64 * 1024
 
-	mux := buildMatchServiceMux(service, archive, upgrader, wsReadLimit)
+	mux := buildMatchServiceMux(service, archive, upgrader, wsReadLimit, rl)
 
 	internalToken := internalServiceToken()
 	addr := httputil.ListenAddr("MATCH_SERVICE_ADDR", 8081)
@@ -123,7 +133,7 @@ func main() {
 // instead of only unit-testing the underlying match.Service methods -- the
 // join-secret-leak regression this func's join handler guards against would
 // not have been caught by a test that never went through this wiring.
-func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchiveStore, upgrader websocket.Upgrader, wsReadLimit int64) *http.ServeMux {
+func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchiveStore, upgrader websocket.Upgrader, wsReadLimit int64, ratelimit rate_limit.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -190,8 +200,8 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			httputil.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		expected := internalServiceToken()
-		if expected == "" {
+		expected := internalServiceTokens()
+		if len(expected) == 0 {
 			httputil.WriteError(w, http.StatusServiceUnavailable, "internal service token not configured on server")
 			return
 		}
@@ -203,7 +213,7 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 				provided = strings.TrimSpace(strings.TrimPrefix(auth, prefix))
 			}
 		}
-		if provided == "" || provided != expected {
+		if !internalTokenMatchesAny(provided, expected) {
 			httputil.WriteError(w, http.StatusUnauthorized, "internal service token required")
 			return
 		}
@@ -225,7 +235,20 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			}
 			// The caller supplied the seat secrets in the request; echoing them
 			// back adds no value and puts them in proxy/CDN logs.
-			resp := service.CreateMatch(req, httputil.NowUTC())
+			// Computer-mode creations go through the one-active-game guard: a
+			// player must finish their current game before starting another
+			// one vs the engine (clients were stacking matches).
+			var resp contracts.MatchSnapshotResponse
+			if contracts.NormalizeMatchModeID(string(req.ModeID)) == contracts.MatchModeComputer {
+				var createErr error
+				resp, createErr = service.CreateComputerMatch(req, httputil.NowUTC())
+				if createErr != nil {
+					httputil.WriteError(w, http.StatusConflict, createErr.Error())
+					return
+				}
+			} else {
+				resp = service.CreateMatch(req, httputil.NowUTC())
+			}
 			// Flush the archive row synchronously: the create response hands the
 			// caller a claim token whose platform-side refresh reads the archive.
 			// The background writeLoop could lose that race, turning the first
@@ -301,8 +324,8 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 		// and returns it inside the seat claim. Without this the claim carries
 		// an empty secret and the player can never authenticate to the room.
 		if len(parts) == 2 && parts[1] == "seat-secret" && r.Method == http.MethodPost {
-			expected := internalServiceToken()
-			if expected == "" {
+			expected := internalServiceTokens()
+			if len(expected) == 0 {
 				httputil.WriteError(w, http.StatusServiceUnavailable, "internal service token not configured on server")
 				return
 			}
@@ -314,7 +337,7 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 					provided = strings.TrimSpace(strings.TrimPrefix(auth, prefix))
 				}
 			}
-			if provided == "" || provided != expected {
+			if !internalTokenMatchesAny(provided, expected) {
 				httputil.WriteError(w, http.StatusUnauthorized, "internal service token required")
 				return
 			}
@@ -387,7 +410,7 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 		}
 
 		if len(parts) == 2 && parts[1] == "ws" && r.Method == http.MethodGet {
-			handleMatchSocket(w, r, service, &upgrader, matchID, wsReadLimit)
+			handleMatchSocket(w, r, service, &upgrader, matchID, wsReadLimit, ratelimit)
 			return
 		}
 
@@ -395,6 +418,19 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 	})
 
 	return mux
+}
+
+// platformServiceCallerToken is the credential this service SENDS to
+// platform-service (its accept list, in precedence order). Deliberately
+// independent of the inbound chain: staging MATCH_INTERNAL_SERVICE_TOKEN
+// here must not change what we send to platform-service.
+func platformServiceCallerToken() string {
+	for _, name := range []string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type finalizingArchiveStore struct {
@@ -412,7 +448,7 @@ func newFinalizingArchiveStore(archive *platform.MatchArchiveStore) *finalizingA
 	return &finalizingArchiveStore{
 		archive:      archive,
 		platformURL:  platformServiceURL(),
-		serviceToken: internalServiceToken(),
+		serviceToken: platformServiceCallerToken(),
 		client:       &http.Client{Timeout: 5 * time.Second},
 		inFlight:     make(map[string]struct{}),
 		done:         make(map[string]struct{}),
@@ -618,7 +654,7 @@ type intentResult struct {
 
 var wsConnSemaphore = make(chan struct{}, 500)
 
-func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Service, upgrader *websocket.Upgrader, matchID string, wsReadLimit int64) {
+func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Service, upgrader *websocket.Upgrader, matchID string, wsReadLimit int64, ratelimit rate_limit.RateLimiter) {
 	select {
 	case wsConnSemaphore <- struct{}{}:
 		defer func() { <-wsConnSemaphore }()
@@ -718,6 +754,26 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 			intent.MatchID = matchID
 			intent.PlayerID = playerID
 			intent.PlayerSecret = playerSecret
+
+			// Per-player intent budget on the socket path. HTTP POSTs to
+			// /intents pass the global IP limiter, but socket frames
+			// historically bypassed every limiter: one authenticated player
+			// could stream unlimited apply_intent frames (engine/match CPU +
+			// a WAN publish each) from a single connection. Same shape as the
+			// HTTP envelope: a polite burst survives, a flood is dropped.
+			if ratelimit != nil {
+				if allowed, retryAfter := ratelimit.Allow("wsintent:"+playerID, time.Minute, 90); !allowed {
+					retrySecs := int(retryAfter.Seconds())
+					if retrySecs < 1 {
+						retrySecs = 1
+					}
+					select {
+					case intentCh <- intentResult{err: fmt.Errorf("rate limited, retry after %ds", retrySecs)}:
+					default:
+					}
+					continue
+				}
+			}
 
 			resp, err := service.ApplyIntent(intent, httputil.NowUTC())
 			select {
@@ -837,7 +893,7 @@ func resolveSocketClaim(matchID, claimToken string) (platform.MatchSeatClaim, er
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Origin", "http://platform-service:8080")
-	if token := internalServiceToken(); token != "" {
+	if token := platformServiceCallerToken(); token != "" {
 		request.Header.Set("X-Chess404-Service-Token", token)
 	}
 
@@ -885,11 +941,42 @@ func platformServiceURL() string {
 	return u
 }
 
+// internalServiceToken is the FIRST token this service accepts from callers
+// (also handed to the rate-limit trusted-bypass). Callers may present ANY
+// configured value -- see internalServiceTokens.
 func internalServiceToken() string {
-	for _, name := range []string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+	for _, name := range []string{"MATCH_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 			return value
 		}
 	}
 	return ""
+}
+
+// internalServiceTokens is the full accept set: every non-empty token env
+// this service recognizes. Per-caller rotation (RUNBOOK.md, stage 4) stages
+// distinct values per caller; the route auth must accept any of them, not
+// just the first.
+func internalServiceTokens() []string {
+	var tokens []string
+	for _, name := range []string{"MATCH_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			tokens = append(tokens, value)
+		}
+	}
+	return tokens
+}
+
+// internalTokenMatchesAny reports whether provided equals one of the
+// expected tokens, in constant time per candidate.
+func internalTokenMatchesAny(provided string, expected []string) bool {
+	if provided == "" || len(expected) == 0 {
+		return false
+	}
+	for _, token := range expected {
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1 {
+			return true
+		}
+	}
+	return false
 }

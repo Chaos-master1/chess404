@@ -17,7 +17,7 @@ React.useEffect(() => {
 
     platform.requestedMatchIdRef.current = id;
     platform.setActivePage('Match');
-  }, [id, platform.requestedMatchIdRef, platform.setActivePage]);
+  }, [id, platform.requestedMatchIdRef, platform.setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps -- mount-once route sync; identity of context members is stable in practice
 
   return null;
 }

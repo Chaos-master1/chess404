@@ -180,6 +180,17 @@ export function usePlatformState(props: UsePlatformStateProps) {
   const authoritativeMatchIdRef = React.useRef<string | null>(null);
   const requestedMatchIdRef = React.useRef<string | null>(null);
 
+  // Bootstrap single-flight + retry bookkeeping. bootstrapNonce re-runs the
+  // bootstrap effect after a failure (retry with backoff); the inFlight ref
+  // makes the effect a no-op while a previous attempt is still running, so
+  // unrelated re-renders (notably hostedRuntime flipping null->true right
+  // after mount) cannot fire a duplicate bootstrap -- production traces
+  // showed two overlapping POSTs /api/gateway/bootstrap on every page load,
+  // doubling the load on exactly the endpoint that was already starving.
+  const [bootstrapNonce, setBootstrapNonce] = React.useState(0);
+  const bootstrapAttemptRef = React.useRef(0);
+  const bootstrapRequestSeqRef = React.useRef(0);
+
   // ── Authentication callbacks ────────────────────────────────────────────────
   const handleSeatAuthenticated = React.useCallback((side: 'white' | 'black', guestSession: PlatformGuestSession, accountSession: PlatformAccountSession) => {
     guestSessionSecretsRef.current[side] = guestSession.sessionSecret;
@@ -247,13 +258,22 @@ export function usePlatformState(props: UsePlatformStateProps) {
   }, [hostedRuntime]);
 
   const applyGatewayAccountSessions = React.useCallback((accountSessions?: {
-    white?: { account: { accountId: string }; sessionToken: string; expiresAt?: string };
-    black?: { account: { accountId: string }; sessionToken: string; expiresAt?: string };
+    white?: { account: { accountId: string; handle?: string }; sessionToken: string; expiresAt?: string };
+    black?: { account: { accountId: string; handle?: string }; sessionToken: string; expiresAt?: string };
   }) => {
     if (accountSessions?.white) {
       writeStoredAccountIdentity('white', accountSessions.white.account, {
         sessionToken: accountSessions.white.sessionToken,
         expiresAt: accountSessions.white.expiresAt ?? null,
+      });
+      // The server renames the account's linked guest to the handle at
+      // claim/register/login; mirror that into the local profile so the
+      // match UI shows the handle immediately instead of a stale generated
+      // guest name until the next full bootstrap.
+      setWhiteProfile((current) => {
+        const handle = accountSessions.white?.account.handle?.trim();
+        if (!handle || !current) return current;
+        return current.displayName === handle ? current : { ...current, displayName: handle };
       });
       setShellAccountNotice('');
       syncPrimaryAccountIdentity();
@@ -298,18 +318,33 @@ export function usePlatformState(props: UsePlatformStateProps) {
       [whiteClaim, blackClaim].find(claim =>
         claim && (claim.guestId === whiteIdentity.guestId || claim.guestId === blackIdentity.guestId)
       ) ?? null;
+    // Local-play only: a second browser shares this page with two identities.
+    // Hosted runtime has exactly ONE local player (the white-lane guest), so
+    // any claim whose guestId is not ours belongs to the remote opponent and
+    // must not be ingested into our seat slots -- that leaked the opponent's
+    // credential into local storage and could flip the rendered seat.
+    const hostedOpponentClaims = hostedRuntime
+      ? [whiteClaim, blackClaim].filter(claim =>
+          claim && claim.guestId && claim.guestId !== whiteIdentity.guestId
+        )
+      : [];
     const isCurrentMatch = authoritativeMatchIdRef.current === matchId;
     const currentBootstrapClaims = gatewayBootstrapClaimsRef.current.matchId === matchId
       ? gatewayBootstrapClaimsRef.current
       : null;
 
+    // Seat-secret slots: in hosted mode an opponent-owned claim never seeds a
+    // slot (see hostedOpponentClaims above); in local play both seats belong
+    // to this browser, so both claims may seed them as before.
+    const whiteSecretSource = hostedOpponentClaims.some(c => c === whiteClaim) ? null : whiteClaim?.playerSecret;
+    const blackSecretSource = hostedOpponentClaims.some(c => c === blackClaim) ? null : blackClaim?.playerSecret;
     const nextWhiteSecret =
-      whiteClaim?.playerSecret ??
+      whiteSecretSource ??
       storedRoomMeta?.whitePlayerSecret ??
       currentBootstrapClaims?.whiteSecret ??
       (isCurrentMatch ? authoritativeSeatSecretsRef.current.white : null);
     const nextBlackSecret =
-      blackClaim?.playerSecret ??
+      blackSecretSource ??
       storedRoomMeta?.blackPlayerSecret ??
       currentBootstrapClaims?.blackSecret ??
       (isCurrentMatch ? authoritativeSeatSecretsRef.current.black : null);
@@ -688,6 +723,13 @@ export function usePlatformState(props: UsePlatformStateProps) {
   // Initial bootstrap fetch
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
+    // Generation guard, not a boolean in-flight flag: each effect run owns a
+    // sequence number and only the newest run may apply results or schedule
+    // retries. A boolean + `cancelled` cleanup deadlocks under StrictMode's
+    // mount->unmount->mount (run B sees the flag set and returns, run A's
+    // cancelled flag suppresses its catch-path retry) and after any remount.
+    const requestId = ++bootstrapRequestSeqRef.current;
+    const isCurrent = () => requestId === bootstrapRequestSeqRef.current;
     const hostname = window.location.hostname.toLowerCase();
     const nextHosted = hostname !== 'localhost' && hostname !== '127.0.0.1';
     const pathMatch = window.location.pathname.match(/^\/match\/([^/]+)$/);
@@ -720,8 +762,6 @@ export function usePlatformState(props: UsePlatformStateProps) {
     setHistoryQueryReady(true);
     setMatchQueryReady(true);
 
-    let cancelled = false;
-
     void fetchGatewayBootstrap({
       matchId: requestedMatchIdRef.current ?? undefined,
       white: readStoredGuestIdentity('white'),
@@ -730,7 +770,8 @@ export function usePlatformState(props: UsePlatformStateProps) {
       blackAccount: readStoredAccountIdentity('black'),
     })
       .then(bootstrap => {
-        if (cancelled) return;
+        if (!isCurrent()) return;
+        bootstrapAttemptRef.current = 0;
         const bootstrapRestriction = parseAccountRestrictionMessage(bootstrap.accountErrors?.white);
         if (nextHosted && bootstrapRestriction) {
           clearPrimaryAccountRestriction(formatAccountRestrictionNotice(bootstrapRestriction));
@@ -748,18 +789,29 @@ export function usePlatformState(props: UsePlatformStateProps) {
         });
       })
       .catch(() => {
-        // Keep fallback labels if the platform or gateway service is unavailable.
+        // The trace evidence from production: on the free-tier web container
+        // the queue page fires 5-6 proxied calls on mount and each request
+        // starves the others (12-16s latencies observed), so this 10s-budget
+        // bootstrap and the parallel guest-sessions POST both died with
+        // net::ERR_ABORTED. Nothing retried them, whiteProfile stayed null,
+        // and the queue join button sat disabled on "Preparing player..."
+        // forever. Retry with backoff instead of swallowing: a transient
+        // abort on load must not cost the visitor their whole session.
+        if (!isCurrent()) return;
+        bootstrapAttemptRef.current += 1;
+        if (bootstrapAttemptRef.current <= 5) {
+          const delay = Math.min(15000, 1000 * 2 ** (bootstrapAttemptRef.current - 1)) + Math.random() * 750;
+          window.setTimeout(() => {
+            if (isCurrent()) setBootstrapNonce(n => n + 1);
+          }, delay);
+        }
       })
       .finally(() => {
-        if (!cancelled) {
+        if (isCurrent()) {
           setGuestProfilesReady(true);
         }
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [applyGatewayGuestSessions, applyGatewayMatchClaims, applyGatewayAccountSessions, applyGatewayQueueRecovery, clearPrimaryAccountRestriction]);
+  }, [bootstrapNonce, applyGatewayGuestSessions, applyGatewayMatchClaims, applyGatewayAccountSessions, applyGatewayQueueRecovery, clearPrimaryAccountRestriction]);
 
   // Safety net: force guestProfilesReady after 5s even if fetchGatewayBootstrap hangs
   React.useEffect(() => {
@@ -791,11 +843,30 @@ export function usePlatformState(props: UsePlatformStateProps) {
 
     const ensureGuestSeat = async (side: 'white' | 'black') => {
       const stored = readStoredGuestIdentity(side);
-      const session = await createGuestSession({
-        guestId: stored.guestId,
-        sessionSecret: stored.sessionSecret,
-        sessionToken: stored.sessionToken,
-      });
+      // This request shares the web container with the rest of the page's
+      // mount burst; production traces caught it dying with ERR_ABORTED and
+      // nothing retried it, leaving the queue page stuck on "Preparing
+      // player..." with the join button permanently disabled. Retry a few
+      // times before giving up.
+      let session: Awaited<ReturnType<typeof createGuestSession>> | null = null;
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+        try {
+          session = await createGuestSession({
+            guestId: stored.guestId,
+            sessionSecret: stored.sessionSecret,
+            sessionToken: stored.sessionToken,
+          });
+          break;
+        } catch (err) {
+          lastErr = err;
+          await new Promise(resolve => window.setTimeout(resolve, 1200 * (attempt + 1)));
+        }
+      }
+      if (!session) {
+        if (lastErr) console.warn('[platform] guest session bootstrap failed after retries:', lastErr);
+        return;
+      }
       if (cancelled) return;
       guestSessionSecretsRef.current[side] = session.sessionSecret;
       writeStoredGuestIdentity(side, session.guest.guestId, session.sessionSecret, {

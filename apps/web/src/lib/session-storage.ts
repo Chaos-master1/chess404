@@ -42,7 +42,6 @@ export const PRESENCE_RETRY_MESSAGE = 'Live match presence sync is delayed.';
 
 const PLAY_ROUTE = '/play';
 const HISTORY_ROUTE = '/history';
-const PROFILES_ROUTE = '/profiles';
 const MATCH_ROUTE_PREFIX = '/match/';
 
 function isMatchRoute(pathname: string): boolean {

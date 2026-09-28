@@ -658,7 +658,16 @@ func (a *NewEngineAdapter) MakeMove(state *contracts.MatchState) *contracts.Play
 		return nil
 	}
 	ov := conform.ToOverlay(state)
+	// The server enforces one card per player per turn (removeCardFromHand
+	// consumes the slot). The adapter used to keep proposing card actions on
+	// the same turn it had already played one -- cards do not flip the turn
+	// -- and every such play_card was rejected. Mirror v1's MakeCardDecision
+	// gate: with the slot consumed, hand the search an empty hand so it can
+	// only propose board moves.
 	myHand := toActionsHand(handFor(state, a.Color))
+	if state.CardUsedThisTurn[a.Color] {
+		myHand = nil
+	}
 	oppHandSize := len(handFor(state, opposite(a.Color)))
 
 	results := search.FairPlaySearchTimed(p, ov, myHand, a.coreColor(), oppHandSize, a.Samples, a.TimeLimit, a.MaxDepth, a.rng)

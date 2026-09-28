@@ -61,8 +61,6 @@ export interface MatchStateContextShape {
   reviewBoard: (Piece | null)[][] | null;
   reviewIdx: number;
   drawOffer: any | null;
-  abortActive: boolean;
-  abortCountdown: number | null;
   streamDisconnected: boolean;
   setSel: (sq: Sq | null) => void;
   setHints: (sqs: Sq[]) => void;
@@ -88,7 +86,6 @@ export interface MatchStateContextShape {
   submitAuthoritativeIntent: (intent: any) => void;
   authoritativeActorForColor: (color: PieceColor) => { playerId: string; playerSecret?: string; playerClaimToken?: string };
   createAuthoritativeRematchRoom: () => void;
-  stopAbortCountdown: () => void;
   activeFinishReasonLabel: string | null;
   authoritativeRematchBusy: boolean;
   canCreateDirectRematch: boolean;
@@ -99,7 +96,7 @@ export interface MatchStateContextShape {
   finishedPrimaryActionLabel: string;
   finishedSecondaryActionLabel: string;
   boardStatusLabel: string;
-  bootstrapAuthoritativeMatch: (id: string) => void;
+  bootstrapAuthoritativeMatch: (options?: { force?: boolean }) => void;
   showHostedSoloBanner: boolean | null;
   showHostedReconnectWarning: boolean | null;
   intentInFlight: boolean;

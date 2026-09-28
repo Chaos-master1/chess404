@@ -19,6 +19,10 @@ interface InboxPageProps {
   onOpenProfile?: (handle: string) => void;
   onOpenFriends?: () => void;
   onUnreadCountChange?: (count: number) => void;
+  // Embedded mode renders the feed without the page-level heading, padding,
+  // and "Open Friends" chrome so it can live inside the Friends page's
+  // Activity section (the host supplies its own header and context).
+  embedded?: boolean;
 }
 
 
@@ -97,6 +101,7 @@ export default function InboxPage({
   onOpenProfile,
   onOpenFriends,
   onUnreadCountChange,
+  embedded = false,
 }: InboxPageProps): React.ReactElement {
   const [overview, setOverview] = React.useState<AccountNotificationOverview | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -234,20 +239,22 @@ export default function InboxPage({
             </div>
           </div>
           <div style={{ display: 'grid', gap: '8px', minWidth: '150px' }}>
-            <button
-              onClick={() => onOpenFriends?.()}
-              style={{
-                padding: '10px 12px',
-                borderRadius: '10px',
-                border: '1px solid rgba(255,255,255,0.12)',
-                background: 'rgba(255,255,255,0.06)',
-                color: '#fff6dc',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              {descriptor.actionLabel}
-            </button>
+            {!embedded && (
+              <button
+                onClick={() => onOpenFriends?.()}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.06)',
+                  color: '#fff6dc',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {descriptor.actionLabel}
+              </button>
+            )}
             <button
               onClick={() => void markRead(notification)}
               disabled={!unread || busyNotificationId === notification.notificationId}
@@ -267,14 +274,14 @@ export default function InboxPage({
         </div>
       </article>
     );
-  }, [busyNotificationId, markRead, onOpenFriends, onOpenProfile]);
+  }, [busyNotificationId, embedded, markRead, onOpenFriends, onOpenProfile]);
 
   if (!accountId || !sessionToken) {
     return (
-      <section style={{ padding: '28px', display: 'grid', gap: '16px' }}>
-        <h2 style={{ color: '#fff3cf', fontSize: '24px', margin: 0 }}>Inbox</h2>
+      <section style={{ padding: embedded ? '12px 4px 4px' : '28px', display: 'grid', gap: '12px' }}>
+        {!embedded && <h2 style={{ color: '#fff3cf', fontSize: '24px', margin: 0 }}>Inbox</h2>}
         <div style={{ color: 'rgba(255,232,180,0.78)', maxWidth: '720px', lineHeight: 1.7 }}>
-          Sign in with a claimed account to unlock your persistent social inbox for friend requests, direct challenges, and platform notifications.
+          Sign in with a claimed account to unlock your social activity feed for friend requests, direct challenges, and platform notifications.
         </div>
       </section>
     );
@@ -283,13 +290,17 @@ export default function InboxPage({
   const notifications = overview?.notifications ?? [];
 
   return (
-    <section style={{ padding: '26px', display: 'grid', gap: '18px' }}>
+    <section style={{ padding: embedded ? '10px 4px 4px' : '26px', display: 'grid', gap: embedded ? '12px' : '18px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={{ display: 'grid', gap: '8px' }}>
-          <h2 style={{ color: '#fff3cf', fontSize: '28px', margin: 0 }}>Inbox</h2>
-          <div style={{ color: 'rgba(255,232,180,0.74)', maxWidth: '760px', lineHeight: 1.6 }}>
-            Persistent social updates for your account: friend graph activity, direct challenge flow, and live platform signals that should survive page switches and offline time.
-          </div>
+          {!embedded && (
+            <>
+              <h2 style={{ color: '#fff3cf', fontSize: '28px', margin: 0 }}>Inbox</h2>
+              <div style={{ color: 'rgba(255,232,180,0.74)', maxWidth: '760px', lineHeight: 1.6 }}>
+                Persistent social updates for your account: friend graph activity, direct challenge flow, and live platform signals that should survive page switches and offline time.
+              </div>
+            </>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           <div

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chess404/realtime/internal/contracts"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -211,7 +212,7 @@ func (s *PostgresGuestStore) ResumeGuestByToken(guestID, sessionToken string) (G
 	return session, nil
 }
 
-func (s *PostgresGuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, winner string) (GuestProfile, GuestProfile, bool, error) {
+func (s *PostgresGuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, winner string, modeID contracts.MatchModeID) (GuestProfile, GuestProfile, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -253,7 +254,20 @@ func (s *PostgresGuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, 
 	}
 
 	now := time.Now().UTC()
-	newWhite, newBlack := ApplyEloMatchResult(white.Rating, black.Rating, winner)
+	// Per-seat K factors: placements outrank everything, otherwise the K
+	// decays with games played (same curve as the account ladder -- see
+	// eloKFactorForGames).
+	whiteK := eloKFactorForGames(white.MatchesPlayed)
+	blackK := eloKFactorForGames(black.MatchesPlayed)
+	if white.PlacementsRemaining > 0 {
+		whiteK = defaultPlacementEloKFactor
+	}
+	if black.PlacementsRemaining > 0 {
+		blackK = defaultPlacementEloKFactor
+	}
+	newWhite, _ := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, whiteK, defaultEloMinRating)
+	_, newBlack := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, blackK, defaultEloMinRating)
+	applyGuestModeElo(&white, &black, modeID, winner, whiteK)
 	switch winner {
 	case "white":
 		white.Rating = newWhite
@@ -299,7 +313,7 @@ func (s *PostgresGuestStore) ListGuests(limit int) []GuestProfile {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at from guests order by rating desc, created_at asc, guest_id asc`
+	query := `select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at from guests order by rating desc, created_at asc, guest_id asc`
 	return queryPostgresGuests(s.db, query, limit)
 }
 
@@ -318,8 +332,36 @@ func (s *PostgresGuestStore) ListRecentGuests(limit int) []GuestProfile {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at from guests order by last_seen_at desc, guest_id asc`
+	query := `select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at from guests order by last_seen_at desc, guest_id asc`
 	return queryPostgresGuests(s.db, query, limit)
+}
+
+// RenameGuest replaces a guest's display name (see the JSON store comment:
+// account-linked guests must carry the account handle, not a placeholder).
+func (s *PostgresGuestStore) RenameGuest(guestID, displayName string) (GuestProfile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	guestID = strings.TrimSpace(guestID)
+	displayName = strings.TrimSpace(displayName)
+	if guestID == "" || displayName == "" {
+		return GuestProfile{}, os.ErrInvalid
+	}
+	result, err := s.db.Exec(`update guests set display_name = $1, last_seen_at = $2 where guest_id = $3`, displayName, timeString(time.Now().UTC()), guestID)
+	if err != nil {
+		return GuestProfile{}, err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		return GuestProfile{}, os.ErrNotExist
+	}
+	entry, ok, err := lookupPostgresGuestDB(s.db, guestID)
+	if err != nil {
+		return GuestProfile{}, err
+	}
+	if !ok {
+		return GuestProfile{}, os.ErrNotExist
+	}
+	return entry, nil
 }
 
 func (s *PostgresGuestStore) Stats() GuestStoreStats {
@@ -355,6 +397,7 @@ func (s *PostgresGuestStore) init() error {
 			finalized_at timestamptz not null
 		);
 		create index if not exists guests_rating_order_idx on guests (rating desc, created_at asc, guest_id asc);
+		-- per-mode guest ladders are added below via alter-table migrations
 		create index if not exists guests_last_seen_order_idx on guests (last_seen_at desc, guest_id asc);
 	`)
 	if err != nil {
@@ -369,7 +412,17 @@ func (s *PostgresGuestStore) init() error {
 		return err
 	}
 	_, err = s.db.Exec(`alter table guests add column if not exists session_expires_at timestamptz`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Per-mode guest ladders (open/hidden). 0 = no games in that mode yet.
+	if _, err := s.db.Exec(`alter table guests add column if not exists rating_open integer not null default 0`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`alter table guests add column if not exists rating_hidden integer not null default 0`); err != nil {
+		return err
+	}
+	return nil
 }
 
 func lookupPostgresGuestDB(db *sql.DB, guestID string) (GuestProfile, bool, error) {
@@ -378,7 +431,7 @@ func lookupPostgresGuestDB(db *sql.DB, guestID string) (GuestProfile, bool, erro
 }
 
 func lookupPostgresGuestSessionDB(db *sql.DB, guestID string) (GuestSession, bool, error) {
-	return scanPostgresGuestSession(db.QueryRow(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = $1`, guestID))
+	return scanPostgresGuestSession(db.QueryRow(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = $1`, guestID))
 }
 
 func lookupPostgresGuestTx(tx *sql.Tx, guestID string) (GuestProfile, bool, error) {
@@ -387,7 +440,7 @@ func lookupPostgresGuestTx(tx *sql.Tx, guestID string) (GuestProfile, bool, erro
 }
 
 func lookupPostgresGuestSessionTx(tx *sql.Tx, guestID string) (GuestSession, bool, error) {
-	return scanPostgresGuestSession(tx.QueryRow(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = $1`, guestID))
+	return scanPostgresGuestSession(tx.QueryRow(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = $1`, guestID))
 }
 
 type postgresGuestScanner interface {
@@ -407,6 +460,8 @@ func scanPostgresGuestSession(scanner postgresGuestScanner) (GuestSession, bool,
 		&entry.GuestID,
 		&entry.DisplayName,
 		&entry.Rating,
+		&entry.RatingOpen,
+		&entry.RatingHidden,
 		&entry.MatchesPlayed,
 		&entry.Wins,
 		&entry.Losses,
@@ -446,10 +501,12 @@ func countPostgresGuestsTx(tx *sql.Tx) (int, error) {
 
 func insertPostgresGuestTx(tx *sql.Tx, session GuestSession) error {
 	_, err := tx.Exec(
-		`insert into guests(guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at) values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		`insert into guests(guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at) values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		session.Guest.GuestID,
 		session.Guest.DisplayName,
 		session.Guest.Rating,
+		session.Guest.RatingOpen,
+		session.Guest.RatingHidden,
 		session.Guest.MatchesPlayed,
 		session.Guest.Wins,
 		session.Guest.Losses,
@@ -465,9 +522,11 @@ func insertPostgresGuestTx(tx *sql.Tx, session GuestSession) error {
 
 func updatePostgresGuestTx(tx *sql.Tx, entry GuestProfile) error {
 	_, err := tx.Exec(
-		`update guests set display_name = $1, rating = $2, matches_played = $3, wins = $4, losses = $5, draws = $6, created_at = $7, last_seen_at = $8 where guest_id = $9`,
+		`update guests set display_name = $1, rating = $2, rating_open = $3, rating_hidden = $4, matches_played = $5, wins = $6, losses = $7, draws = $8, created_at = $9, last_seen_at = $10 where guest_id = $11`,
 		entry.DisplayName,
 		entry.Rating,
+		entry.RatingOpen,
+		entry.RatingHidden,
 		entry.MatchesPlayed,
 		entry.Wins,
 		entry.Losses,
@@ -503,6 +562,8 @@ func queryPostgresGuests(db *sql.DB, baseQuery string, limit int) []GuestProfile
 			&entry.GuestID,
 			&entry.DisplayName,
 			&entry.Rating,
+			&entry.RatingOpen,
+			&entry.RatingHidden,
 			&entry.MatchesPlayed,
 			&entry.Wins,
 			&entry.Losses,

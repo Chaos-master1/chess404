@@ -31,7 +31,7 @@ func registerAccountRoutes(mux *http.ServeMux, archive *platform.MatchArchiveSto
 			return
 		}
 
-		accountItems := filterAccountsByQuery(accounts.ListAccounts(limit), query)
+		accountItems := filterPublicDirectoryAccounts(filterAccountsByQuery(accounts.ListAccounts(limit), query))
 		seasonOptions := platform.BuildAvailableSeasonOptionsForMode(accountItems, modeID)
 		accountsList := make([]platform.PublicAccountProfile, 0, len(accountItems))
 		for _, account := range accountItems {
@@ -194,7 +194,7 @@ func registerAccountRoutes(mux *http.ServeMux, archive *platform.MatchArchiveSto
 			respondError(w, http.StatusForbidden, "account does not own an archived rated seat")
 			return
 		}
-		white, black, guestChanged, err := guests.FinalizeMatch(payload.MatchID, entry.WhiteGuestID, entry.BlackGuestID, winner)
+		white, black, guestChanged, err := guests.FinalizeMatch(payload.MatchID, entry.WhiteGuestID, entry.BlackGuestID, winner, entry.ModeID)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return

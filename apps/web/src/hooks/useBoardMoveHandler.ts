@@ -105,8 +105,6 @@ export interface UseBoardMoveHandlerProps {
   authoritativeActorForColor: (color: PieceColor) => { playerId: string; playerSecret?: string; playerClaimToken?: string };
   applyAuthoritativeSnapshot: (snapshot: MatchSnapshotMessage) => void;
   resetCardUsed: (nextTurn: PieceColor) => void;
-  startAbortCountdown: () => void;
-  stopAbortCountdown: () => void;
   setTicking: (color: PieceColor | null) => void;
   setClockActive: (active: boolean) => void;
   handleLavaLanding: (row: number, col: number, pieceType: PieceType) => void;
@@ -130,7 +128,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     setDoubleMove, doubleMoveRef, cardPending, selectedCard, setSelectedCard, promoPicker, cardPromo,
     jokerPicker, ghostRef, setGhostPiece, hostedRuntime, viewerSeatRef,
     authoritativeMatchIdRef, authoritativeActorForColor, applyAuthoritativeSnapshot,
-    resetCardUsed, startAbortCountdown, stopAbortCountdown, setTicking, setClockActive,
+    resetCardUsed, setTicking, setClockActive,
     handleLavaLanding, finalPositionRef, blackMovedRef, setCardMsg, handleCardClick,
     isReviewing, getFusedMoves
   } = props;
@@ -243,7 +241,10 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
       const actor = authoritativeActorForColor(piece.color);
       if (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken)) return false;
     }
-    if (piece.fusedWith || piece.invisible || piece.shielded || piece.frozen) return false;
+    // Shielded pieces may move: the shield only absorbs a capture
+    // (applyMove consumes it via shield_blocked_capture), and moving drops
+    // it server-side. Freezing is the mechanic that blocks movement.
+    if (piece.fusedWith || piece.invisible || piece.frozen) return false;
     if (target?.fusedWith || target?.shielded || target?.invisible) return false;
     return true;
   }, [cardPending, promo, promoPicker, cardPromo, jokerPicker, hostedRuntime, authoritativeActorForColor, authoritativeMatchIdRef, boardRef, ghostRef, turnRef, viewerSeatRef]);
@@ -622,11 +623,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
 
     handleLavaLanding(tr, tc, piece.type);
 
-    if (t === 'white' && !blackMovedRef.current) {
-      startAbortCountdown();
-      setTicking(null);
-    } else if (t === 'black' && !blackMovedRef.current) {
-      stopAbortCountdown();
+    if (t === 'black' && !blackMovedRef.current) {
       blackMovedRef.current = true;
       setClockActive(true);
       setTicking(next);
@@ -637,7 +634,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     setTurn(next);
     checkEndGame(nb, next, newMv, newLm, newHmc, newPh, posKey, fen, t);
     setDrawOffer(null);
-  }, [overRef, authoritativeMatchIdRef, boardRef, ghostRef, hostedRuntime, viewerSeatRef, turnRef, authoritativeActorForColor, applyAuthoritativeSnapshot, setCardMsg, setPromo, movedRef, hmcRef, fmnRef, canSubmitAuthoritativeMove, posHistRef, doubleMoveRef, setGhostPiece, setBoard, setMoved, setLm, setFmn, setHmc, setMovHist, resetCardUsed, setTicking, setSel, setHints, handleLavaLanding, setDoubleMove, setSnapshots, setPosHist, blackMovedRef, startAbortCountdown, stopAbortCountdown, setClockActive, setTurn, checkEndGame, setDrawOffer, isAttackedWithFusion, selectedCard, setSelectedCard]);
+  }, [overRef, authoritativeMatchIdRef, boardRef, ghostRef, hostedRuntime, viewerSeatRef, turnRef, authoritativeActorForColor, applyAuthoritativeSnapshot, setCardMsg, setPromo, movedRef, hmcRef, fmnRef, canSubmitAuthoritativeMove, posHistRef, doubleMoveRef, setGhostPiece, setBoard, setMoved, setLm, setFmn, setHmc, setMovHist, resetCardUsed, setTicking, setSel, setHints, handleLavaLanding, setDoubleMove, setSnapshots, setPosHist, blackMovedRef, setClockActive, setTurn, checkEndGame, setDrawOffer, isAttackedWithFusion, selectedCard, setSelectedCard]);
 
   const doPromo = React.useCallback((type: PieceType) => {
     if (!promo) return;

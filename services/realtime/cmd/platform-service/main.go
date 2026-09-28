@@ -119,6 +119,9 @@ func main() {
 	go runAnticheatRetentionLoop(anticheatStore)
 
 	internalToken := configuredInternalServiceToken()
+	envutil.WarnSharedInternalToken("platform-service",
+		os.Getenv("PLATFORM_INTERNAL_SERVICE_TOKEN"), "PLATFORM_INTERNAL_SERVICE_TOKEN",
+		[]string{"CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"})
 	addr := httputil.ListenAddr("PLATFORM_ADDR", 8083)
 	srv := &http.Server{
 		Addr: addr,
@@ -226,6 +229,9 @@ func respondJSON(w http.ResponseWriter, code int, v any) {
 	}
 }
 
+// configuredInternalServiceToken is the FIRST token this service accepts
+// from callers. Callers may present ANY configured value -- see
+// internalServiceTokens.
 func configuredInternalServiceToken() string {
 	for _, name := range []string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
@@ -233,6 +239,20 @@ func configuredInternalServiceToken() string {
 		}
 	}
 	return ""
+}
+
+// internalServiceTokens is the full accept set: every non-empty token env
+// this service recognizes. Per-caller rotation (RUNBOOK.md, stage 4) stages
+// distinct values per caller (gateway, web, match-service); the internal
+// route auth must accept any of them, not just the first.
+func internalServiceTokens() []string {
+	var tokens []string
+	for _, name := range []string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			tokens = append(tokens, value)
+		}
+	}
+	return tokens
 }
 
 func envBool(name string, fallback bool) bool {
@@ -249,8 +269,8 @@ func envBool(name string, fallback bool) bool {
 }
 
 func requireInternalServiceRequest(w http.ResponseWriter, r *http.Request) bool {
-	expected := configuredInternalServiceToken()
-	if expected == "" {
+	expected := internalServiceTokens()
+	if len(expected) == 0 {
 		respondError(w, http.StatusNotFound, "not found")
 		return false
 	}
@@ -263,7 +283,14 @@ func requireInternalServiceRequest(w http.ResponseWriter, r *http.Request) bool 
 			provided = strings.TrimSpace(strings.TrimPrefix(auth, prefix))
 		}
 	}
-	if provided == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+	matched := false
+	for _, token := range expected {
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1 {
+			matched = true
+			break
+		}
+	}
+	if !matched {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return false
 	}

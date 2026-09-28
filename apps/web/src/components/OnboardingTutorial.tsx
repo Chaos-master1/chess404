@@ -44,15 +44,9 @@ const STEPS: Record<string, { icon: string; title: string; body: string; tip?: s
 export function OnboardingTutorial({ tutorial }: Props): React.ReactElement | null {
   const { active, step, next, prev, dismiss } = tutorial;
 
-  if (!active || step === 'complete') return null;
-
-  const s = STEPS[step];
-  if (!s) return null;
-
-  const stepKeys = ['welcome', 'board', 'cards', 'mana', 'spells'];
-  const currentIndex = stepKeys.indexOf(step);
-
   // Escape and a backdrop click dismiss, matching every other modal surface.
+  // The effect must run unconditionally (rules-of-hooks): it no-ops on its
+  // own when the tutorial is inactive, so it sits above the early returns.
   React.useEffect(() => {
     if (!active) return;
     const onKey = (event: KeyboardEvent) => {
@@ -63,6 +57,14 @@ export function OnboardingTutorial({ tutorial }: Props): React.ReactElement | nu
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [active, step, dismiss]);
+
+  if (!active || step === 'complete') return null;
+
+  const s = STEPS[step];
+  if (!s) return null;
+
+  const stepKeys = ['welcome', 'board', 'cards', 'mana', 'spells'];
+  const currentIndex = stepKeys.indexOf(step);
 
   return (
     <div

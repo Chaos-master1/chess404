@@ -4,6 +4,7 @@ import React from 'react';
 import type { PieceColor, GameCard } from '../types';
 import type { MatchFinishReason } from '@chess404/contracts';
 import type { GuestProfile } from '../lib/platform-service';
+import { guestRatingForMode } from '../lib/platform-service';
 import type { ShellNavGroup, ShellNavItem, ShellPageMeta } from '../components/layout/AppShell';
 import type { SocialAlert } from '../lib/match-labels';
 import {
@@ -12,7 +13,6 @@ import {
   CommunityIcon,
   FriendsIcon,
   HistoryIcon,
-  InboxIcon,
   PlayIcon,
   ProfileIcon,
   StatusIcon,
@@ -83,12 +83,20 @@ export function useMatchNav(props: UseMatchNavProps) {
     openLiveMatch, setActivePage, setSocialAlert,
   } = props;
 
+  // Once the match is finished there is nothing left to reconnect to: the
+  // server stops broadcasting and the stream shutting down is CORRECT, not a
+  // degraded state. Showing "Sync Reconnecting" over a finished game made
+  // every post-game screen look broken (observed live after a timeout loss:
+  // banner persisted for minutes while the client 404-polled a dead room).
+  const matchOver = over || authoritativeStatus === 'finished';
   const boardStatusLabel = authoritativeMatchId
     ? authoritativeStatus === 'waiting'
       ? 'Private Match Waiting Room'
-      : hostedRuntime && !viewerSeat
-        ? (authoritativeLive ? 'Spectating Live Match' : 'Spectator Sync Reconnecting')
-        : (authoritativeLive ? 'Online Match Live' : 'Match Sync Reconnecting')
+      : matchOver
+        ? 'Match Complete'
+        : hostedRuntime && !viewerSeat
+          ? (authoritativeLive ? 'Spectating Live Match' : 'Spectator Sync Reconnecting')
+          : (authoritativeLive ? 'Online Match Live' : 'Match Sync Reconnecting')
     : hostedRuntime
       ? 'Competitive Match Destination'
       : 'Local Play Sandbox';
@@ -126,8 +134,15 @@ export function useMatchNav(props: UseMatchNavProps) {
       ? [{
           label: 'Social',
           items: [
-            { key: 'Friends', label: 'Friends', icon: <FriendsIcon />, badge: friendsAttentionCount > 0 ? friendsAttentionCount : null },
-            { key: 'Inbox', label: 'Inbox', icon: <InboxIcon />, badge: inboxUnreadCount > 0 ? inboxUnreadCount : null },
+            {
+              key: 'Friends',
+              label: 'Friends',
+              icon: <FriendsIcon />,
+              // Inbox lives inside Friends now (one social hub), so the
+              // single Friends badge covers friend/challenge attention AND
+              // unread inbox activity together.
+              badge: friendsAttentionCount + inboxUnreadCount > 0 ? friendsAttentionCount + inboxUnreadCount : null,
+            },
           ],
         } satisfies ShellNavGroup]
       : []),
@@ -158,8 +173,8 @@ export function useMatchNav(props: UseMatchNavProps) {
   // URL for that single frame, a visible flash on every match launch.
   const isMatchRoute = pathname?.startsWith('/match/') ?? false;
   const showPlayHub = !isMatchRoute && (hostedRuntime
-    ? (activePage === 'Play' || activePage === 'Modes' || activePage === 'Queue' || activePage === 'Lobbies')
-    : (activePage === 'Modes' || activePage === 'Queue' || activePage === 'Lobbies'));
+    ? (activePage === 'Play' || activePage === 'Queue')
+    : (activePage === 'Queue'));
   const showBoardSurface = isMatchRoute || activePage === 'Match' || (!hostedRuntime && activePage === 'Play');
   const controlledSeat = viewerSeat ?? (hostedRuntime ? 'white' : null);
   const topSeat: PieceColor = controlledSeat === 'black' ? 'white' : 'black';
@@ -199,23 +214,35 @@ export function useMatchNav(props: UseMatchNavProps) {
             : null)
     : null;
   const activeFinishReasonLabel = finishReasonLabel(activeFinishReason);
+  // Name policy (formatPlayerLabel): a signed-in player's linked guest is
+  // renamed to their account handle server-side at claim/register/login, so
+  // a present displayName IS the handle. Anyone without a profile — guests,
+  // or a stale local profile from before that rename existed — shows as
+  // "Anonymous", never a generated placeholder name.
   const displayedWhiteName = hostedRuntime && authoritativeMatchId
-    ? (matchSeatMeta?.whiteName ?? (computerDifficulty && viewerSeat !== 'white' ? computerDifficulty.name : undefined) ?? (viewerSeat === 'white' ? whiteProfile?.displayName : undefined) ?? 'White')
-    : (whiteProfile?.displayName ?? 'Player');
+    ? (matchSeatMeta?.whiteName ?? (computerDifficulty && viewerSeat !== 'white' ? computerDifficulty.name : undefined) ?? (viewerSeat === 'white' ? whiteProfile?.displayName : undefined) ?? 'Anonymous')
+    : (whiteProfile?.displayName ?? 'Anonymous');
   const displayedBlackName = hostedRuntime && authoritativeMatchId
-    ? (matchSeatMeta?.blackName ?? (computerDifficulty && viewerSeat !== 'black' ? computerDifficulty.name : undefined) ?? (viewerSeat === 'black' ? whiteProfile?.displayName : undefined) ?? 'Black')
-    : (blackProfile?.displayName ?? 'Opponent');
+    ? (matchSeatMeta?.blackName ?? (computerDifficulty && viewerSeat !== 'black' ? computerDifficulty.name : undefined) ?? (viewerSeat === 'black' ? whiteProfile?.displayName : undefined) ?? 'Anonymous')
+    : (blackProfile?.displayName ?? 'Anonymous');
   const disconnectGraceBanner = activeDisconnectGraceFor
     ? viewerSeat === activeDisconnectGraceFor
       ? `Your seat is in reconnect grace. Rejoin before ${disconnectGraceDeadlineLabel ?? 'the timer expires'} or the match will be forfeited.`
       : `${activeDisconnectGraceFor === 'white' ? displayedWhiteName : displayedBlackName} disconnected. The match will forfeit if they do not return by ${disconnectGraceDeadlineLabel ?? 'the end of the grace window'}.`
     : null;
+  // Ratings follow the match's mode: a guest's open/hidden ladders are
+  // separate (server maintains both), so the card shows the ladder the
+  // current game feeds. Falls back to the blended rating for guests/rooms
+  // without a per-mode ladder yet. Computer difficulty keeps its own rating.
+  const activeMatchModeId = activeMatchRoomMeta?.modeId;
+  const whiteGuestRating = viewerSeat === 'white' ? whiteProfile : blackProfile;
+  const blackGuestRating = viewerSeat === 'black' ? whiteProfile : blackProfile;
   const displayedWhiteRating = hostedRuntime && authoritativeMatchId
-    ? (computerDifficulty && viewerSeat !== 'white' ? computerDifficulty.rating : (viewerSeat === 'white' ? whiteProfile?.rating : blackProfile?.rating) ?? 1200)
-    : (whiteProfile?.rating ?? 1200);
+    ? (computerDifficulty && viewerSeat !== 'white' ? computerDifficulty.rating : guestRatingForMode(whiteGuestRating, activeMatchModeId) ?? 1200)
+    : guestRatingForMode(whiteProfile, activeMatchModeId) ?? 1200;
   const displayedBlackRating = hostedRuntime && authoritativeMatchId
-    ? (computerDifficulty && viewerSeat !== 'black' ? computerDifficulty.rating : (viewerSeat === 'black' ? whiteProfile?.rating : blackProfile?.rating) ?? 1200)
-    : (blackProfile?.rating ?? 1200);
+    ? (computerDifficulty && viewerSeat !== 'black' ? computerDifficulty.rating : guestRatingForMode(blackGuestRating, activeMatchModeId) ?? 1200)
+    : guestRatingForMode(blackProfile, activeMatchModeId) ?? 1200;
   const activeMatchModeLabel = modeLabel(activeMatchRoomMeta?.modeId);
   const activeMatchQueueLabel = queueLabel(activeMatchRoomMeta?.queue);
   const canCreateDirectRematch = Boolean(authoritativeMatchId && activeMatchRoomMeta?.queue === 'direct');
@@ -330,9 +357,7 @@ export function useMatchNav(props: UseMatchNavProps) {
           title: hasPrimaryAccountSession ? 'Account security and identity' : 'Create your Chess404 account',
           description: 'Chess404 is competitive online chess with curated card powers. Sign in once, recover easily, and carry your identity across devices.',
         };
-      case 'Modes':
       case 'Queue':
-      case 'Lobbies':
       case 'Play':
       default:
         return {

@@ -21,6 +21,8 @@ interface QueueTicketCreatePayload {
   queue?: 'casual' | 'rated';
   modeId?: string;
   rating?: number;
+  clockSeconds?: number;
+  clockIncrement?: number;
   displayName?: string;
   accountId?: string;
   accountSessionToken?: string;
@@ -91,6 +93,8 @@ export async function POST(request: Request): Promise<Response> {
     queue,
     modeId: payload.modeId,
     rating: payload.rating,
+    clockSeconds: payload.clockSeconds,
+    clockIncrement: payload.clockIncrement,
     displayName: payload.displayName,
   });
 }

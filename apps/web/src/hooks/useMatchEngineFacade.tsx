@@ -8,6 +8,7 @@ import type {
   PlayerIntent,
 } from '@chess404/contracts';
 import { DEFAULT_MATCH_MODE_ID } from '@chess404/contracts';
+import { classifySnapshotTier, filterUnseenEventIds } from '../lib/snapshot-tier';
 import { useStockfish } from '../usestockfish';
 import type {
   Board,
@@ -33,6 +34,8 @@ import {
 import {
   applyIntent,
   fetchMatch,
+  isMatchGone,
+  markMatchGone,
   readStoredRoomMeta,
   resolveSeatSecret,
   type StoredRoomMeta,
@@ -41,6 +44,7 @@ import {
 import { joinPrivateMatch, rematchPrivateMatch } from '../lib/private-match-service';
 import { buildPendingCardFromSnapshot } from '../lib/pending-card-from-snapshot';
 import {
+  claimMatchSeat,
   type GuestProfile,
 } from '../lib/platform-service';
 import type { QueueName, QueueTicket } from '../lib/matchmaking-service';
@@ -94,9 +98,7 @@ type AppPage =
   | 'Community'
   | 'Status'
   | 'Admin'
-  | 'Modes'
-  | 'Queue'
-  | 'Lobbies';
+  | 'Queue';
 
 function buildStoredRoomMeta(
   base: StoredRoomMeta | null | undefined,
@@ -302,7 +304,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   const {
     timeW, setTimeW, timeB, setTimeB, tickingState, setTicking, clockActive, setClockActive,
-    abortCountdown, setAbortCountdown, startAbortCountdown, stopAbortCountdown, resetTimer,
+    resetTimer,
   } = useMatchTimer();
 
   const {
@@ -319,6 +321,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     triggerTeleportAnim, jumpAnim, setJumpAnim, triggerJumpAnim, sacrificeAnim,
     setSacrificeAnim, triggerSacrificeAnim, mindControlAnim, setMindControlAnim,
     triggerMindControlAnim, fuseAnim, setFuseAnim, triggerFuseAnim,
+    triggerSwapAnim,
   } = animations;
 
   const [doubleMove, setDoubleMove] = React.useState<DoubleMove | null>(null);
@@ -341,7 +344,9 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const [radarActive, setRadarActive] = React.useState(false);
 
   const playMoveSound = React.useCallback(() => playSound('move'), []);
-  const playCardSound = React.useCallback(() => playSound('card_play'), []);
+  // Mechanic-aware: optional for now (sound pool has one card sound); kept as a
+  // param so per-card audio can land without touching call sites again.
+  const playCardSound = React.useCallback((_mechanic?: string) => playSound('card_play'), []);
   const { chatMessages, setChatMessages, chatInput, setChatInput, chatRef, resetChat } = useMatchChat();
   const { resetAntiCheat } = useMatchAntiCheat();
 
@@ -364,6 +369,12 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const [authoritativeLive, setAuthoritativeLive] = React.useState(false);
   const [authoritativeMatchId, setAuthoritativeMatchId] = React.useState<string | null>(null);
   const [matchLoadError, setMatchLoadError] = React.useState<string | null>(null);
+  // Match IDs the server has definitively declared gone (finished/archived,
+  // 404/410) in this page session. Without the latch, every navigation to a
+  // stale /match/<id> (or any page while requestedMatchIdRef still points at
+  // one) re-ran the bootstrap chain and re-logged "match is not public".
+  // Ref, not state: it must not retrigger effects, only gate them.
+  const goneMatchIdsRef = React.useRef<Set<string>>(new Set());
   const [authoritativeStatus, setAuthoritativeStatus] = React.useState<'waiting' | 'active' | 'finished' | null>(null);
   const [authoritativeWhiteConnected, setAuthoritativeWhiteConnected] = React.useState(false);
   const [authoritativeBlackConnected, setAuthoritativeBlackConnected] = React.useState(false);
@@ -387,9 +398,39 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     };
   }, [authoritativeClaimExpiresAtRef, authoritativeClaimTokensRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, hostedRuntime]);
 
+  // Strictly monotonic snapshot application (bounce fix) via the shared
+  // classifySnapshotTier helper -- see lib/snapshot-tier.ts for the tier
+  // rationale (equal-seq clock ticks must stay cosmetic, not dropped).
+  const appliedSeqRef = React.useRef(0);
+  const appliedEventIdsRef = React.useRef<Set<string>>(new Set());
+
   const applyAuthoritativeSnapshot = React.useCallback((snapshot: MatchSnapshotMessage) => {
     const match = snapshot.match;
     if (!match) return;
+
+    const tier = classifySnapshotTier(snapshot.seqNum, appliedSeqRef.current);
+    if (tier === 'stale') return;
+    const cosmeticOnly = tier === 'cosmetic';
+    if (tier === 'fresh' && (snapshot.seqNum ?? 0) > 0) {
+      appliedSeqRef.current = snapshot.seqNum as number;
+    }
+
+    if (cosmeticOnly) {
+      // Same-seq frame: the clock tick. Update only what it legitimately
+      // carries -- clocks and (defensively) terminal state. Never board,
+      // turn, hands, pending cards or identity, and never event side effects.
+      if (match.clock) {
+        setTimeW(match.clock.whiteMs);
+        setTimeB(match.clock.blackMs);
+      }
+      if (match.status === 'finished') {
+        setOver(true);
+        setWinner(match.winner ?? null);
+      }
+      return;
+    }
+
+    const freshEvents = filterUnseenEventIds(snapshot.events, appliedEventIdsRef.current) as NonNullable<typeof snapshot.events>;
 
     // Snapshot hydration is the boundary between a public match URL and an
     // authenticated player action.  The façade used to update only the board,
@@ -495,6 +536,28 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     } else if (turnRef.current !== match.turn) {
       resetCardUsed(match.turn as PieceColor);
     }
+    // The server is the source of truth for the one-card-per-turn slot
+    // (cardUsedThisTurn mirrors what removeCardFromHand consumed). Seed the
+    // local cardUsedBy flags from it so a mid-turn reload -- or a snapshot
+    // that arrives after a local optimistic play -- shows honest UI state
+    // instead of offering a card the server will refuse.
+    const serverCardUsed = match.cardUsedThisTurn ?? null;
+    if (serverCardUsed) {
+      const nextFlags = {
+        white: serverCardUsed.white === true,
+        black: serverCardUsed.black === true,
+      };
+      if (
+        cardUsedByRef.current.white !== nextFlags.white ||
+        cardUsedByRef.current.black !== nextFlags.black
+      ) {
+        cardUsedByRef.current = nextFlags;
+        setCardUsedBy(nextFlags);
+      }
+    } else if (isNewMatch) {
+      cardUsedByRef.current = { white: false, black: false };
+      setCardUsedBy({ white: false, black: false });
+    }
     setTurn(match.turn);
     setMoved(new Set(match.moved));
     setLm(match.lastMove);
@@ -503,11 +566,20 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     if (match.moveHistory) {
       setMovHist(buildMoveRows(match.moveHistory));
     }
+    // Sync the chat log from the authoritative snapshot. The facade applier
+    // never mapped match.chatMessages -- only the other runtime did -- so in
+    // hosted matches the server accepted every message and NOBODY ever saw
+    // it, not even the sender (no local echo either). This is the actual
+    // "chat is broken" root cause; the swallowed send errors were only the
+    // second half.
+    if (Array.isArray(match.chatMessages)) {
+      setChatMessages(match.chatMessages.map(msg => ({ sender: msg.sender as 'white' | 'black', text: msg.text })));
+    }
 
-    if (snapshot.events && snapshot.events.length > 0) {
+    if (snapshot.events && freshEvents.length > 0) {
       const mySeat = viewerSeatRef.current;
       const myActor = mySeat ? authoritativeActorForColor(mySeat) : null;
-      for (const ev of snapshot.events) {
+      for (const ev of freshEvents) {
         if (ev.type === 'card_played') {
           const cardPayload = ev.payload?.card as GameCard | undefined;
           const mechanic = (ev.payload?.mechanic || cardPayload?.mechanic || '') as CardMechanic;
@@ -524,11 +596,22 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
           const mechanic = ev.payload?.mechanic as string;
           const target = ev.payload?.target as { row: number; col: number } | undefined;
           const piece = ev.payload?.piece as { type: PieceType; color: PieceColor } | undefined;
+          const fromSq = ev.payload?.from as { row: number; col: number } | undefined;
           const isOpponent = myActor?.playerId && ev.actorId ? ev.actorId !== myActor.playerId : true;
           if (isOpponent && target) {
             if ((mechanic === 'sniper' || mechanic === 'badsniper') && piece) {
               triggerSniperAnim(target, piece.type, piece.color, mechanic as any);
               fireCardAnim('sniper', `${piece.type} eliminated`);
+            } else if (mechanic === 'teleport' && fromSq) {
+              triggerTeleportAnim(fromSq, target, piece?.type ?? 'queen', piece?.color ?? 'black');
+            } else if (mechanic === 'jump' && fromSq) {
+              triggerJumpAnim(fromSq, target, piece?.type ?? 'knight', piece?.color ?? 'black', Boolean(piece));
+            } else if ((mechanic === 'swapme' || mechanic === 'swapus' || mechanic === 'swaphim') && fromSq) {
+              triggerSwapAnim(fromSq, target);
+            } else if (mechanic === 'mindcontrol' && piece) {
+              triggerMindControlAnim(target, piece.color, piece.type);
+            } else if ((mechanic === 'smallsacrifice' || mechanic === 'bigsacrifice') && fromSq) {
+              triggerSacrificeAnim([fromSq, target]);
             }
           }
         } else if (ev.type === 'card_drawn') {
@@ -536,8 +619,12 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
           const isOpponent = !myActor?.playerId || (ev.actorId ? ev.actorId !== myActor.playerId : (mySeat ? owner !== mySeat : owner !== 'white'));
           playCardSound();
           if (isOpponent) {
+            // The server stubs the opponent's payload (hidden: true, neutral
+            // cards) so their rarity never reaches us. The viewer's own
+            // card_drawn event already set the banner with the REAL rarity,
+            // so do not overwrite it with a fabricated one -- just signal
+            // the opponent's face-down draw via message + sound.
             setCardMsg('🃏 Opponent drew a card!');
-            setLastDrawAnim({ color: (owner || 'black') as any, rarity: 'common' });
           } else {
             const cards = ev.payload?.cards as GameCard[] | undefined;
             const rarity = cards?.[0]?.rarity || 'common';
@@ -585,14 +672,13 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     if (match.bombPieces) setBombPieces(match.bombPieces as any);
 
     if (isGameOver) {
-      stopAbortCountdown();
       setClockActive(false);
       setTicking(null);
     } else if (match.whiteConnected && match.blackConnected) {
       setClockActive(true);
       setTicking(match.turn);
     }
-  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, stopAbortCountdown, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, triggerTeleportAnim, triggerJumpAnim, triggerSwapAnim, triggerMindControlAnim, triggerSacrificeAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;
@@ -603,8 +689,15 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     try {
       const snap = await applyIntent(authoritativeMatchIdRef.current, intent);
       applyAuthoritativeSnapshot(snap);
-    } catch {
-      // Reconcile on failure
+    } catch (err) {
+      // Surface the rejection instead of swallowing it: the server's reason
+      // (rate limit, empty text, stale seq, not your turn...) used to be
+      // invisible, so every failed chat or move looked like the button did
+      // nothing at all. applyIntent already reconciles seq state in the
+      // background on failure; this only makes the reason visible.
+      const msg = err instanceof Error ? err.message : String(err);
+      setCardMsg(`⚠️ ${msg.slice(0, 140)}`);
+      window.setTimeout(() => setCardMsg(''), 3500);
     }
   }, [authoritativeMatchIdRef, applyAuthoritativeSnapshot, hostedRuntime, setCardMsg]);
 
@@ -626,7 +719,9 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     checkEndGame: () => {},
     finishCardUse, removeCardFromHand, radarActive, setRadarActive, finalPositionRef,
     setOver, setWinner, setMovHist, setPosHist, setSnapshots, triggerSniperAnim,
-    triggerTransformAnim, triggerFuseAnim, over, hostedRuntime, viewerSeatRef
+    triggerTransformAnim, triggerFuseAnim,
+    triggerSwapAnim, triggerTeleportAnim, triggerJumpAnim, triggerMindControlAnim, triggerSacrificeAnim,
+    over, hostedRuntime, viewerSeatRef
   });
 
   const {
@@ -644,7 +739,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     setDoubleMove, doubleMoveRef, cardPending, selectedCard, setSelectedCard, promoPicker, cardPromo,
     jokerPicker, ghostRef, setGhostPiece, hostedRuntime, viewerSeatRef,
     authoritativeMatchIdRef, authoritativeActorForColor, applyAuthoritativeSnapshot,
-    resetCardUsed, startAbortCountdown, stopAbortCountdown, setTicking, setClockActive,
+    resetCardUsed, setTicking, setClockActive,
     handleLavaLanding, finalPositionRef, blackMovedRef, setCardMsg, handleCardClick,
     isReviewing, getFusedMoves
   });
@@ -671,10 +766,27 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     }
   }, [turn, over, hostedRuntime, doMove, setPremove, premoveRef, viewerSeatRef, getMoves, setCardMsg]);
 
-  const bootstrapAuthoritativeMatch = React.useCallback(async () => {
+  const bootstrapAuthoritativeMatch = React.useCallback(async (options?: { force?: boolean }) => {
     if (!hostedRuntime) return;
-    const matchId = requestedMatchIdRef.current || gatewayRecoveredMatchIdRef.current;
+    // requestedMatchIdRef is populated at app mount only. After an SPA
+    // requestedMatchIdRef is populated at app mount only. After an SPA
+    // navigation (queue auto-open, computer match, invite) the URL is the
+    // only source of truth -- without this fallback the authoritative
+    // bootstrap silently no-ops, authoritativeStatus stays null, and
+    // MatchBoardView's `authoritativeStatus !== 'active'` gate swallows
+    // every board interaction for the whole match.
+    const routedMatchId = typeof window !== 'undefined'
+      ? window.location.pathname.match(/^\/match\/([^/?]+)/)?.[1]?.replace(/\/$/, '')
+      : null;
+    const matchId = requestedMatchIdRef.current
+      || gatewayRecoveredMatchIdRef.current
+      || (routedMatchId ? decodeURIComponent(routedMatchId) : null)
+      || null;
     if (!matchId) return;
+    // Explicit retries (the "Retry" buttons) bypass the gone-latch; passive
+    // effect runs do not, so a known-gone room cannot spam the error chain
+    // on every navigation.
+    if (!options?.force && goneMatchIdsRef.current.has(matchId)) return;
     setMatchLoadError(null);
     try {
       const roomMeta = readStoredRoomMeta(matchId);
@@ -685,12 +797,55 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
           : null;
       const guest = readStoredGuestIdentity('white');
 
-      // A direct-match URL is a bearer invitation, not a spectator API. Claim
-      // an available seat through the gateway before requesting any private
-      // snapshot. Re-opening an existing seat also succeeds here because the
-      // guest session secret proves ownership; a full room falls through to
-      // the authenticated fetch below.
+      // No held credential: either a direct-match bearer URL (join an open
+      // seat through the gateway) or a queue-paired player whose seat claim
+      // never landed -- the queue auto-open navigates to the room even when
+      // its claim POST fails, and the gateway join below CANNOT recover that
+      // case because match-service rejects a seat-owner re-join whose seat
+      // already carries the server-generated secret. So try the match-claim
+      // pipeline first: it authenticates by guest session, recognizes a seat
+      // owner from the match archive, and mints/refreshes the real claim;
+      // only when that 403/404s (not a participant) fall back to joining as
+      // a fresh invitee. A full room falls through to the authenticated
+      // fetch below.
       if (!heldCredential && guest.guestId) {
+        try {
+          const healed = await claimMatchSeat({
+            matchId,
+            guestId: guest.guestId,
+            sessionSecret: guest.sessionSecret,
+            sessionToken: guest.sessionToken,
+          });
+          const seatKey = healed.seatColor === 'black' ? 'black' : 'white';
+          const prevSeat = (roomMeta?.viewerSeat ?? null) === healed.seatColor ? roomMeta : null;
+          writeStoredRoomMeta(matchId, {
+            ...roomMeta,
+            viewerSeat: healed.seatColor,
+            [`${seatKey}GuestId`]: healed.guestId,
+            [`${seatKey}PlayerSecret`]: healed.playerSecret,
+            [`${seatKey}ClaimToken`]: healed.claimToken,
+            [`${seatKey}ClaimExpiresAt`]: healed.expiresAt ?? '',
+            whiteGuestId: healed.whiteGuestId ?? roomMeta?.whiteGuestId,
+            blackGuestId: healed.blackGuestId ?? roomMeta?.blackGuestId,
+            whiteName: healed.whiteName ?? roomMeta?.whiteName,
+            blackName: healed.blackName ?? roomMeta?.blackName,
+            queue: healed.queue ?? roomMeta?.queue,
+            modeId: healed.modeId ?? roomMeta?.modeId ?? DEFAULT_MATCH_MODE_ID,
+            ...(prevSeat ?? {}),
+          });
+          applyAuthoritativeSnapshot(await fetchMatch(matchId));
+          return;
+        } catch (claimErr) {
+          const status = (claimErr as { status?: number } | null)?.status;
+          // 403 = not a seat owner in this match (a fresh invitee); 404 = no
+          // claim exists for this guest+match. Both are "try the join path"
+          // signals, not failures. Anything else (401 bad session, 5xx,
+          // network) is a real error: rethrow so the UI shows a load error
+          // instead of silently spectating.
+          if (status !== 403 && status !== 404) {
+            throw claimErr;
+          }
+        }
         const account = readStoredAccountIdentity('white');
         try {
           const joined = await joinPrivateMatch({
@@ -749,7 +904,21 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       } else if (status === 429) {
         message = 'Too many requests — wait a moment and try again.';
       }
-      console.error('[bootstrapAuthoritativeMatch] failed:', err);
+      if (status === 404 || status === 410) {
+        // A 404/410 is the server's terminal verdict for this room, not an
+        // application failure: log it as a warning (a console.error on every
+        // visit to a stale room read as an app outage) and latch it so later
+        // navigations skip the whole bootstrap chain. Seat claims only exist
+        // while a match is active, so a finished private match 404s for its
+        // own players through the proxy path -- there is no retry that can
+        // succeed, and the next computer/queue match overwrites the room
+        // meta anyway.
+        markMatchGone(matchId);
+        goneMatchIdsRef.current.add(matchId);
+        console.warn(`[bootstrapAuthoritativeMatch] match unavailable (${status}): ${matchId}`);
+      } else {
+        console.error('[bootstrapAuthoritativeMatch] failed:', err);
+      }
       setMatchLoadError(message);
     }
   }, [hostedRuntime, requestedMatchIdRef, gatewayRecoveredMatchIdRef, applyAuthoritativeSnapshot]);
@@ -767,6 +936,27 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     void bootstrapAuthoritativeMatch();
   }, [activePage, bootstrapAuthoritativeMatch, guestProfilesReady, hostedRuntime, pathname]);
 
+  // Leaving a gone room drops its stale seat/claim state: the match is
+  // unreadable, so the cached credentials can only produce failed heartbeats
+  // and claim refreshes later. Kept out of bootstrapAuthoritativeMatch because
+  // it already re-runs on every navigation; this runs once per page transition.
+  React.useEffect(() => {
+    if (pathname?.startsWith('/match/')) return;
+    const routedMatchId = typeof window !== 'undefined'
+      ? window.location.pathname.match(/^\/match\/([^/?]+)/)?.[1]?.replace(/\/$/, '')
+      : null;
+    const matchId = requestedMatchIdRef.current
+      || gatewayRecoveredMatchIdRef.current
+      || (routedMatchId ? decodeURIComponent(routedMatchId) : null)
+      || null;
+    if (!matchId || !goneMatchIdsRef.current.has(matchId)) return;
+    goneMatchIdsRef.current.delete(matchId);
+    writeStoredActiveMatchId(null);
+    writeStoredRoomMeta(matchId, null);
+    requestedMatchIdRef.current = null;
+    gatewayRecoveredMatchIdRef.current = null;
+  }, [pathname, requestedMatchIdRef, gatewayRecoveredMatchIdRef]);
+
   const resetBoardEffectsCallback = React.useCallback(() => {
     setLavaSquares([]);
     setLavaExploding([]);
@@ -778,6 +968,10 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   const newGame = React.useCallback(() => {
     stop();
+    // Captured before the refs below are nulled: the finished room's meta is
+    // cleared with the game so its seat credentials cannot leak into a new
+    // room's auth path.
+    const finishedMatchId = authoritativeMatchIdRef.current;
     setBoard(makeBoard());
     setTurn('white');
     setSel(null);
@@ -844,15 +1038,15 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     gatewayRecoveredMatchIdRef.current = null;
     requestedMatchIdRef.current = null;
     writeStoredActiveMatchId(null);
+    if (finishedMatchId) writeStoredRoomMeta(finishedMatchId, null);
     clearRequestedMatchQuery();
     setGameKey(k => k + 1);
     if (hostedRuntime) {
       setActivePage('Play');
       return;
     }
-    setTimeout(() => startAbortCountdown(), 0);
-    void bootstrapAuthoritativeMatch();
-  }, [stop, setBoard, setTurn, setSel, setHints, setMoved, setLm, setDrag, setPromo, setCheck, setMate, setStale, setInsuf, setHmc, setFmn, setPosHist, setDrawOffer, setOver, setWinner, setMovHist, setSnapshots, setReviewIdx, setReviewBoard, resetChat, resetTimer, cardUsedByRef, setCardUsedBy, pendingCardUseRef, setSelectedCard, setWhiteHand, setBlackHand, setLastDrawAnim, setDealPhase, setCardPending, setCardMsg, setPromoPicker, resetBoardEffectsCallback, setBombPieces, setBombExploding, setSwapAnim, setJokerPicker, resetAntiCheat, setCardPromo, setDoubleMove, setCardAnim, setViewerSeat, viewerSeatRef, setMatchSeatMeta, authoritativeMatchIdRef, authoritativeSeatSecretsRef, authoritativeClaimExpiresAtRef, authoritativeClaimTokensRef, gatewayBootstrapClaimsRef, gatewayRecoveredMatchIdRef, requestedMatchIdRef, hostedRuntime, setActivePage, startAbortCountdown, bootstrapAuthoritativeMatch]);
+    void bootstrapAuthoritativeMatch({ force: true });
+  }, [stop, setBoard, setTurn, setSel, setHints, setMoved, setLm, setDrag, setPromo, setCheck, setMate, setStale, setInsuf, setHmc, setFmn, setPosHist, setDrawOffer, setOver, setWinner, setMovHist, setSnapshots, setReviewIdx, setReviewBoard, resetChat, resetTimer, cardUsedByRef, setCardUsedBy, pendingCardUseRef, setSelectedCard, setWhiteHand, setBlackHand, setLastDrawAnim, setDealPhase, setCardPending, setCardMsg, setPromoPicker, resetBoardEffectsCallback, setBombPieces, setBombExploding, setSwapAnim, setJokerPicker, resetAntiCheat, setCardPromo, setDoubleMove, setCardAnim, setViewerSeat, viewerSeatRef, setMatchSeatMeta, authoritativeMatchIdRef, authoritativeSeatSecretsRef, authoritativeClaimExpiresAtRef, authoritativeClaimTokensRef, gatewayBootstrapClaimsRef, gatewayRecoveredMatchIdRef, requestedMatchIdRef, hostedRuntime, setActivePage, bootstrapAuthoritativeMatch]);
 
   const returnToQueueHome = React.useCallback(() => {
     setQueueLaunchIntent(null);
@@ -931,7 +1125,6 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     applyGatewayMatchClaims,
     applyGatewayAccountSessions,
     onSnapshot: applyAuthoritativeSnapshot,
-    stopAbortCountdown,
     authoritativeActorForColor,
   });
 
@@ -951,7 +1144,6 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   const kingPos = check && !isReviewing ? findKing(board, turn) : null;
   const roundNumber = React.useMemo(() => Math.floor(fmn), [fmn]);
-  const abortActive = abortCountdown !== null && abortCountdown > 0;
   const hasPrimaryAccountSession = !!primaryAccountIdentity?.sessionToken;
 
   const createAuthoritativeRematchRoom = React.useCallback(async () => {
@@ -1039,8 +1231,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     triggerSniperAnim, triggerTransformAnim, triggerFuseAnim,
     transformAnim, sniperAnim, teleportAnim, jumpAnim, sacrificeAnim, mindControlAnim, fuseAnim,
     timeW, setTimeW, timeB, setTimeB, tickingState, setTicking,
-    clockActive, setClockActive, abortCountdown, startAbortCountdown,
-    stopAbortCountdown, resetTimer,
+    clockActive, setClockActive, resetTimer,
     authoritativeLive, authoritativeStatus,
     authoritativeWhiteConnected, authoritativeBlackConnected,
     authoritativeDisconnectGraceFor, authoritativeDisconnectGraceDeadline,
@@ -1062,7 +1253,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     fmtClock, evalStr, evalLabel, renderPlayerCard, renderJokerPicker,
     premove, setPremove, premoveRef,
     chatMessages, setChatMessages, chatInput, setChatInput, chatRef, resetChat,
-    roundNumber, abortActive, streamDisconnected, hasPrimaryAccountSession,
+    roundNumber, streamDisconnected, hasPrimaryAccountSession,
     submitAuthoritativeIntent, bootstrapAuthoritativeMatch, requestedMatchIdRef,
     matchLoadError, setMatchLoadError,
     engineOn, setEngineOn, finalPositionRef, reviewBoard,

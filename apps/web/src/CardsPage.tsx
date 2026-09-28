@@ -109,7 +109,7 @@ function CardTile({card,selected,onClick}:{card:Card;selected:boolean;onClick:()
       onMouseEnter={()=>setHov(true)}
       onMouseLeave={()=>setHov(false)}
       style={{
-        width:'100%', maxWidth:190, minWidth:0, flexShrink:0,
+        width:'100%', maxWidth:190, minWidth:0,
         cursor:'pointer',
         position:'relative',
         borderRadius:14,
@@ -150,6 +150,10 @@ function CardTile({card,selected,onClick}:{card:Card;selected:boolean;onClick:()
         overflow:'hidden',
         display:'flex',
         flexDirection:'column',
+        // Fixed height: with minHeight the grid stretched the FRAME to the
+        // tallest sibling while the body stayed short, leaving an empty
+        // purple band below the card face. A fixed body plus the 4-line
+        // clamp keeps frame and body ending together at every width.
         height:240,
         position:'relative',
         // Inner card face — darker base
@@ -267,7 +271,7 @@ function CardTile({card,selected,onClick}:{card:Card;selected:boolean;onClick:()
           <div style={{padding:'6px 8px 6px', flex:1, overflow:'hidden'}}>
             <div style={{
               color:'rgba(240,232,215,0.82)', fontSize:10, lineHeight:1.5,
-              display:'-webkit-box', WebkitLineClamp:3,
+              display:'-webkit-box', WebkitLineClamp:4,
               WebkitBoxOrient:'vertical' as any, overflow:'hidden',
             }}>{card.desc}</div>
           </div>
@@ -305,38 +309,38 @@ function BigPreview({card}:{card:Card|null}) {
   );
 
   return (
-    <div style={{display:'flex',flexDirection:'column',alignItems:'center',padding:'14px 16px',gap:10,animation:'fadeUp 0.2s ease',flex:1,overflow:'hidden'}}>
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',padding:'10px 12px',gap:6,animation:'fadeUp 0.2s ease',flex:1}}>
       <div style={{
         width:'100%', borderRadius:16, padding:4,
         background: frameBg[card.rarity],
         boxShadow:`0 0 20px ${rs.glow}, 0 0 40px ${rs.glow}55, 0 8px 32px rgba(0,0,0,0.8)`,
-        flexShrink:0,
+        flex:'1 1 auto', minHeight:0, display:'flex', // stretch with the sidebar so the preview fits the viewport; artwork absorbs the slack
       }}>
-        <div style={{borderRadius:13, overflow:'hidden', background:artBg[card.rarity], display:'flex', flexDirection:'column', border:'1px solid rgba(255,255,255,0.15)'}}>
-          <div style={{padding:'10px 14px', background:'rgba(0,0,0,0.30)', borderBottom:`1px solid ${rs.accent}55`, display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+        <div style={{borderRadius:13, overflow:'hidden', background:artBg[card.rarity], display:'flex', flexDirection:'column', flex:1, minHeight:0, border:'1px solid rgba(255,255,255,0.15)'}}>
+          <div style={{padding:'8px 14px', background:'rgba(0,0,0,0.30)', borderBottom:`1px solid ${rs.accent}55`, display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0}}>
             <div style={{color:'#fff', fontWeight:800, fontSize:14, letterSpacing:'0.3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1}}>{card.name}</div>
             <span style={{fontSize:9, fontWeight:800, color:rs.accent, background:`${rs.accent}22`, border:`1px solid ${rs.accent}55`, padding:'3px 8px', borderRadius:5, marginLeft:8, whiteSpace:'nowrap', letterSpacing:'0.5px'}}>{rs.label}</span>
           </div>
-          <div style={{height:150, position:'relative', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <div style={{flex:'1 1 130px', minHeight:96, position:'relative', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'}}>
             <div style={{position:'absolute',inset:0,background:`radial-gradient(ellipse at 50% 45%,${rs.accent}55 0%,transparent 60%)`}}/>
             {[0,1,2,3].map(i=><div key={i} style={{position:'absolute',top:`${10+i*22}%`,left:`${5+i*28}%`,fontSize:9,color:rs.accent,opacity:0.55,animation:'sparkle 2s ease-in-out infinite',animationDelay:`${i*0.3}s`}}>✦</div>)}
             <div style={{fontSize:68,filter:`drop-shadow(0 0 20px ${rs.glow})`,animation:'float 3s ease-in-out infinite',zIndex:1}}>{card.icon}</div>
           </div>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'7px 14px',background:'rgba(0,0,0,0.25)',borderTop:`1px solid ${rs.accent}44`}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'7px 14px',background:'rgba(0,0,0,0.25)',borderTop:`1px solid ${rs.accent}44`,flexShrink:0}}>
             <span style={{fontSize:10,fontWeight:800,padding:'4px 12px',borderRadius:5,color:rs.accent,background:`${rs.accent}25`,border:`1px solid ${rs.accent}66`,textTransform:'uppercase',letterSpacing:'1px'}}>{card.type==='trap'?'TRAP':'SPELL'}</span>
             <span style={{fontSize:10,color:'rgba(255,255,255,0.55)',fontWeight:600}}>{card.dropRate}% drop</span>
           </div>
-          <div style={{padding:'10px 14px 12px',background:'rgba(0,0,0,0.22)'}}>
+          <div style={{padding:'8px 14px 10px',background:'rgba(0,0,0,0.22)',flexShrink:0}}>
             <div style={{color:'rgba(255,245,235,0.92)',fontSize:11,lineHeight:1.6}}>{card.desc}</div>
           </div>
         </div>
       </div>
       <div style={{width:'100%',display:'flex',gap:8}}>
-        <div style={{flex:1,padding:'10px',background:'rgba(0,0,0,0.3)',borderRadius:8,border:`1px solid ${rs.accent}33`,textAlign:'center'}}>
+        <div style={{flex:1,padding:'8px 10px',background:'rgba(0,0,0,0.3)',borderRadius:8,border:`1px solid ${rs.accent}33`,textAlign:'center'}}>
           <div style={{color:'rgba(180,160,120,0.5)',fontSize:8,fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',marginBottom:4}}>DROP</div>
-          <div style={{color:rs.accent,fontSize:18,fontWeight:800}}>{card.dropRate}%</div>
+          <div style={{color:rs.accent,fontSize:16,fontWeight:800}}>{card.dropRate}%</div>
         </div>
-        <div style={{flex:1,padding:'10px',background:'rgba(0,0,0,0.3)',borderRadius:8,border:`1px solid ${rs.accent}33`,textAlign:'center'}}>
+        <div style={{flex:1,padding:'8px 10px',background:'rgba(0,0,0,0.3)',borderRadius:8,border:`1px solid ${rs.accent}33`,textAlign:'center'}}>
           <div style={{color:'rgba(180,160,120,0.5)',fontSize:8,fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',marginBottom:4}}>TYPE</div>
           <div style={{color:rs.accent,fontSize:12,fontWeight:800,marginTop:2}}>{card.type==='trap'?'TRAP':'SPELL'}</div>
         </div>
@@ -357,7 +361,7 @@ function RaritySection({rarity,cards,selectedId,onSelect,filterType}:{rarity:Rar
         <div style={{flex:1,height:1,background:`linear-gradient(90deg,${rs.accent}44,transparent)`}}/>
         <span style={{color:`${rs.accent}77`,fontSize:11,fontWeight:600}}>{visible.length} cards · {DROP_RATES[rarity]}% drop</span>
       </div>
-      <div className="cards-rarity-grid" style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(150px, 1fr))', gap:14}}>
+      <div className="cards-rarity-grid" style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:14}}>
         {visible.map(card=><CardTile key={card.mechanic} card={card} selected={selectedId===card.mechanic} onClick={()=>onSelect(card)}/>)}
       </div>
     </div>
@@ -385,7 +389,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
   },[filterType,filterRarity,search]);
 
   return (
-    <div className="cards-page-root" style={{height:embedded?'100%':'100vh',minHeight:0,flex:embedded?1:undefined,display:'flex',flexDirection:'column',fontFamily:"var(--font-sans),'Segoe UI',sans-serif",backgroundImage:embedded?undefined:'url(/background.png)',backgroundSize:'cover',backgroundPosition:'center',backgroundAttachment:'fixed',overflow:'hidden'}}>
+    <div className="cards-page-root" style={{height:embedded?'100%':'100vh',minHeight:0,flex:embedded?1:undefined,display:'flex',flexDirection:'column',fontFamily:"var(--font-sans),'Segoe UI',sans-serif",backgroundImage:embedded?undefined:'url(/background.webp)',backgroundSize:'cover',backgroundPosition:'center',backgroundAttachment:'fixed',overflow:'hidden'}}>
       <style>{`
         @keyframes float   {0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)}}
         @keyframes sparkle {0%,100%{opacity:0.2;transform:scale(1) rotate(0deg)} 50%{opacity:1;transform:scale(1.5) rotate(20deg)}}
@@ -398,20 +402,29 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
         ::-webkit-scrollbar-thumb{background:rgba(255,165,40,0.35);border-radius:3px}
 
         .cards-filter-bar-inner { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; }
+        /* The nowrap filter row's min-content width (~1170px) must not
+           propagate up the flex chain (min-width:auto) — on phones it blew
+           the whole page out horizontally. With min-width:0 the bar keeps
+           its own overflow-x scroll (see the <=900px block) and the grid
+           stays at true viewport width. */
+        .cards-page-root { min-width:0; max-width:100%; }
         .cards-sidebar-desktop {
           width:340px; flex-shrink:0; display:flex; flex-direction:column;
           background:linear-gradient(180deg,#16163a 0%,#10102e 100%);
           backdrop-filter:blur(20px); border-right:1px solid rgba(255,165,40,0.15);
-          overflow-y:hidden; border-radius:16px; box-shadow:4px 0 32px rgba(0,0,0,0.4);
+          /* Contained, not scrollable: BigPreview flexes to the remaining
+             height (artwork absorbs the slack) so the whole sidebar fits a
+             laptop viewport without an inner scrollbar. */
+          overflow:hidden; scrollbar-width:none; border-radius:16px; box-shadow:4px 0 32px rgba(0,0,0,0.4);
         }
-        .cards-mobile-preview-backdrop { display:none; }
+        /* Short laptops: hide flavor text so preview + drop rates fit without scrolling. */ @media (max-height: 780px) { .cards-sidebar-info-tips { display:none; } } .cards-mobile-preview-backdrop { display:none; }
         .cards-mobile-preview-sheet { display:none; }
 
         @media (max-width: 900px) {
           .cards-sidebar-desktop { display:none !important; }
-          .cards-filter-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:10px 12px !important; flex-wrap:nowrap !important; }
+          .cards-filter-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:10px 12px !important; }
           .cards-filter-wrap::-webkit-scrollbar { display:none; }
-          .cards-filter-bar-inner { flex-shrink:0; flex-wrap:nowrap; }
+          .cards-filter-bar-inner { flex-wrap:wrap; flex-shrink:0; }
           .cards-grid-wrap { padding:16px 12px !important; }
           .cards-mobile-preview-backdrop {
             display:block; position:fixed; inset:0; z-index:200;
@@ -430,6 +443,18 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
         }
         @media (max-width: 480px) {
           .cards-grid-wrap { padding:10px 6px !important; }
+          /* Phone-perfect: two full cards per row, tight gaps, and the preview
+             sheet clears the phone's home-indicator safe area. */
+          .cards-rarity-grid { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap:10px !important; }
+          .cards-mobile-preview-sheet { max-height: 86vh; padding-bottom: env(safe-area-inset-bottom); }
+          /* Filter menu as slim chip rows: the desktop pills' inline
+             min-heights and padding ate ~200px of vertical space at phone
+             widths. Buttons are inline-styled, so overrides need !important. */
+          .cards-filter-wrap { gap:5px !important; row-gap:5px !important; padding:7px 10px !important; }
+          .cards-filter-wrap button { padding:4px 9px !important; min-height:0 !important; font-size:10px !important; border-radius:8px !important; }
+          .cards-filter-wrap button span { font-size:9px !important; } .cards-filter-brand { gap:6px !important; margin-right:8px !important; } .cards-filter-brand > span:first-child { display:none; } .cards-filter-brand-title { font-size:12px !important; } .cards-filter-brand-count { font-size:9px !important; } .cards-filter-divider { display:none !important; }
+          .cards-filter-wrap > div:last-child { flex:1 1 100%; }
+          .cards-filter-wrap input { width:100% !important; padding:6px 10px 6px 28px !important; font-size:12px !important; }
         }
       `}</style>
 
@@ -451,7 +476,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
       {/* NAV */}
       {!embedded && <nav style={{position:'relative',zIndex:100,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 48px',height:'64px',background:'linear-gradient(180deg,#1a1a3a 0%,#12122a 100%)',backdropFilter:'blur(20px)',borderBottom:'1px solid rgba(255,165,40,0.25)',boxShadow:'0 2px 24px rgba(0,0,0,0.5)'}}>
         <div style={{display:'flex',alignItems:'center',gap:14,minWidth:200}}>
-          <div style={{width:40,height:40,borderRadius:10,background:'linear-gradient(135deg,#c8860a,#7a5008)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,boxShadow:'0 0 14px rgba(200,134,10,0.6)',border:'1px solid rgba(255,180,60,0.4)'}}>♛</div>
+          <div style={{width:40,height:40,borderRadius:10,overflow:'hidden',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 0 14px rgba(200,134,10,0.6)',border:'1px solid rgba(255,180,60,0.4)'}}><img src="/logo-mark.png" alt="Chess404" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}} /></div>
           <span style={{fontSize:21,fontWeight:800,letterSpacing:1,background:'linear-gradient(135deg,#ffd700,#c8860a,#fff8e0)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>CardChess</span>
         </div>
         <div style={{display:'flex',gap:8}}>
@@ -468,20 +493,20 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
 
       {/* FILTER BAR */}
       <div className="cards-filter-wrap" style={{position:'relative',zIndex:99,flexShrink:0,display:'flex',alignItems:'center',gap:10,padding:embedded?'12px 24px':'12px 48px',background:'linear-gradient(180deg,#16163a 0%,#10102e 100%)',backdropFilter:'blur(16px)',borderBottom:'1px solid rgba(255,165,40,0.15)',flexWrap:'wrap'}}>
-        <div style={{display:'flex',alignItems:'center',gap:10,marginRight:16}}>
+        <div className="cards-filter-brand" style={{display:'flex',alignItems:'center',gap:10,marginRight:16}}>
           <span style={{fontSize:20,filter:'drop-shadow(0 0 8px rgba(255,165,40,0.5))'}}>🃏</span>
           <div>
-            <div style={{color:'#fff',fontWeight:700,fontSize:15}}>Cards</div>
-            <div style={{color:'rgba(200,180,140,0.5)',fontSize:11}}>{filtered.length} cards</div>
+            <div className="cards-filter-brand-title" style={{color:'#fff',fontWeight:700,fontSize:15}}>Cards</div>
+            <div className="cards-filter-brand-count" style={{color:'rgba(200,180,140,0.5)',fontSize:11}}>{filtered.length} cards</div>
           </div>
         </div>
-        <div style={{width:1,height:28,background:'rgba(255,255,255,0.1)',margin:'0 4px'}}/>
+        <div className="cards-filter-divider" style={{width:1,height:28,background:'rgba(255,255,255,0.1)',margin:'0 4px'}}/>
         {(['All','Spell','Trap'] as const).map(t=>(
           <button key={t} onClick={()=>setFilterType(t)} style={{padding:'9px 16px',minHeight:'40px',borderRadius:8,fontSize:13,fontWeight:600,background:filterType===t?(t==='Spell'?'rgba(125,211,252,0.15)':t==='Trap'?'rgba(251,146,60,0.15)':'rgba(255,165,40,0.15)'):'rgba(255,255,255,0.06)',backdropFilter:'blur(10px)',color:filterType===t?(t==='Spell'?'#7dd3fc':t==='Trap'?'#fb923c':'#ffb830'):'rgba(200,185,140,0.6)',border:filterType===t?`1px solid ${t==='Spell'?'rgba(125,211,252,0.35)':t==='Trap'?'rgba(251,146,60,0.35)':'rgba(255,165,40,0.35)'}`:'1px solid rgba(255,255,255,0.1)',cursor:'pointer',fontFamily:'inherit',display:'inline-flex',alignItems:'center'}}>
             {t==='All'?`All (${CARDS.length})`:t==='Spell'?`⚡ Spell (${CARDS.filter(c=>c.type==='spell').length})`:`🪤 Trap (${CARDS.filter(c=>c.type==='trap').length})`}
           </button>
         ))}
-        <div style={{width:1,height:28,background:'rgba(255,255,255,0.1)',margin:'0 4px'}}/>
+        <div className="cards-filter-divider" style={{width:1,height:28,background:'rgba(255,255,255,0.1)',margin:'0 4px'}}/>
         {(['All',...RARITY_ORDER] as (Rarity|'All')[]).map(r=>{
           const active=filterRarity===r; const rs2=r!=='All'?RS[r as Rarity]:null;
           const count=r==='All'?CARDS.length:CARDS.filter(c=>c.rarity===r).length;
@@ -503,10 +528,10 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
             margin:embedded?'16px':'16px 20px 16px 16px',
           }}>
             <BigPreview card={selected}/>
-            <div style={{padding:'14px 18px',borderTop:'1px solid rgba(255,165,40,0.15)',flexShrink:0,background:'rgba(0,0,0,0.2)',borderRadius:'0 0 0 16px'}}>
-              <div style={{color:'rgba(200,180,140,0.55)',fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:10}}>Drop Rates</div>
+            <div style={{padding:'9px 16px',borderTop:'1px solid rgba(255,165,40,0.15)',flexShrink:0,background:'rgba(0,0,0,0.2)',borderRadius:'0 0 0 16px'}}>
+              <div style={{color:'rgba(200,180,140,0.55)',fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'1.5px',marginBottom:8}}>Drop Rates</div>
               {RARITY_ORDER.map(r=>{const rs2=RS[r];return(
-                <div key={r} style={{display:'flex',alignItems:'center',gap:10,marginBottom:9}}>
+                <div key={r} style={{display:'flex',alignItems:'center',gap:10,marginBottom:5}}>
                   <div style={{width:56,fontSize:9,fontWeight:800,color:rs2.accent,letterSpacing:'0.5px'}}>{rs2.label}</div>
                   <div style={{flex:1,height:5,borderRadius:3,background:'rgba(255,255,255,0.06)',overflow:'hidden'}}>
                     <div style={{height:'100%',width:`${DROP_RATES[r]}%`,background:`linear-gradient(90deg,${rs2.accent}88,${rs2.accent})`,boxShadow:`0 0 5px ${rs2.glow}`}}/>
@@ -515,11 +540,11 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
                 </div>
               );})}
             </div>
-            <div style={{padding:'12px 18px',borderTop:'1px solid rgba(255,165,40,0.10)',flexShrink:0}}>
+            <div className="cards-sidebar-info-tips" style={{padding:'9px 16px',borderTop:'1px solid rgba(255,165,40,0.10)',flexShrink:0}}>
               <div style={{color:'#ffb830',fontSize:11,fontWeight:700,marginBottom:5}}>⊙ Infinite Pool</div>
               <div style={{color:'rgba(200,185,150,0.65)',fontSize:10.5,lineHeight:1.55}}>Cards drawn from an infinite deck. Rarity determines drop chance each round.</div>
             </div>
-            <div style={{padding:'12px 18px',borderTop:'1px solid rgba(255,165,40,0.10)',flexShrink:0}}>
+            <div className="cards-sidebar-info-tips" style={{padding:'9px 16px',borderTop:'1px solid rgba(255,165,40,0.10)',flexShrink:0}}>
               <div style={{color:'#60a5fa',fontSize:11,fontWeight:700,marginBottom:5}}>■ Strategy Tip</div>
               <div style={{color:'rgba(200,185,150,0.65)',fontSize:10.5,lineHeight:1.55}}>Traps activate on the opponent's turn. Spells activate on yours. Plan ahead!</div>
             </div>

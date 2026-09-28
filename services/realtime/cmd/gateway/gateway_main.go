@@ -27,6 +27,9 @@ func main() {
 	// well under 1s; the headroom is for tail latency.
 	client := httputil.NewHTTPClient(10 * time.Second)
 	mux := buildGatewayMux(config, client)
+	envutil.WarnSharedInternalToken("gateway",
+		os.Getenv("GATEWAY_INTERNAL_SERVICE_TOKEN"), "GATEWAY_INTERNAL_SERVICE_TOKEN",
+		[]string{"PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"})
 	rl, err := rate_limit.NewRateLimiter()
 	if err != nil {
 		log.Fatalf("failed to initialize rate limiter: %v", err)

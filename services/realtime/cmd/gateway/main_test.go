@@ -699,6 +699,101 @@ func TestGatewayJoinsPrivateMatch(t *testing.T) {
 	}
 }
 
+// Regression: a caller presenting rejected credentials for a private match
+// used to be silently re-minted a brand-new guest by the bootstrap fallback.
+// That fresh guest then claimed the open seat as a phantom opponent nobody
+// owned. The gateway must refuse the join instead of minting a replacement.
+func TestGatewayJoinPrivateMatchRefusesReplacementGuestForRejectedIdentity(t *testing.T) {
+	var matchJoinCalls int
+	matchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/matches/private-room-x/join" {
+			matchJoinCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"match": map[string]any{
+					"match": map[string]any{
+						"matchId":      "private-room-x",
+						"status":       "active",
+						"queue":        "direct",
+						"modeId":       "hidden_cards",
+						"whiteGuestId": "white-guest",
+						"blackGuestId": "phantom-guest",
+					},
+					"replayHead": 0,
+					"events":     []map[string]any{},
+				},
+				"seatColor":          "black",
+				"joined":             true,
+				"waitingForOpponent": false,
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "service": "match-service"})
+	}))
+	defer matchServer.Close()
+
+	var mintCalls int
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/platform/guest-sessions":
+			var payload map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if payload["guestId"] == "stale-guest" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "unauthorized guest session"})
+				return
+			}
+			mintCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"guest": map[string]any{
+					"guestId":       "phantom-guest",
+					"displayName":   "Guest phantom-guest",
+					"rating":        1200,
+					"matchesPlayed": 0,
+					"wins":          0,
+					"losses":        0,
+					"draws":         0,
+					"createdAt":     "2026-01-01T00:00:00Z",
+					"lastSeenAt":    "2026-01-01T00:00:00Z",
+				},
+				"sessionSecret": "phantom-secret",
+			})
+		case "/api/platform/status", "/api/platform/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer platformServer.Close()
+
+	matchmakingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	}))
+	defer matchmakingServer.Close()
+
+	mux := buildGatewayMux(GatewayConfig{
+		MatchServiceURL:       matchServer.URL,
+		PlatformServiceURL:    platformServer.URL,
+		MatchmakingServiceURL: matchmakingServer.URL,
+	}, matchServer.Client())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/private-matches/private-room-x/join", strings.NewReader(`{
+		"guest":{"guestId":"stale-guest","sessionSecret":"wrong-secret"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected rejected identity join to be refused with 401, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if matchJoinCalls != 0 {
+		t.Fatalf("expected zero match join calls for a refused identity, got %d", matchJoinCalls)
+	}
+	if mintCalls == 0 {
+		t.Fatal("expected platform fallback mint to still be attempted (and then refused by the gateway)")
+	}
+}
+
 func TestGatewayCreatesPrivateRematchRoom(t *testing.T) {
 	matchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1819,5 +1914,221 @@ func TestGatewayErrorMessageReturnsUpstreamError(t *testing.T) {
 	noString := GatewayServiceHealth{URL: "x", StatusCode: 500, Payload: map[string]any{"error": 42}}
 	if got := gatewayErrorMessage(noString, "fallback for non-string"); got != "fallback for non-string" {
 		t.Fatalf("expected fallback when error is not a string, got %q", got)
+	}
+}
+
+// TestGatewayRatedPrivateMatchRequiresAccount locks in the server-side
+// rated-account gate for private rooms: a rated room creation without a
+// valid account session must be rejected with 403 at the gateway (the
+// client-side LobbiesPage gate is advisory only), while the same request
+// carrying an account session must proceed and still create the room in
+// the rated queue.
+func TestGatewayRatedPrivateMatchRequiresAccount(t *testing.T) {
+	var createQueue string
+	matchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/matches":
+			var payload struct {
+				Queue string `json:"queue"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			createQueue = payload.Queue
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"match": map[string]any{
+					"matchId":      "rated-room-1",
+					"queue":        "rated",
+					"modeId":       "open_cards",
+					"status":       "waiting",
+					"whiteGuestId": "rated-white-guest",
+					"whiteName":    "White",
+					"clockSeconds": 600,
+					"createdAt":    "2026-01-01T00:00:00Z",
+					"updatedAt":    "2026-01-01T00:00:00Z",
+				},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "service": "match-service"})
+		}
+	}))
+	defer matchServer.Close()
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/platform/guest-sessions":
+			var payload map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"guest": map[string]any{
+					"guestId":        payload["guestId"],
+					"displayName":    "Guest " + payload["guestId"],
+					"rating":         1200,
+					"matchesPlayed":  0,
+					"wins":           0,
+					"losses":         0,
+					"draws":          0,
+					"createdAt":      "2026-01-01T00:00:00Z",
+					"lastSeenAt":     "2026-01-01T00:00:00Z",
+				},
+				"sessionSecret": payload["sessionSecret"],
+			})
+		case "/api/platform/account-sessions":
+			var payload map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"account": map[string]any{
+					"accountId":      payload["accountId"],
+					"handle":         "aurora_white",
+					"primaryGuestId": "rated-white-guest",
+					"linkedGuestIds": []string{"rated-white-guest"},
+					"createdAt":      "2026-01-01T00:00:00Z",
+					"lastSeenAt":     "2026-01-02T00:00:00Z",
+				},
+				"sessionToken": payload["sessionToken"],
+				"expiresAt":    "2026-12-31T00:00:00Z",
+			})
+		case "/api/platform/match-claims":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"matchId":      "rated-room-1",
+				"guestId":      "rated-white-guest",
+				"seatColor":    "white",
+				"playerId":     "white_player",
+				"playerSecret": "claim-secret",
+				"claimToken":   "claim-token",
+				"queue":        "rated",
+				"status":       "active",
+			})
+		case "/api/platform/status", "/api/platform/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer platformServer.Close()
+
+	matchmakingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	}))
+	defer matchmakingServer.Close()
+
+	mux := buildGatewayMux(GatewayConfig{
+		MatchServiceURL:       matchServer.URL,
+		PlatformServiceURL:    platformServer.URL,
+		MatchmakingServiceURL: matchmakingServer.URL,
+	}, matchServer.Client())
+
+	createPayload := `{"guest":{"guestId":"rated-white-guest","sessionSecret":"rated-white-secret"},"queue":"rated","modeId":"open_cards","preferredSeat":"white"}`
+
+	// No account session: rated creation must be rejected with 403.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/private-matches", strings.NewReader(createPayload))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected rated private create without account to be rejected with 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if createQueue != "" {
+		t.Fatalf("expected match-service create to never fire for rejected rated room, got queue=%q", createQueue)
+	}
+
+	// With an account session: rated creation proceeds.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/private-matches", strings.NewReader(`{"guest":{"guestId":"rated-white-guest","sessionSecret":"rated-white-secret"},"account":{"accountId":"acct-rated-white","sessionToken":"accttok-rated-white"},"queue":"rated","modeId":"open_cards","preferredSeat":"white"}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected rated private create with account to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if createQueue != "rated" {
+		t.Fatalf("expected match-service to receive queue=%q, got %q", "rated", createQueue)
+	}
+	var payload GatewayPrivateMatchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("expected rated create response to decode, got %v", err)
+	}
+	if payload.MatchID != "rated-room-1" || payload.SeatColor != "white" {
+		t.Fatalf("unexpected rated create payload: %#v", payload)
+	}
+}
+
+// TestGatewayCasualPrivateMatchStillAllowsGuests guards the flip side of the
+// rated gate: guest-only casual/direct rooms must keep working without any
+// account session.
+func TestGatewayCasualPrivateMatchStillAllowsGuests(t *testing.T) {
+	matchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/matches" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"match": map[string]any{
+					"matchId":      "casual-room-1",
+					"queue":        "casual",
+					"modeId":       "open_cards",
+					"status":       "waiting",
+					"whiteGuestId": "casual-guest",
+					"whiteName":    "White",
+					"clockSeconds": 600,
+					"createdAt":    "2026-01-01T00:00:00Z",
+					"updatedAt":    "2026-01-01T00:00:00Z",
+				},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "service": "match-service"})
+	}))
+	defer matchServer.Close()
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/platform/guest-sessions":
+			var payload map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"guest": map[string]any{
+					"guestId":       payload["guestId"],
+					"displayName":   "Guest " + payload["guestId"],
+					"rating":        1200,
+					"matchesPlayed": 0,
+					"wins":          0,
+					"losses":        0,
+					"draws":         0,
+					"createdAt":     "2026-01-01T00:00:00Z",
+					"lastSeenAt":    "2026-01-01T00:00:00Z",
+				},
+				"sessionSecret": payload["sessionSecret"],
+			})
+		case "/api/platform/match-claims":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"matchId":      "casual-room-1",
+				"guestId":      "casual-guest",
+				"seatColor":    "white",
+				"playerId":     "white_player",
+				"playerSecret": "claim-secret",
+				"claimToken":   "claim-token",
+				"queue":        "casual",
+				"status":       "active",
+			})
+		case "/api/platform/status", "/api/platform/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer platformServer.Close()
+
+	matchmakingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	}))
+	defer matchmakingServer.Close()
+
+	mux := buildGatewayMux(GatewayConfig{
+		MatchServiceURL:       matchServer.URL,
+		PlatformServiceURL:    platformServer.URL,
+		MatchmakingServiceURL: matchmakingServer.URL,
+	}, matchServer.Client())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/private-matches", strings.NewReader(`{"guest":{"guestId":"casual-guest","sessionSecret":"casual-secret"},"queue":"casual","modeId":"open_cards","preferredSeat":"white"}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected casual private create without account to succeed, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }

@@ -340,10 +340,12 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                       #{index + 1}
                     </div>
                     <div className="rankings-row__name">
+                      {/* The server's displayName IS the handle for accounts, so
+                          rendering both showed every name twice. One line: the
+                          canonical @handle (formatPlayerLabel policy). */}
                       <div style={{ color: '#fff2c8', fontSize: '14px', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {account.displayName ?? account.handle}
+                        @{account.handle}
                       </div>
-                      <div style={{ color: '#ffd98f', fontSize: '11px', fontWeight: 700, marginTop: '3px' }}>@{account.handle}</div>
                       <div style={{ color: 'rgba(170,190,220,0.62)', fontSize: '11px', marginTop: '4px' }}>
                         {account.matchesPlayed ?? 0} matches - {account.wins ?? 0}W {account.losses ?? 0}L {account.draws ?? 0}D - {account.guestCount ?? account.linkedGuestIds.length} guest{(account.guestCount ?? account.linkedGuestIds.length) === 1 ? '' : 's'}
                       </div>
@@ -352,7 +354,15 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                       </div>
                     </div>
                     <div className="rankings-row__elo">
-                      {selectedSeasonId && season ? season.ratingEnd : (account.rating ?? 1200)} Elo
+                      {selectedSeasonId && season
+                        ? season.ratingEnd
+                        // Mode-filtered view: show that mode's ladder rating
+                        // (server resolves per-mode vs blended fallback).
+                        : selectedModeId === 'open_cards'
+                          ? (account.openCards?.rating ?? account.rating ?? 1200)
+                          : selectedModeId === 'hidden_cards'
+                            ? (account.hiddenCards?.rating ?? account.rating ?? 1200)
+                            : (account.rating ?? 1200)} Elo
                     </div>
                     <div className="rankings-row__season">
                       {season

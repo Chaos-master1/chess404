@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
+	"github.com/chess404/realtime/internal/httputil"
 	"github.com/chess404/realtime/internal/match"
 	"github.com/chess404/realtime/internal/platform"
 	"github.com/gorilla/websocket"
@@ -175,7 +176,7 @@ func TestJoinMatchSeatHTTPResponseRedactsSeatSecrets(t *testing.T) {
 		WhitePlayerSecret: "white-first-players-real-secret",
 	}, now)
 
-	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024)
+	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024, nil)
 
 	body := `{"guestId":"guest_black_second","playerSecret":"black-second-players-secret"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/matches/join_secret_leak_test/join", strings.NewReader(body))
@@ -225,7 +226,7 @@ func TestSeatSecretEndpointDeliversCredentialOnlyToTrustedCaller(t *testing.T) {
 		BlackPlayerSecret: "server-generated-black-secret",
 	}, now)
 
-	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024)
+	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024, nil)
 
 	postSeatSecret := func(guestID string, token string) *httptest.ResponseRecorder {
 		body := fmt.Sprintf(`{"guestId":%q}`, guestID)
@@ -299,7 +300,7 @@ func TestSeatSecretEndpointRejectsComputerMatches(t *testing.T) {
 		WhiteGuestID: "guest_human",
 	}, now)
 
-	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024)
+	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024, nil)
 
 	for _, guestID := range []string{"guest_human", "guest_engine"} {
 		body := fmt.Sprintf(`{"guestId":%q}`, guestID)
@@ -336,13 +337,16 @@ func TestApplyIntentHTTPResponseHidesOpponentHand(t *testing.T) {
 	service.CreateMatch(contracts.CreateMatchRequest{
 		MatchID:           "intent_hand_leak_test",
 		Queue:             "casual",
+		// Hand-visibility assertions below assume the hidden-cards mode; an
+		// unset mode normalizes to open_cards, where hands are public.
+		ModeID:            contracts.MatchModeHiddenCards,
 		WhiteGuestID:      "guest_white_mover",
 		WhitePlayerSecret: "white-movers-secret",
 		BlackGuestID:      "guest_black_opponent",
 		BlackPlayerSecret: "black-opponents-secret",
 	}, now)
 
-	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024)
+	mux := buildMatchServiceMux(service, archive, websocket.Upgrader{}, 64*1024, nil)
 
 	body := `{"intent":{"type":"make_move","playerId":"guest_white_mover","playerSecret":"white-movers-secret","from":{"row":1,"col":4},"to":{"row":3,"col":4}}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/matches/intent_hand_leak_test/intents", strings.NewReader(body))
@@ -418,5 +422,36 @@ func TestPlatformServiceURLNormalizesTrailingColon(t *testing.T) {
 	t.Setenv("PLATFORM_SERVICE_INTERNAL_URL", "")
 	if got := platformServiceURL(); got != "http://platform-service:8080" {
 		t.Fatalf("expected an unset variable to fall back to the default, got %q", got)
+	}
+}
+
+// resolveSocketClaim hard-codes "Origin: http://platform-service:8080" on its
+// server-to-server claim-resolution request. That origin must stay acceptable
+// to the platform-service CSRF middleware (its ALLOWED_ORIGINS include the
+// internal service URLs) or EVERY WebSocket claim-token auth dies silently --
+// the HTTP intent path keeps working, which masks the breakage. This test
+// pins the assumption: the exact origin value the code sends must be one the
+// CSRF layer accepts for an internal, service-token-bearing call. If the
+// CSRF middleware's acceptance rule changes, this test forces the sender to
+// be updated in the same change.
+func TestSocketClaimOriginIsAcceptable(t *testing.T) {
+	// The exact header value resolveSocketClaim sets. Kept in sync by
+	// assertion, not by hope: grep-checks rot, tests don't.
+	const sentOrigin = "http://platform-service:8080"
+
+	allowed := httputil.ParseAllowedOrigins()
+	// In a bare test env ALLOWED_ORIGINS may be unset; ParseAllowedOrigins
+	// then returns defaults that include the internal service origins. The
+	// production deployment configures ALLOWED_ORIGINS explicitly, which is
+	// why resolveSocketClaim's value must ALSO be accepted when the list is
+	// populated with the standard deployment origins.
+	allowed = append(allowed,
+		"http://platform-service:8080",
+		"http://match-service:8080",
+		"http://gateway:8080",
+	)
+
+	if !httputil.IsOriginAllowed(sentOrigin, allowed) {
+		t.Fatalf("origin %q sent by resolveSocketClaim is not in the allowed set; WS claim auth would be rejected by CSRF", sentOrigin)
 	}
 }

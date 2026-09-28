@@ -13,6 +13,40 @@ import (
 
 // Private match create/join/rematch flows.
 
+// enforcePrivateRatedAccountPolicy rejects rated private rooms unless the
+// acting player holds a verified platform account session. Client-side gates
+// (LobbiesPage, FriendsPage) are advisory only; the gateway is the first
+// trusted enforcement point. The join variant infers the queue from the
+// target room, because join requests do not carry a queue field.
+func enforcePrivateRatedAccountPolicy(queue, action string, accountSession *platform.AccountSession) (int, error) {
+	if strings.TrimSpace(queue) != "rated" {
+		return http.StatusOK, nil
+	}
+	if accountSession == nil || strings.TrimSpace(accountSession.Account.AccountID) == "" {
+		return http.StatusForbidden, fmt.Errorf("rated %s requires a signed-in account on both sides", action)
+	}
+	return http.StatusOK, nil
+}
+
+// enforcePrivateRatedJoinPolicy gates join on the target room's stored queue,
+// which is the source of truth for whether the match is rated. Join requests
+// carry no queue field, so the gateway inspects the room first. The gate only
+// fires when it can PROVE the room is rated: if the snapshot is unavailable
+// (unknown room or match-service trouble) the join proceeds and surfaces the
+// real upstream error instead of a misleading 502, and platform-service's
+// rated finalize gate still blocks archival of unaccounted rated games.
+func enforcePrivateRatedJoinPolicy(config GatewayConfig, client *http.Client, matchID string, r *http.Request) (int, error) {
+	result := fetchGatewayJSONRequest(r, client, http.MethodGet, config.MatchServiceURL+"/api/matches/"+matchID, nil)
+	if !result.Healthy {
+		return http.StatusOK, nil
+	}
+	snapshot, err := decodeGatewayPayload[contracts.MatchSnapshotResponse](result.Payload)
+	if err != nil {
+		return http.StatusOK, nil
+	}
+	return enforcePrivateRatedAccountPolicy(snapshot.Match.Queue, "private match join", nil)
+}
+
 func createGatewayPrivateMatch(config GatewayConfig, client *http.Client, request GatewayPrivateMatchRequest, r *http.Request) (GatewayPrivateMatchResponse, int, error) {
 	session, statusCode, err := ensureGatewayPrivateGuestSession(config, client, request.Guest, r)
 	if err != nil {
@@ -22,6 +56,9 @@ func createGatewayPrivateMatch(config GatewayConfig, client *http.Client, reques
 	if accountSessionErr != nil {
 		log.Printf("note: account session bootstrap skipped: %v", accountSessionErr)
 	}
+	if statusCode, err := enforcePrivateRatedAccountPolicy(request.Queue, "private match creation", accountSession); statusCode != http.StatusOK {
+		return GatewayPrivateMatchResponse{}, statusCode, err
+	}
 	return createGatewayPrivateMatchForSession(config, client, session, accountSession, request.Queue, request.ModeID, request.ClockSeconds, request.PreferredSeat, request.Difficulty, r)
 }
 
@@ -30,7 +67,7 @@ func createGatewayPrivateMatchForSession(
 	client *http.Client,
 	session *platform.GuestSession,
 	accountSession *platform.AccountSession,
-	queue string,
+	queue string, // caller-verified: rated-account policy already enforced upstream.
 	modeID contracts.MatchModeID,
 	clockSeconds int64,
 	preferredSeat string,
@@ -141,6 +178,10 @@ func joinGatewayPrivateMatch(config GatewayConfig, client *http.Client, matchID 
 		log.Printf("note: account session bootstrap skipped: %v", accountSessionErr)
 	}
 
+	if statusCode, err := enforcePrivateRatedJoinPolicy(config, client, matchID, r); statusCode != http.StatusOK {
+		return GatewayPrivateMatchResponse{}, statusCode, err
+	}
+
 	joinReq := contracts.JoinMatchSeatRequest{
 		GuestID:       session.Guest.GuestID,
 		DisplayName:   session.Guest.DisplayName,
@@ -241,6 +282,9 @@ func rematchGatewayPrivateMatch(config GatewayConfig, client *http.Client, match
 		clockSeconds = 600
 	}
 
+	if statusCode, err := enforcePrivateRatedAccountPolicy(snapshot.Match.Queue, "rematch creation", accountSession); statusCode != http.StatusOK {
+		return GatewayPrivateMatchResponse{}, statusCode, err
+	}
 	return createGatewayPrivateMatchForSession(
 		config,
 		client,

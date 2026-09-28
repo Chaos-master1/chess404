@@ -210,6 +210,11 @@ type MatchState struct {
 	DoubleMove              *DoubleMoveState     `json:"doubleMove,omitempty"`
 	UndoAgainst             string               `json:"undoAgainst,omitempty"`
 	Turn                    string               `json:"turn"`
+	// CardUsedThisTurn mirrors the client's cardUsedBy gate: one card per
+	// player per turn, enforced server-side so an API client cannot bypass
+	// the UI restriction. Cleared for the new side-to-move at every turn
+	// flip, and cleared for the canceller by applyCancelCard.
+	CardUsedThisTurn        map[string]bool      `json:"cardUsedThisTurn,omitempty"`
 	Moved                   []string             `json:"moved"`
 	LastMove                *LastMove            `json:"lastMove,omitempty"`
 	HalfMoveClock           int                  `json:"halfMoveClock"`

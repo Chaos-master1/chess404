@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chess404/realtime/internal/contracts"
 )
 
 const postgresGuestInitSQL = `
@@ -29,6 +30,7 @@ const postgresGuestInitSQL = `
 			finalized_at timestamptz not null
 		);
 		create index if not exists guests_rating_order_idx on guests (rating desc, created_at asc, guest_id asc);
+		-- per-mode guest ladders are added below via alter-table migrations
 		create index if not exists guests_last_seen_order_idx on guests (last_seen_at desc, guest_id asc);
 	`
 
@@ -45,6 +47,10 @@ func TestPostgresGuestStoreEnsureGuestTouchesExistingGuest(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists session_expires_at timestamptz`)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists rating_open integer not null default 0`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists rating_hidden integer not null default 0`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	store, err := NewPostgresGuestStoreWithDB(db)
 	if err != nil {
@@ -54,11 +60,11 @@ func TestPostgresGuestStoreEnsureGuestTouchesExistingGuest(t *testing.T) {
 
 	now := time.Date(2026, 5, 6, 19, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()
-	mock.ExpectQuery(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = \$1`).
+	mock.ExpectQuery(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = \$1`).
 		WithArgs("guest_existing").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"guest_id", "display_name", "rating", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
-		}).AddRow("guest_existing", "Aurora Bishop 101", 1200, 0, 0, 0, 0, now, now, "secret_existing", "guesttok_existing", now.Add(6*time.Hour)))
+			"guest_id", "display_name", "rating", "rating_open", "rating_hidden", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
+		}).AddRow("guest_existing", "Aurora Bishop 101", 1200, 0, 0, 0, 0, 0, 0, now, now, "secret_existing", "guesttok_existing", now.Add(6*time.Hour)))
 	mock.ExpectExec(`update guests set last_seen_at = \$1, session_secret = \$2, session_token = \$3, session_expires_at = \$4 where guest_id = \$5`).
 		WithArgs(sqlmock.AnyArg(), "secret_existing", "guesttok_existing", sqlmock.AnyArg(), "guest_existing").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -90,6 +96,10 @@ func TestPostgresGuestStoreFinalizeMatchIsIdempotent(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists session_expires_at timestamptz`)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists rating_open integer not null default 0`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists rating_hidden integer not null default 0`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	store, err := NewPostgresGuestStoreWithDB(db)
 	if err != nil {
@@ -99,22 +109,22 @@ func TestPostgresGuestStoreFinalizeMatchIsIdempotent(t *testing.T) {
 
 	now := time.Date(2026, 5, 6, 19, 15, 0, 0, time.UTC)
 	mock.ExpectBegin()
-	mock.ExpectQuery(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = \$1`).
+	mock.ExpectQuery(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = \$1`).
 		WithArgs("guest_white").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"guest_id", "display_name", "rating", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
-		}).AddRow("guest_white", "White", 1216, 1, 1, 0, 0, now, now, "secret_white", "guesttok_white", now.Add(6*time.Hour)))
-	mock.ExpectQuery(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = \$1`).
+			"guest_id", "display_name", "rating", "rating_open", "rating_hidden", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
+		}).AddRow("guest_white", "White", 1216, 0, 0, 1, 1, 0, 0, now, now, "secret_white", "guesttok_white", now.Add(6*time.Hour)))
+	mock.ExpectQuery(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = \$1`).
 		WithArgs("guest_black").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"guest_id", "display_name", "rating", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
-		}).AddRow("guest_black", "Black", 1184, 1, 0, 1, 0, now, now, "secret_black", "guesttok_black", now.Add(6*time.Hour)))
+			"guest_id", "display_name", "rating", "rating_open", "rating_hidden", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
+		}).AddRow("guest_black", "Black", 1184, 0, 0, 1, 0, 1, 0, now, now, "secret_black", "guesttok_black", now.Add(6*time.Hour)))
 	mock.ExpectQuery(`select winner from finalized_matches where match_id = \$1`).
 		WithArgs("room_123").
 		WillReturnRows(sqlmock.NewRows([]string{"winner"}).AddRow("white"))
 	mock.ExpectRollback()
 
-	white, black, changed, err := store.FinalizeMatch("room_123", "guest_white", "guest_black", "white")
+	white, black, changed, err := store.FinalizeMatch("room_123", "guest_white", "guest_black", "white", contracts.MatchModeOpenCards)
 	if err != nil {
 		t.Fatalf("expected idempotent postgres finalize to succeed, got %v", err)
 	}
@@ -143,6 +153,10 @@ func TestPostgresGuestStoreResumeGuestByToken(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists session_expires_at timestamptz`)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists rating_open integer not null default 0`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`alter table guests add column if not exists rating_hidden integer not null default 0`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	store, err := NewPostgresGuestStoreWithDB(db)
 	if err != nil {
@@ -151,11 +165,11 @@ func TestPostgresGuestStoreResumeGuestByToken(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	now := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
-	mock.ExpectQuery(`select guest_id, display_name, rating, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = \$1`).
+	mock.ExpectQuery(`select guest_id, display_name, rating, rating_open, rating_hidden, matches_played, wins, losses, draws, created_at, last_seen_at, session_secret, session_token, session_expires_at from guests where guest_id = \$1`).
 		WithArgs("guest_token").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"guest_id", "display_name", "rating", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
-		}).AddRow("guest_token", "Token Guest", 1200, 0, 0, 0, 0, now, now, "secret_token", "guesttok_resume", now.Add(6*time.Hour)))
+			"guest_id", "display_name", "rating", "rating_open", "rating_hidden", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
+		}).AddRow("guest_token", "Token Guest", 1200, 0, 0, 0, 0, 0, 0, now, now, "secret_token", "guesttok_resume", now.Add(6*time.Hour)))
 	mock.ExpectExec(`update guests set last_seen_at = \$1, session_token = \$2, session_expires_at = \$3 where guest_id = \$4`).
 		WithArgs(sqlmock.AnyArg(), "guesttok_resume", sqlmock.AnyArg(), "guest_token").
 		WillReturnResult(sqlmock.NewResult(0, 1))

@@ -39,12 +39,21 @@ function buildCsp(nonce: string): string {
   // Next.js dev mode's webpack runtime evaluates each module through eval()
   // (its HMR/source-map devtool) -- blocking eval there isn't a security
   // property, it just crashes the entire client bundle before React can
-  // render anything. Production's build never uses eval(), so this stays
-  // scoped to non-production and the CSP shipped to users is unchanged.
+  // render anything. Production's build never uses eval(), so 'unsafe-eval'
+  // stays scoped to non-production and the CSP shipped to users is unchanged.
+  //
+  // 'wasm-unsafe-eval' must be present in BOTH modes: WebAssembly.instantiate
+  // is not eval(), but Chrome still gates it behind script-src, and the
+  // Stockfish engine worker compiles its .wasm at startup. Without this
+  // source every engine boot failed with "WebAssembly.instantiate(): ...
+  // violates ... CSP directive", which the worker bootstrap treated as a
+  // crash and restarted -- an infinite error loop with no engine.
+  // 'wasm-unsafe-eval' covers exactly WASM compilation, not eval, so the
+  // strict-dynamic/nonce XSS posture is unaffected.
   const scriptSrc =
     process.env.NODE_ENV === 'production'
-      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
-      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`;
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval' 'wasm-unsafe-eval'`;
   return [
     "default-src 'self'",
     scriptSrc,
@@ -95,6 +104,6 @@ export function middleware(request: NextRequest): NextResponse {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|pieces/|background.png).*)',
+    '/((?!_next/static|_next/image|favicon.ico|pieces/|background.png|background.webp|sounds/|stockfish-|logo-mark.png|logo192.png|logo512.png|apple-touch-icon.png|manifest.json|robots.txt|sitemap.xml).*)',
   ],
 };

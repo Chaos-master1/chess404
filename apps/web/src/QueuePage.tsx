@@ -6,8 +6,10 @@ import type { MatchModeId } from '@chess404/contracts';
 import { DEFAULT_MATCH_MODE_ID, OFFICIAL_MATCH_MODES } from '@chess404/contracts';
 import type { GuestProfile } from './lib/platform-service';
 import type { QueueName, QueueSnapshot, QueueTicket } from './lib/matchmaking-service';
-import { cancelTicket, enqueueGuest, fetchQueueSnapshots, fetchQueueTickets, fetchTicket, RateLimitError } from './lib/matchmaking-service';
+import { cancelTicket, enqueueGuest, fetchQueueSnapshots, fetchQueueTickets, fetchTicket, RateLimitError, type EnqueueGuestClock } from './lib/matchmaking-service';
 import { ensureMatch, readStoredRoomMeta, resolveSeatSecret, writeStoredRoomMeta, type StoredRoomMeta } from './lib/match-service';
+import { claimMatchSeat, fetchActiveMatchClaim, type MatchSeatClaim } from './lib/platform-service';
+import { readStoredGuestIdentity } from './lib/session-storage';
 import { formatDateTime, normalizeModeId } from './lib/display';
 import { modeLabel } from './lib/match-labels';
 
@@ -34,6 +36,37 @@ interface StoredTicketRef {
 const DEFAULT_QUEUE: QueueName = 'casual';
 const QUEUE_SELECTION_STORAGE_KEY = 'chess404.queue.selection';
 const MODE_SELECTION_STORAGE_KEY = 'chess404.mode.selection';
+const CLOCK_SELECTION_STORAGE_KEY = 'chess404.clock.selection';
+
+export interface QueueClockOption {
+  seconds: number;
+  increment: number;
+  label: string;
+}
+
+export const QUEUE_CLOCK_OPTIONS: QueueClockOption[] = [
+  { seconds: 300, increment: 0, label: '5+0 Blitz' },
+  { seconds: 600, increment: 0, label: '10+0 Rapid' },
+  { seconds: 900, increment: 10, label: '15+10 Classic' },
+  { seconds: 1800, increment: 0, label: '30+0 Long' },
+];
+
+const DEFAULT_CLOCK_OPTION = QUEUE_CLOCK_OPTIONS[1];
+
+export function clockLabel(seconds?: number, increment?: number): string {
+  if (!seconds || seconds <= 0) {
+    return '10+0';
+  }
+  return `${seconds}+${increment ?? 0}`;
+}
+
+function readStoredClockSelection(): QueueClockOption {
+  if (typeof window === 'undefined') {
+    return DEFAULT_CLOCK_OPTION;
+  }
+  const seconds = Number(window.localStorage.getItem(CLOCK_SELECTION_STORAGE_KEY));
+  return QUEUE_CLOCK_OPTIONS.find(option => option.seconds === seconds) ?? DEFAULT_CLOCK_OPTION;
+}
 
 function queueTicketStorageKey(side: QueueSide): string {
   return `chess404.queue.${side}.ticket`;
@@ -150,6 +183,7 @@ export default function QueuePage({
   const router = useRouter();
   const [queue, setQueue] = React.useState<QueueName>(() => readStoredQueueSelection());
   const [modeId, setModeId] = React.useState<MatchModeId>(() => readStoredModeSelection());
+  const [clock, setClock] = React.useState<QueueClockOption>(() => readStoredClockSelection());
   const [whiteTicket, setWhiteTicket] = React.useState<QueueTicket | null>(null);
   const [blackTicket, setBlackTicket] = React.useState<QueueTicket | null>(null);
   const [queueTickets, setQueueTickets] = React.useState<QueueTicket[]>([]);
@@ -222,12 +256,27 @@ export default function QueuePage({
   }, [modeId]);
 
   React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem(CLOCK_SELECTION_STORAGE_KEY, String(clock.seconds));
+  }, [clock]);
+
+  React.useEffect(() => {
     return () => {
+      // Snapshot BOTH stored refs first, then cancel exactly the tickets this
+      // browser queued. The old code cancelled only one id (white ?? black)
+      // while clearing both slots: in local play with two queued lanes that
+      // leaked the second ticket, and any navigation that re-mounted this
+      // page raced the restore effect and could cancel a freshly-issued
+      // ticket belonging to the very session that was navigating away.
       const whiteRef = readStoredTicketRef('white');
       const blackRef = readStoredTicketRef('black');
-      const ticketId = whiteRef?.ticketId ?? blackRef?.ticketId;
-      if (ticketId) {
+      const ids = Array.from(new Set([whiteRef?.ticketId, blackRef?.ticketId].filter((id): id is string => Boolean(id))));
+      for (const ticketId of ids) {
         cancelTicket(ticketId).catch(() => {});
+      }
+      if (ids.length > 0) {
         clearStoredTicketRef('white');
         clearStoredTicketRef('black');
       }
@@ -258,11 +307,42 @@ export default function QueuePage({
         if (!stored) return null;
         try {
           const { ticket } = await fetchTicket(stored.ticketId);
+          if (ticket && !cancelled) {
+            // Re-align the picker with the restored seek so a re-join uses
+            // the same time control the original ticket was created with.
+            const restored = QUEUE_CLOCK_OPTIONS.find(option => option.seconds === (ticket.clockSeconds ?? 0));
+            if (restored) {
+              setClock(restored);
+            }
+          }
           return ticket;
         } catch (err) {
           const message = err instanceof Error ? err.message : '';
           if (message.includes('404')) {
             clearStoredTicketRef(side);
+            // A vanished ticket does NOT mean a vanished match: matched
+            // tickets prune after their recovery TTL while the seat claim
+            // (and the room) lives on. Resolve the active claim; if the
+            // guest still owns a live match, recover into it instead of
+            // silently dropping the player back to the lobby.
+            const identity = readStoredGuestIdentity(side);
+            if (identity.guestId) {
+              try {
+                const claim = await fetchActiveMatchClaim({
+                  guestId: identity.guestId,
+                  sessionSecret: identity.sessionSecret,
+                  sessionToken: identity.sessionToken,
+                });
+                if (!cancelled && claim.matchId && claim.status !== 'finished') {
+                  claimRecoveryTicketIdRef.current = stored.ticketId;
+                  setClaimRecovery(claim);
+                  return null;
+                }
+              } catch {
+                // No active claim either -- the ticket truly expired with
+                // no room behind it; stay cleared.
+              }
+            }
           }
           return null;
         }
@@ -357,7 +437,7 @@ export default function QueuePage({
     setModeId(normalizeModeId(preferredModeId));
   }, [preferredModeId, whiteTicket, blackTicket]);
 
-  const buildHostedAssignedRoomMeta = React.useCallback((ticket: QueueTicket, profile: GuestProfile | null): StoredRoomMeta | null => {
+  const buildHostedAssignedRoomMeta = React.useCallback((ticket: QueueTicket, profile: GuestProfile | null, claimSecret?: string | null): StoredRoomMeta | null => {
     if (!ticket.assignedRoom || !ticket.seatColor || !profile) {
       return null;
     }
@@ -367,13 +447,16 @@ export default function QueuePage({
     const opponentGuestId = ticket.matchedWith || undefined;
     const opponentName = ticket.opponentName || existingRoomMeta?.[viewerSeat === 'white' ? 'blackName' : 'whiteName'];
 
-    // The hosted lane always queues under the 'white' storage side, but the
-    // server assigns the real seat with a coin flip. Mirror this player's
-    // session secret onto whichever seat they were actually assigned so the
-    // match page can authenticate its WebSocket intents. Without this, a
-    // black-seat assignment finds no secret keyed under 'black' and the board
-    // opens with "Cannot connect: missing player credentials".
-    const ownSessionSecret = readStoredGuestSessionSecret('white');
+    // Seat-credential policy (root cause of the queue-pairing black screen):
+    // queue matches are created by matchmaking with server-generated seat
+    // secrets that no client ever receives, so the client MUST NOT fabricate
+    // one here. Substituting the guest session secret produced a credential
+    // match-service rejects on every intent ("unauthorized player secret"),
+    // killed the WS auth, and degraded the whole match to spectator polling.
+    // The real secret arrives only through the match-claim pipeline
+    // (claimMatchSeat below -> platform-service -> match-service seat-secret
+    // endpoint), so the room meta carries whatever that pipeline returned.
+    const ownClaimSecret = (claimSecret ?? '').trim();
 
     return {
       ...existingRoomMeta,
@@ -387,16 +470,99 @@ export default function QueuePage({
       whiteName: viewerSeat === 'white' ? profile.displayName : opponentName ?? existingRoomMeta?.whiteName,
       blackName: viewerSeat === 'black' ? profile.displayName : opponentName ?? existingRoomMeta?.blackName,
       whitePlayerSecret: viewerSeat === 'white'
-        ? resolveSeatSecret(existingRoomMeta?.whitePlayerSecret, ownSessionSecret)
+        ? (ownClaimSecret || undefined)
         : existingRoomMeta?.whitePlayerSecret,
       blackPlayerSecret: viewerSeat === 'black'
-        ? resolveSeatSecret(existingRoomMeta?.blackPlayerSecret, ownSessionSecret)
+        ? (ownClaimSecret || undefined)
         : existingRoomMeta?.blackPlayerSecret,
     };
   }, []);
 
+  const [claimBusy, setClaimBusy] = React.useState(false);
+  // Recovered active claim for a match whose ticket 404'd (Fix F): routed
+  // through the exact same claim-then-navigate flow as a fresh pairing.
+  const [claimRecovery, setClaimRecovery] = React.useState<MatchSeatClaim | null>(null);
+  // The ticketId whose 404 triggered the recovery (bookkeeping only).
+  const claimRecoveryTicketIdRef = React.useRef<string | null>(null);
+
   React.useEffect(() => {
-    if (!hostedRuntime || restoringTickets) {
+    if (!claimRecovery || !whiteProfile || claimBusy) {
+      return;
+    }
+    const claim = claimRecovery;
+    const assignedRoom = claim.matchId;
+    if (hostedAutoOpenMatchRef.current === assignedRoom) {
+      return;
+    }
+    hostedAutoOpenMatchRef.current = assignedRoom;
+    setClaimBusy(true);
+    const identity = readStoredGuestIdentity('white');
+    const claimWithRetry = async () => {
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await claimMatchSeat({
+            matchId: assignedRoom,
+            guestId: whiteProfile.guestId,
+            sessionSecret: identity.sessionSecret,
+            sessionToken: identity.sessionToken,
+          });
+        } catch (err) {
+          lastErr = err;
+          await new Promise(resolve => setTimeout(resolve, 1200 * (attempt + 1)));
+        }
+      }
+      throw lastErr;
+    };
+    void claimWithRetry()
+      .then(freshClaim => {
+        const roomMeta = buildHostedAssignedRoomMeta(
+          {
+            ticketId: claimRecoveryTicketIdRef.current ?? '',
+            guestId: whiteProfile.guestId,
+            queue: (claim.queue === 'rated' ? 'rated' : 'casual') as QueueName,
+            modeId: claim.modeId ?? DEFAULT_MATCH_MODE_ID,
+            status: 'matched',
+            rating: whiteProfile.rating,
+            createdAt: '',
+            updatedAt: '',
+            assignedRoom,
+            seatColor: claim.seatColor,
+            matchedWith: claim.seatColor === 'white' ? claim.blackGuestId : claim.whiteGuestId,
+            opponentName: claim.seatColor === 'white' ? claim.blackName : claim.whiteName,
+          },
+          whiteProfile,
+          freshClaim?.playerSecret,
+        );
+        if (!roomMeta) {
+          setClaimRecovery(null);
+          return;
+        }
+        writeStoredRoomMeta(assignedRoom, roomMeta);
+        if (freshClaim?.claimToken) {
+          const claimTokenKey = claim.seatColor === 'white' ? 'whiteClaimToken' : 'blackClaimToken';
+          const claimExpiryKey = claim.seatColor === 'white' ? 'whiteClaimExpiresAt' : 'blackClaimExpiresAt';
+          writeStoredRoomMeta(assignedRoom, {
+            ...roomMeta,
+            [claimTokenKey]: freshClaim.claimToken,
+            [claimExpiryKey]: freshClaim.expiresAt ?? '',
+          });
+        }
+        clearStoredTicketRef('white');
+        router.push(`/match/${encodeURIComponent(assignedRoom)}`);
+      })
+      .catch(err => {
+        console.warn('[queue] recovered-claim navigation failed, staying on lobby:', err);
+        setError('We found your match but could not reopen it automatically. Try again in a moment.');
+      })
+      .finally(() => {
+        setClaimBusy(false);
+        setClaimRecovery(null);
+      });
+  }, [claimRecovery, whiteProfile, claimBusy, buildHostedAssignedRoomMeta, router]);
+
+  React.useEffect(() => {
+    if (!hostedRuntime || restoringTickets || claimBusy) {
       return;
     }
     const ticket = whiteTicket;
@@ -409,15 +575,67 @@ export default function QueuePage({
     if (hostedAutoOpenMatchRef.current === ticket.assignedRoom) {
       return;
     }
-    const roomMeta = buildHostedAssignedRoomMeta(ticket, whiteProfile);
-    if (!roomMeta) {
-      return;
-    }
     hostedAutoOpenMatchRef.current = ticket.assignedRoom;
-    writeStoredRoomMeta(ticket.assignedRoom, roomMeta);
-    clearStoredTicketRef('white');
-    router.push(`/match/${encodeURIComponent(ticket.assignedRoom)}`);
-  }, [hostedRuntime, restoringTickets, whiteTicket, whiteProfile, buildHostedAssignedRoomMeta, router]);
+    setClaimBusy(true);
+
+    // Resolve the REAL seat credential through the match-claim pipeline
+    // before navigating. The paired ticket carries no secret; without this
+    // fetch the match page opened with a fabricated/failing credential and
+    // the stream degraded to spectator polling (queue-pairing black screen).
+    const assignedRoom: string = ticket.assignedRoom;
+    const seatColor: 'white' | 'black' = ticket.seatColor;
+    const identity = readStoredGuestIdentity('white');
+    // The claim is the ONLY path to a real seat credential for queue matches,
+    // and the fallback below (open the room anyway) degrades this player to
+    // read-only polling if it runs. Under load the claim POST itself can be
+    // the request that dies, so retry before falling back.
+    const claimWithRetry = async () => {
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await claimMatchSeat({
+            matchId: assignedRoom,
+            guestId: whiteProfile.guestId,
+            sessionSecret: identity.sessionSecret,
+            sessionToken: identity.sessionToken,
+          });
+        } catch (err) {
+          lastErr = err;
+          await new Promise(resolve => setTimeout(resolve, 1200 * (attempt + 1)));
+        }
+      }
+      throw lastErr;
+    };
+    void claimWithRetry()
+      .then(claim => {
+        const roomMeta = buildHostedAssignedRoomMeta(ticket, whiteProfile, claim?.playerSecret);
+        if (!roomMeta) return;
+        writeStoredRoomMeta(assignedRoom, roomMeta);
+        if (claim?.claimToken) {
+          const claimTokenKey = seatColor === 'white' ? 'whiteClaimToken' : 'blackClaimToken';
+          const claimExpiryKey = seatColor === 'white' ? 'whiteClaimExpiresAt' : 'blackClaimExpiresAt';
+          writeStoredRoomMeta(assignedRoom, {
+            ...roomMeta,
+            [claimTokenKey]: claim.claimToken,
+            [claimExpiryKey]: claim.expiresAt ?? '',
+          });
+        }
+        clearStoredTicketRef('white');
+        router.push(`/match/${encodeURIComponent(assignedRoom)}`);
+      })
+      .catch(err => {
+        // Claim failed (transient outage / already-refreshed elsewhere):
+        // still open the room. The match page's own bootstrap recovers the
+        // claim server-side on a full load, and the stream error surface
+        // explains what is wrong instead of silently spectating.
+        console.warn('[queue] seat claim fetch failed, opening room anyway:', err);
+        const roomMeta = buildHostedAssignedRoomMeta(ticket, whiteProfile, null);
+        if (roomMeta) writeStoredRoomMeta(assignedRoom, roomMeta);
+        clearStoredTicketRef('white');
+        router.push(`/match/${encodeURIComponent(assignedRoom)}`);
+      })
+      .finally(() => setClaimBusy(false));
+  }, [hostedRuntime, restoringTickets, whiteTicket, whiteProfile, claimBusy, buildHostedAssignedRoomMeta, router]);
 
   const pollingBackoffRef = React.useRef(0);
 
@@ -514,8 +732,7 @@ export default function QueuePage({
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [whiteTicket?.ticketId, whiteTicket?.status, blackTicket?.ticketId, blackTicket?.status, applyQueueSnapshot, restoringTickets]);
+  }, [whiteTicket?.ticketId, whiteTicket?.status, blackTicket?.ticketId, blackTicket?.status, applyQueueSnapshot, restoringTickets]); // eslint-disable-line react-hooks/exhaustive-deps -- legacy queue effect, see lint policy in eslint.config.mjs
 
   const handleJoin = React.useCallback(async (side: 'white' | 'black') => {
     if (tutorialActive) {
@@ -540,7 +757,7 @@ export default function QueuePage({
       const result = await enqueueGuest(profile.guestId, queue, modeId, profile.rating, profile.displayName, {
         accountId: accountIdentity.accountId ?? undefined,
         accountSessionToken: accountIdentity.sessionToken ?? undefined,
-      });
+      }, { seconds: clock.seconds, increment: clock.increment });
       if (side === 'white') {
         setWhiteTicket(result.ticket);
       } else {
@@ -552,7 +769,7 @@ export default function QueuePage({
     } finally {
       setLoading(false);
     }
-  }, [whiteProfile, blackProfile, queue, modeId, refreshQueue, hostedRuntime, tutorialActive]);
+  }, [whiteProfile, blackProfile, queue, modeId, clock, refreshQueue, hostedRuntime, tutorialActive]);
 
   const handleCancel = React.useCallback(async (side: 'white' | 'black') => {
     const ticket = side === 'white' ? whiteTicket : blackTicket;
@@ -598,6 +815,8 @@ export default function QueuePage({
         ...existingRoomMeta,
         queue,
         modeId: ticket.modeId ?? existingRoomMeta?.modeId ?? modeId,
+        clockSeconds: ticket.clockSeconds ?? existingRoomMeta?.clockSeconds ?? clock.seconds,
+        clockIncrement: ticket.clockIncrement ?? existingRoomMeta?.clockIncrement ?? clock.increment,
         whiteGuestId: existingRoomMeta?.whiteGuestId ?? whiteProfile?.guestId,
         blackGuestId: existingRoomMeta?.blackGuestId ?? (hostedRuntime ? undefined : blackProfile?.guestId),
         whiteAccountId: existingRoomMeta?.whiteAccountId ?? readStoredAccountId('white') ?? undefined,
@@ -610,7 +829,8 @@ export default function QueuePage({
       writeStoredRoomMeta(ticket.assignedRoom, roomMeta);
       await ensureMatch({
         matchId: ticket.assignedRoom,
-        clockSeconds: 600,
+        clockSeconds: roomMeta.clockSeconds,
+        clockIncrement: roomMeta.clockIncrement,
         queue: roomMeta.queue,
         modeId: roomMeta.modeId,
         whiteGuestId: roomMeta.whiteGuestId,
@@ -688,6 +908,7 @@ export default function QueuePage({
           <>
             <div>Lane: {ticket.queue === 'rated' ? 'Rated Quick Pair' : 'Casual Quick Pair'}</div>
             <div>Mode: {modeLabel(ticket.modeId)}</div>
+            <div>Clock: {clockLabel(ticket.clockSeconds, ticket.clockIncrement)}</div>
             <div>Updated: {formatDateTime(ticket.updatedAt)}</div>
             {ticket.status === 'queued' ? <div>Searching for another player in this official mode now.</div> : null}
             {ticket.seatColor && <div>Seat: {ticket.seatColor === 'white' ? 'White pieces' : 'Black pieces'}</div>}
@@ -834,7 +1055,11 @@ export default function QueuePage({
             ))}
           </div>
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-            {OFFICIAL_MATCH_MODES.map(mode => (
+            {/* The queue pairs human opponents only: 'computer' is not a
+                queueable mode here — vs-computer has its dedicated panel on
+                the play hub, and queueing into it would strand both tickets
+                (the engine never joins the matchmaking queue). */}
+            {OFFICIAL_MATCH_MODES.filter(mode => mode.id !== 'computer').map(mode => (
               <button
                 key={mode.id}
                 onClick={() => setModeId(mode.id)}
@@ -865,6 +1090,41 @@ export default function QueuePage({
           </div>
           <div style={{ color: 'rgba(210,225,255,0.68)', fontSize: '11px', marginTop: '8px', lineHeight: 1.45 }}>
             {OFFICIAL_MATCH_MODES.find(mode => mode.id === modeId)?.rulesSummary}
+          </div>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+            {QUEUE_CLOCK_OPTIONS.map(option => (
+              <button
+                key={option.label}
+                onClick={() => setClock(option)}
+                disabled={restoringTickets}
+                style={{
+                  flex: 1,
+                  minHeight: '44px',
+                  padding: '11px 10px',
+                  borderRadius: '10px',
+                  border: clock.seconds === option.seconds && clock.increment === option.increment
+                    ? '1px solid rgba(120,190,255,0.45)'
+                    : '1px solid rgba(255,255,255,0.08)',
+                  background: clock.seconds === option.seconds && clock.increment === option.increment
+                    ? 'linear-gradient(180deg, rgba(54,102,184,0.3) 0%, rgba(24,40,82,0.42) 100%)'
+                    : 'rgba(255,255,255,0.03)',
+                  color: clock.seconds === option.seconds && clock.increment === option.increment ? '#e5f0ff' : 'rgba(210,225,255,0.75)',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  cursor: restoringTickets ? 'not-allowed' : 'pointer',
+                  opacity: restoringTickets ? 0.7 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                title={`Queue matches at ${option.label} (${option.seconds}s base + ${option.increment}s increment)`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ color: 'rgba(210,225,255,0.68)', fontSize: '11px', marginTop: '8px', lineHeight: 1.45 }}>
+            Time control: {clock.label}. You will only be paired with players who picked the same control.
           </div>
           {queue === 'rated' && (
             <div style={{
@@ -999,6 +1259,7 @@ export default function QueuePage({
                     <div style={{ marginTop: '8px', color: 'rgba(255,232,180,0.72)', fontSize: '12px', lineHeight: 1.5 }}>
                       <div>Lane: {ticket.queue === 'rated' ? 'Rated Quick Pair' : 'Casual Quick Pair'}</div>
                       <div>Mode: {modeLabel(ticket.modeId)}</div>
+                      <div>Clock: {clockLabel(ticket.clockSeconds, ticket.clockIncrement)}</div>
                       <div>Rating: {ticket.rating}</div>
                       <div>{ticket.status === 'matched' ? 'Paired' : 'Queued'}: {formatDateTime(ticket.updatedAt)}</div>
                       {ticket.opponentName && <div>Opponent: {ticket.opponentName}</div>}

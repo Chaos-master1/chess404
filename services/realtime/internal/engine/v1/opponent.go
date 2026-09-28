@@ -251,6 +251,14 @@ func reverseIsCurrentlyLegal(state *contracts.MatchState, color string) bool {
 // so composite opponents can ask for a card decision WITHOUT paying for the
 // full chess search MakeMove also runs.
 func (co *ComputerOpponent) MakeCardDecision(state *contracts.MatchState) *contracts.PlayerIntent {
+	// The server enforces one card per player per turn (removeCardFromHand
+	// consumes the slot). The card brain used to re-fire on the same turn it
+	// had already played a card -- cards do not flip the turn -- so its
+	// second play_card intent was rejected and the turn needed a fallback
+	// move. Respect the slot like any human client must.
+	if state.CardUsedThisTurn[co.Color] {
+		return nil
+	}
 	// Card scoring reads WhiteHand/BlackHand straight off state; evaluate
 	// against a filtered copy so a card the computer cannot complete is never
 	// even a candidate, instead of catching the failure after the fact.

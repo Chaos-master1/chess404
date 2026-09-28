@@ -50,4 +50,10 @@ func trackIntentTime(presence *matchPresenceState, actorColor string, now time.T
 	} else if actorColor == "black" {
 		presence.BlackLastIntentAt = now
 	}
+	// An accepted intent is definitive proof of life: an authenticated player
+	// submitting a move or card (a signed HTTP round trip the presence system
+	// cannot forge) must not be forfeited for a broken WS heartbeat loop. This
+	// refreshes the heartbeat and, via presenceHeartbeat, also clears that
+	// color's disconnect-grace window since the player is demonstrably back.
+	presenceHeartbeat(presence, actorColor, now)
 }

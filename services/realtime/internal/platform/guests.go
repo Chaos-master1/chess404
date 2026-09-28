@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chess404/realtime/internal/contracts"
 )
 
 var ErrUnauthorizedGuestSession = errors.New("unauthorized guest session")
@@ -23,6 +25,13 @@ type GuestProfile struct {
 	GuestID           string    `json:"guestId"`
 	DisplayName       string    `json:"displayName"`
 	Rating            int       `json:"rating"`
+	// Per-mode guest ladders (open/hidden). 0 = no games in that mode yet;
+	// the first rated game in a mode seeds the ladder from the blended
+	// rating so returning guests do not restart at the default. Mirrors the
+	// account-side modeRatings split (open and hidden genuinely reward
+	// different skills); computer matches stay unrated.
+	RatingOpen        int       `json:"ratingOpen,omitempty"`
+	RatingHidden      int       `json:"ratingHidden,omitempty"`
 	MatchesPlayed     int       `json:"matchesPlayed"`
 	Wins              int       `json:"wins"`
 	Losses            int       `json:"losses"`
@@ -226,7 +235,92 @@ func (s *GuestStore) ResumeGuestByToken(guestID, sessionToken string) (GuestSess
 	return buildGuestSession(entry, privateState), nil
 }
 
-func (s *GuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, winner string) (GuestProfile, GuestProfile, bool, error) {
+// guestModeKey maps a match mode to the GuestProfile ladder field it feeds.
+// Computer matches return "" (unrated for ladder purposes, like accounts).
+func guestModeKey(modeID contracts.MatchModeID) string {
+	switch contracts.NormalizeMatchModeID(string(modeID)) {
+	case contracts.MatchModeHiddenCards:
+		return "hidden"
+	case contracts.MatchModeOpenCards:
+		return "open"
+	default:
+		return ""
+	}
+}
+
+func guestLadderRating(profile GuestProfile, modeKey string) int {
+	if modeKey == "hidden" {
+		return profile.RatingHidden
+	}
+	return profile.RatingOpen
+}
+
+func setGuestLadderRating(profile *GuestProfile, modeKey string, rating int) {
+	if modeKey == "hidden" {
+		profile.RatingHidden = rating
+		return
+	}
+	profile.RatingOpen = rating
+}
+
+// applyGuestModeElo updates both guests' per-mode ladder alongside the
+// blended one. First game in a mode seeds from the blended rating (a
+// 1500-blended guest must not restart at the 1200 default); Elo uses the
+// same K-factor and floor as the blended update. Returns false when the
+// match's mode has no ladder (computer, unknown).
+func applyGuestModeElo(white, black *GuestProfile, modeID contracts.MatchModeID, winner string, kFactor float64) bool {
+	modeKey := guestModeKey(modeID)
+	if modeKey == "" {
+		return false
+	}
+	whiteMode := guestLadderRating(*white, modeKey)
+	blackMode := guestLadderRating(*black, modeKey)
+	if whiteMode <= 0 {
+		whiteMode = white.Rating
+		if whiteMode <= 0 {
+			whiteMode = defaultEloStartRating
+		}
+	}
+	if blackMode <= 0 {
+		blackMode = black.Rating
+		if blackMode <= 0 {
+			blackMode = defaultEloStartRating
+		}
+	}
+	newWhite, newBlack := ApplyEloMatchResultWithK(whiteMode, blackMode, winner, kFactor, defaultEloMinRating)
+	setGuestLadderRating(white, modeKey, newWhite)
+	setGuestLadderRating(black, modeKey, newBlack)
+	return true
+}
+
+// RenameGuest replaces a guest's display name. It exists so the guest row
+// linked to an account can carry the account handle as its name (the
+// match-creation chain uses the guest displayName); generating playful
+// placeholder names for guests is fine, but a signed-in player must never
+// show one.
+func (s *GuestStore) RenameGuest(guestID, displayName string) (GuestProfile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	guestID = strings.TrimSpace(guestID)
+	displayName = strings.TrimSpace(displayName)
+	if guestID == "" || displayName == "" {
+		return GuestProfile{}, os.ErrInvalid
+	}
+	entry, ok := s.entries[guestID]
+	if !ok {
+		return GuestProfile{}, os.ErrNotExist
+	}
+	entry.DisplayName = displayName
+	entry.LastSeenAt = time.Now().UTC()
+	s.entries[guestID] = entry
+	if err := s.persistLocked(); err != nil {
+		return GuestProfile{}, err
+	}
+	return entry, nil
+}
+
+func (s *GuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, winner string, modeID contracts.MatchModeID) (GuestProfile, GuestProfile, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -246,11 +340,20 @@ func (s *GuestStore) FinalizeMatch(matchID, whiteGuestID, blackGuestID, winner s
 	}
 
 	now := time.Now().UTC()
-	kFactor := defaultEloKFactor
-	if white.PlacementsRemaining > 0 || black.PlacementsRemaining > 0 {
-		kFactor = defaultPlacementEloKFactor
+	// Per-seat K factors: placements outrank everything, otherwise the K
+	// decays with games played (same curve as the account ladder -- see
+	// eloKFactorForGames).
+	whiteK := eloKFactorForGames(white.MatchesPlayed)
+	blackK := eloKFactorForGames(black.MatchesPlayed)
+	if white.PlacementsRemaining > 0 {
+		whiteK = defaultPlacementEloKFactor
 	}
-	newWhite, newBlack := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, kFactor, defaultEloMinRating)
+	if black.PlacementsRemaining > 0 {
+		blackK = defaultPlacementEloKFactor
+	}
+	newWhite, _ := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, whiteK, defaultEloMinRating)
+	_, newBlack := ApplyEloMatchResultWithK(white.Rating, black.Rating, winner, blackK, defaultEloMinRating)
+	applyGuestModeElo(&white, &black, modeID, winner, whiteK)
 	switch winner {
 	case "white":
 		white.Rating = newWhite

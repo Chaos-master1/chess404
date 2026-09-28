@@ -193,7 +193,17 @@ func finalizeArchivedRatedMatch(
 		return nil, http.StatusBadRequest, errGuestResult("unknown black guest")
 	}
 
-	white, black, guestChanged, err := guests.FinalizeMatch(matchID, entry.WhiteGuestID, entry.BlackGuestID, winner)
+	// Rated requires both players to hold accounts. A guest (or a
+	// mixed guest/account pair) must never gain or lose rating: a guest
+	// could farm points by rating-resetting their browser identity, and an
+	// account matched against a guest would gain nothing meaningful.
+	whiteLinkedBeforeFinalize, _ := accounts.GetAccountByGuest(entry.WhiteGuestID)
+	blackLinkedBeforeFinalize, _ := accounts.GetAccountByGuest(entry.BlackGuestID)
+	if whiteLinkedBeforeFinalize.AccountID == "" || blackLinkedBeforeFinalize.AccountID == "" {
+		return nil, http.StatusBadRequest, errGuestResult("rated results finalize only when both players hold accounts")
+	}
+
+	white, black, guestChanged, err := guests.FinalizeMatch(matchID, entry.WhiteGuestID, entry.BlackGuestID, winner, entry.ModeID)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
@@ -317,6 +327,26 @@ func filterAccountsByQuery(accounts []platform.AccountProfile, query string) []p
 		if strings.Contains(strings.ToLower(strings.TrimSpace(account.Handle)), query) {
 			filtered = append(filtered, account)
 		}
+	}
+	return filtered
+}
+
+// e2eHandlePrefix marks automated-test accounts: the auth e2e suite registers
+// real accounts against whatever deployment it runs against (production by
+// default) and there is no account-deletion endpoint, so every run used to
+// leak a fresh handle into the public directory and leaderboard — the stray
+// "@e2e_..." players users kept seeing. They stay functional (tests sign in
+// with them) but are excluded from every PUBLIC surface: directory, ratings,
+// profiles, and community search.
+const e2eHandlePrefix = "e2e_"
+
+func filterPublicDirectoryAccounts(accounts []platform.AccountProfile) []platform.AccountProfile {
+	filtered := make([]platform.AccountProfile, 0, len(accounts))
+	for _, account := range accounts {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(account.Handle)), e2eHandlePrefix) {
+			continue
+		}
+		filtered = append(filtered, account)
 	}
 	return filtered
 }
