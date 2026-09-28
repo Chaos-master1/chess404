@@ -11,6 +11,7 @@ import CardsPage from './CardsPage';
 import FriendsPage from './FriendsPage';
 import HistoryPage from './HistoryPage';
 import InboxPage from './InboxPage';
+import { FixedBackground } from './components/FixedBackground';
 import PlayHubPage from './PlayHubPage';
 import ProfilesPage from './ProfilesPage';
 import WatchPage from './WatchPage';
@@ -251,13 +252,21 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
     <main id="main-content" style={{
       display:'flex', flexDirection:'column', height:'100dvh', overflow:'hidden',
       fontFamily:"'Segoe UI', sans-serif",
-      backgroundImage:'url(/background.webp)',
-      backgroundSize:'cover',
-      backgroundPosition:'center',
-      backgroundRepeat:'no-repeat',
-      backgroundAttachment:'fixed',
       position:'relative',
     }}>
+      {/* Nebula backdrop as a fixed layer: background-attachment:fixed is
+          rendered only for the first viewport on Android Chrome, which cut
+          the background off with a hard edge on long pages. */}
+      <div
+        aria-hidden
+        style={{
+          position:'fixed', inset:0, zIndex:0, pointerEvents:'none',
+          backgroundImage:'url(/background.webp)',
+          backgroundSize:'cover',
+          backgroundPosition:'center',
+          backgroundRepeat:'no-repeat',
+        }}
+      />
       <div style={{ position:'fixed', inset:0, background:'linear-gradient(160deg, rgba(8,4,20,0.45) 0%, rgba(15,6,30,0.35) 50%, rgba(5,2,15,0.50) 100%)', pointerEvents:'none', zIndex:0 }} />
       <style>{GLOBAL_STYLES}</style>
 

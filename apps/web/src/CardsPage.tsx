@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { FixedBackground } from './components/FixedBackground';
 
 type Rarity   = 'trash' | 'common' | 'rare' | 'epic' | 'legendary';
 type CardType = 'spell' | 'trap';
@@ -389,7 +390,8 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
   },[filterType,filterRarity,search]);
 
   return (
-    <div className="cards-page-root" style={{height:embedded?'100%':'100vh',minHeight:0,flex:embedded?1:undefined,display:'flex',flexDirection:'column',fontFamily:"var(--font-sans),'Segoe UI',sans-serif",backgroundImage:embedded?undefined:'url(/background.webp)',backgroundSize:'cover',backgroundPosition:'center',backgroundAttachment:'fixed',overflow:'hidden'}}>
+    <div className="cards-page-root" style={{height:embedded?'100%':'100vh',minHeight:0,flex:embedded?1:undefined,display:'flex',flexDirection:'column',fontFamily:"var(--font-sans),'Segoe UI',sans-serif",overflow:'hidden'}}>
+      {!embedded && <FixedBackground overlay overlayOpacity={0.55} />}
       <style>{`
         @keyframes float   {0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)}}
         @keyframes sparkle {0%,100%{opacity:0.2;transform:scale(1) rotate(0deg)} 50%{opacity:1;transform:scale(1.5) rotate(20deg)}}
@@ -458,8 +460,6 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
         }
       `}</style>
 
-      {/* Background overlay */}
-      {!embedded && <div style={{position:'fixed',inset:0,background:'rgba(6,3,16,0.55)',pointerEvents:'none',zIndex:0}}/>}
 
       {/* Floating ambient particles */}
       {!embedded && [...Array(14)].map((_,i)=>(
