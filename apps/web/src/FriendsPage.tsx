@@ -26,6 +26,25 @@ import type { PrivateMatchIdentity } from './lib/private-match-service';
 import { formatDateTime } from './lib/display';
 import InboxPage from './InboxPage';
 
+// Time controls offered in the challenge popup. Kept in sync with
+// QueuePage's QUEUE_CLOCK_OPTIONS deliberately NOT imported: a named import
+// would pull the whole queue page module into the Friends bundle.
+interface ChallengeClockOption {
+  seconds: number;
+  increment: number;
+  label: string;
+}
+
+// Index into CHALLENGE_CLOCK_OPTIONS: 10+0 Rapid, the house default.
+const DEFAULT_CHALLENGE_CLOCK_INDEX = 1;
+
+const CHALLENGE_CLOCK_OPTIONS: ChallengeClockOption[] = [
+  { seconds: 300, increment: 0, label: '5+0 Blitz' },
+  { seconds: 600, increment: 0, label: '10+0 Rapid' },
+  { seconds: 900, increment: 10, label: '15+10 Classic' },
+  { seconds: 1800, increment: 0, label: '30+0 Long' },
+];
+
 interface FriendsPageProps {
   identity?: PrivateMatchIdentity | null;
   accountId?: string | null;
@@ -107,7 +126,13 @@ export default function FriendsPage({
   const [challengeOverview, setChallengeOverview] = React.useState<DirectChallengeOverview | null>(null);
   const [targetHandle, setTargetHandle] = React.useState('');
   const [challengeModeId, setChallengeModeId] = React.useState<MatchModeId>(DEFAULT_MATCH_MODE_ID);
-  const [challengeSeat, setChallengeSeat] = React.useState<PieceColor>('white');
+  // Lichess-style challenge flow: clicking Challenge opens a popup that
+  // carries mode, time control, and color (with a random option the old
+  // fixed-defaults section never had). challengeColor resolves to a real
+  // seat at send time.
+  const [challengeTarget, setChallengeTarget] = React.useState<FriendshipView | null>(null);
+  const [challengeColor, setChallengeColor] = React.useState<'black' | 'random' | 'white'>('white');
+  const [challengeClock, setChallengeClock] = React.useState(CHALLENGE_CLOCK_OPTIONS[DEFAULT_CHALLENGE_CLOCK_INDEX]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const [notice, setNotice] = React.useState('');
@@ -253,7 +278,10 @@ export default function FriendsPage({
     }
   }, [accountId, sessionToken]);
 
-  const handleSendChallenge = React.useCallback(async (friendship: FriendshipView) => {
+  const handleSendChallenge = React.useCallback(async (
+    friendship: FriendshipView,
+    choices: { modeId: MatchModeId; seat: PieceColor; clockSeconds: number },
+  ) => {
     if (!accountId || !sessionToken || !identity?.guestId) {
       setError('Sign in with an active player session to send direct challenges.');
       return;
@@ -265,18 +293,19 @@ export default function FriendsPage({
       const result = await sendDirectChallenge({
         identity,
         targetAccountId: friendship.account.accountId,
-        modeId: challengeModeId,
-        preferredSeat: challengeSeat,
-        clockSeconds: 600,
+        modeId: choices.modeId,
+        preferredSeat: choices.seat,
+        clockSeconds: choices.clockSeconds,
       });
       persistChallengeRoom(result);
+      setChallengeTarget(null);
       router.push(`/match/${encodeURIComponent(result.match.matchId)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send direct challenge.');
     } finally {
       setBusyRequestId(null);
     }
-  }, [accountId, challengeModeId, challengeSeat, identity, sessionToken, router]);
+  }, [accountId, identity, sessionToken, router]);
 
   const handleAcceptChallenge = React.useCallback(async (challenge: DirectChallengeView) => {
     if (!accountId || !sessionToken || !identity?.guestId) {
@@ -492,58 +521,6 @@ export default function FriendsPage({
               Refresh overview
             </button>
 
-            <div style={{ marginTop: '4px', padding: '12px 12px 10px', borderRadius: '12px', border: '1px solid rgba(255,180,60,0.12)', background: 'rgba(255,255,255,0.025)', display: 'grid', gap: '10px' }}>
-              <div style={{ color: '#fff2c8', fontSize: '11px', fontWeight: 800, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Challenge Defaults</div>
-              <label style={{ display: 'grid', gap: '6px' }}>
-                <span style={{ color: 'rgba(255,232,180,0.62)', fontSize: '11px', fontWeight: 700 }}>Mode</span>
-                <select
-                  value={challengeModeId}
-                  onChange={(event) => setChallengeModeId(event.target.value as MatchModeId)}
-                  style={{
-                    minHeight: '42px',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: '1px solid rgba(255,180,60,0.22)',
-                    background: '#121824',
-                    color: '#fff4d6',
-                    colorScheme: 'dark',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    outline: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {OFFICIAL_MATCH_MODES.filter((mode) => mode.id !== 'computer').map((mode) => (
-                    <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#fff4d6' }}>{mode.label}</option>
-                  ))}
-                </select>
-              </label>
-              <div style={{ display: 'grid', gap: '6px' }}>
-                <span style={{ color: 'rgba(255,232,180,0.62)', fontSize: '11px', fontWeight: 700 }}>Your preferred seat</span>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {(['white', 'black'] as PieceColor[]).map((color) => (
-                    <button
-                      key={color}
-                      onClick={() => setChallengeSeat(color)}
-                      style={{
-                        minHeight: '38px',
-                        padding: '8px 14px',
-                        borderRadius: '999px',
-                        border: challengeSeat === color ? '1px solid rgba(255,215,0,0.34)' : '1px solid rgba(255,180,60,0.16)',
-                        background: challengeSeat === color ? 'rgba(255,180,60,0.16)' : 'rgba(255,255,255,0.03)',
-                        color: challengeSeat === color ? '#fff2c8' : 'rgba(255,232,180,0.72)',
-                        fontSize: '11px',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        textTransform: 'capitalize',
-                      }}
-                    >
-                      {color}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -739,7 +716,7 @@ export default function FriendsPage({
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     {renderProfileChip(friendship.account.handle)}
                     <button
-                      onClick={() => void handleSendChallenge(friendship)}
+                      onClick={() => setChallengeTarget(friendship)}
                       disabled={busyRequestId === `challenge:${friendship.friendshipId}`}
                       style={{
                         minHeight: '36px',
@@ -773,6 +750,201 @@ export default function FriendsPage({
               No accepted friends yet. Start by sending a request to another claimed Chess404 handle.
             </div>
           )}
+        </div>
+      </div>
+
+      {challengeTarget && (
+        <ChallengeModal
+          target={challengeTarget}
+          busy={busyRequestId === `challenge:${challengeTarget.friendshipId}`}
+          modeId={challengeModeId}
+          onModeChange={setChallengeModeId}
+          color={challengeColor}
+          onColorChange={setChallengeColor}
+          clock={challengeClock}
+          onClockChange={setChallengeClock}
+          onCancel={() => setChallengeTarget(null)}
+          onSend={(modeId, seat, clockSeconds) => void handleSendChallenge(challengeTarget, { modeId, seat, clockSeconds })}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChallengeModal({
+  target,
+  busy,
+  modeId,
+  onModeChange,
+  color,
+  onColorChange,
+  clock,
+  onClockChange,
+  onCancel,
+  onSend,
+}: {
+  target: FriendshipView;
+  busy: boolean;
+  modeId: MatchModeId;
+  onModeChange: (mode: MatchModeId) => void;
+  color: 'black' | 'random' | 'white';
+  onColorChange: (color: 'black' | 'random' | 'white') => void;
+  clock: ChallengeClockOption;
+  onClockChange: (clock: ChallengeClockOption) => void;
+  onCancel: () => void;
+  onSend: (modeId: MatchModeId, seat: PieceColor, clockSeconds: number) => void;
+}): React.ReactElement {
+  // Escape closes, like the rest of the app's overlays.
+  React.useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onCancel();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [busy, onCancel]);
+
+  const labelStyle: React.CSSProperties = {
+    color: 'rgba(255,232,180,0.62)',
+    fontSize: '11px',
+    fontWeight: 700,
+  };
+  const controlStyle: React.CSSProperties = {
+    minHeight: '42px',
+    padding: '10px 12px',
+    borderRadius: '10px',
+    border: '1px solid rgba(255,180,60,0.22)',
+    background: '#121824',
+    color: '#fff4d6',
+    colorScheme: 'dark',
+    fontSize: '12px',
+    fontWeight: 700,
+    outline: 'none',
+    cursor: 'pointer',
+  };
+
+  return (
+    <div
+      onClick={() => { if (!busy) onCancel(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(4,6,12,0.72)', backdropFilter: 'blur(3px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '18px',
+      }}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Challenge ${target.account.handle}`}
+        style={{
+          width: 'min(420px, 100%)',
+          padding: '22px 22px 20px',
+          borderRadius: '16px',
+          border: '1px solid rgba(255,180,60,0.24)',
+          background: 'linear-gradient(180deg, rgba(16,20,32,0.99) 0%, rgba(10,13,22,0.99) 100%)',
+          boxShadow: '0 24px 70px rgba(0,0,0,0.55)',
+          display: 'grid', gap: '14px',
+        }}
+      >
+        <div style={{ display: 'grid', gap: '4px' }}>
+          <div style={{ color: '#ffcf72', fontSize: '11px', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase' }}>Direct Challenge</div>
+          <div style={{ color: '#fff2c8', fontSize: '18px', fontWeight: 800 }}>@{target.account.handle}</div>
+        </div>
+
+        <label style={{ display: 'grid', gap: '6px' }}>
+          <span style={labelStyle}>Mode</span>
+          <select value={modeId} onChange={(event) => onModeChange(event.target.value as MatchModeId)} style={controlStyle}>
+            {OFFICIAL_MATCH_MODES.filter((mode) => mode.id !== 'computer').map((mode) => (
+              <option key={mode.id} value={mode.id} style={{ background: '#121824', color: '#fff4d6' }}>{mode.label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'grid', gap: '6px' }}>
+          <span style={labelStyle}>Time control</span>
+          <select
+            value={clock.seconds}
+            onChange={(event) => {
+              const seconds = Number(event.target.value);
+              const next = CHALLENGE_CLOCK_OPTIONS.find((option) => option.seconds === seconds);
+              if (next) onClockChange(next);
+            }}
+            style={controlStyle}
+          >
+            {CHALLENGE_CLOCK_OPTIONS.map((option) => (
+              <option key={option.seconds} value={option.seconds} style={{ background: '#121824', color: '#fff4d6' }}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <span style={labelStyle}>Your color</span>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {(['white', 'random', 'black'] as const).map((choice) => (
+              <button
+                key={choice}
+                onClick={() => onColorChange(choice)}
+                style={{
+                  minHeight: '38px',
+                  padding: '8px 16px',
+                  borderRadius: '999px',
+                  border: color === choice ? '1px solid rgba(255,215,0,0.34)' : '1px solid rgba(255,180,60,0.16)',
+                  background: color === choice ? 'rgba(255,180,60,0.16)' : 'rgba(255,255,255,0.03)',
+                  color: color === choice ? '#fff2c8' : 'rgba(255,232,180,0.72)',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {choice === 'random' ? '\u2654\u265A Random' : choice}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '4px' }}>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            style={{
+              minHeight: '40px',
+              padding: '10px 16px',
+              borderRadius: '10px',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.05)',
+              color: 'rgba(255,232,180,0.82)',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: busy ? 'default' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              // Random color resolves to a concrete seat at send time; both
+              // sides resolving independently is fine -- the challenged
+              // player's ACCEPT flow assigns the opposite seat.
+              const seat: PieceColor = color === 'random' ? (Math.random() < 0.5 ? 'white' : 'black') : color;
+              onSend(modeId, seat, clock.seconds);
+            }}
+            disabled={busy}
+            style={{
+              minHeight: '40px',
+              padding: '10px 18px',
+              borderRadius: '10px',
+              border: '1px solid rgba(86,204,120,0.3)',
+              background: 'linear-gradient(180deg, rgba(48,140,80,0.42) 0%, rgba(22,84,48,0.5) 100%)',
+              color: '#e6ffef',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: busy ? 'default' : 'pointer',
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            {busy ? 'Sending\u2026' : 'Send Challenge'}
+          </button>
         </div>
       </div>
     </div>
