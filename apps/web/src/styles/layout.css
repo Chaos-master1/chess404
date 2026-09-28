@@ -35,6 +35,14 @@
   background: linear-gradient(180deg, rgba(9, 6, 18, 0.94) 0%, rgba(9, 12, 20, 0.98) 100%);
   border-right: 1px solid rgba(255, 190, 90, 0.14);
   backdrop-filter: blur(18px);
+  /* Short laptop windows: the nav (brand + 3 groups) can exceed the
+     viewport height, which clipped the footer's Account/Sign In button
+     below the fold with no way to reach it. The sidebar scrolls internally
+     and the footer stays pinned via margin-top:auto. */
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 190, 90, 0.35) transparent;
 }
 
 .app-shell__sidebar--collapsed {
