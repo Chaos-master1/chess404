@@ -682,8 +682,14 @@ export default function ProfilesPage({
               <div style={{ padding: '18px', borderRadius: '16px', background: 'linear-gradient(180deg, rgba(200,134,10,0.18) 0%, rgba(70,42,8,0.22) 100%)', border: '1px solid rgba(255,185,70,0.18)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '14px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                   <div style={{ minWidth: 0 }}>
+                    {/* One name, not two: displayName currently mirrors the
+                        handle server-side, so rendering both produced
+                        "lazy-to-move / @lazy-to-move". Show the @handle line
+                        only when the display name actually differs. */}
                     <div style={{ color: '#fff2c8', fontSize: '24px', fontWeight: 900 }}>{profile.displayName ?? profile.handle}</div>
-                    <div style={{ color: '#ffd98f', fontSize: '13px', fontWeight: 800, marginTop: '6px' }}>@{profile.handle}</div>
+                    {(profile.displayName ?? profile.handle) !== profile.handle ? (
+                      <div style={{ color: '#ffd98f', fontSize: '13px', fontWeight: 800, marginTop: '6px' }}>@{profile.handle}</div>
+                    ) : null}
                     <div style={{ color: 'rgba(255,232,180,0.62)', fontSize: '12px', marginTop: '8px' }}>
                       Joined {formatDateTime(profile.createdAt)} · last seen {formatDateTime(profile.lastSeenAt)}
                     </div>

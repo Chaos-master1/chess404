@@ -714,7 +714,22 @@ export default function FriendsPage({
                   <PresencePill account={friendship.account} />
 
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {renderProfileChip(friendship.account.handle)}
+                    <button
+                      onClick={() => onOpenProfile?.(friendship.account.handle)}
+                      style={{
+                        minHeight: '36px',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(255,180,60,0.16)',
+                        background: 'rgba(255,180,60,0.08)',
+                        color: '#ffe7a9',
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Profile
+                    </button>
                     <button
                       onClick={() => setChallengeTarget(friendship)}
                       disabled={busyRequestId === `challenge:${friendship.friendshipId}`}

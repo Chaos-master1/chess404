@@ -92,8 +92,11 @@ export default function AppShell({
         <aside className="app-shell__sidebar">
           <div className="app-shell__brand">
             <div className="app-shell__brand-mark">
+              {/* logo512.png is the full-art gold mark; logo-mark.png is a
+                  mostly-black tile that read as a dark square in the amber
+                  brand box. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo-mark.png" alt="" className="app-shell__brand-mark-img" />
+              <img src="/logo512.png" alt="" className="app-shell__brand-mark-img" />
             </div>
             <div className="app-shell__brand-copy">
               <div className="app-shell__brand-title">{brandTitle}</div>

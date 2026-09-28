@@ -49,17 +49,13 @@
 }
 
 .app-shell__brand-mark {
-  width: 44px;
-  height: 44px;
-  border-radius: 16px;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
   display: grid;
   place-items: center;
   color: var(--text-on-accent);
-  background: linear-gradient(135deg, rgba(224, 160, 30, 1) 0%, rgba(120, 75, 8, 1) 100%);
-  box-shadow:
-    0 12px 24px rgba(200, 134, 10, 0.22),
-    inset 0 1px 0 rgba(255, 244, 210, 0.35),
-    inset 0 -6px 12px rgba(60, 36, 4, 0.35);
+  box-shadow: 0 12px 24px rgba(200, 134, 10, 0.22);
 }
 
 .app-shell__brand-mark-img {
