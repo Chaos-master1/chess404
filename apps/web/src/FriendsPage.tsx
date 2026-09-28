@@ -661,59 +661,23 @@ export default function FriendsPage({
                     gap: '10px',
                   }}
                 >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
                     <div>
                       <div style={{ color: '#fff2c8', fontSize: '15px', fontWeight: 800 }}>@{friendship.account.handle}</div>
                       <div style={{ color: 'rgba(255,232,180,0.64)', fontSize: '12px', marginTop: '3px' }}>
                         Rating {friendship.account.rating ?? 1200} | {describePresence(friendship.account).detail}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      <button
-                        onClick={() => void handleRemoveFriend(friendship)}
-                        disabled={busyRequestId === friendship.friendshipId}
-                        style={{
-                          minHeight: '36px',
-                          padding: '8px 12px',
-                          borderRadius: '9px',
-                          border: '1px solid rgba(231,76,60,0.32)',
-                          background: 'rgba(120,20,20,0.18)',
-                          color: '#ffd3ce',
-                          fontSize: '11px',
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                          opacity: busyRequestId === friendship.friendshipId ? 0.7 : 1,
-                        }}
-                      >
-                        Remove
-                      </button>
-                      <button
-                        onClick={() => void handleBlockFriend(friendship)}
-                        disabled={busyRequestId === `block:${friendship.friendshipId}`}
-                        style={{
-                          minHeight: '36px',
-                          fontSize: '11px',
-                          padding: '8px 10px',
-                          background: 'rgba(120,20,20,0.28)',
-                          color: '#ffd3ce',
-                          border: '1px solid rgba(231,76,60,0.25)',
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                          opacity: busyRequestId === `block:${friendship.friendshipId}` ? 0.6 : 1,
-                        }}
-                        aria-label={`Block ${friendship.account.handle}`}
-                      >
-                        Block
-                      </button>
-                    </div>
-                  </div>
 
                   <div style={{ color: 'rgba(255,232,180,0.78)', fontSize: '12px', lineHeight: 1.6 }}>
                     Friends since {formatDateTime(friendship.createdAt)}
                   </div>
                   <PresencePill account={friendship.account} />
 
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {/* One action row for the whole card: Profile · Challenge ·
+                      Remove · Block. Previously Remove/Block floated by the
+                      name while Profile/Challenge sat lower with a different
+                      border — four buttons in one consistent row now. */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                     <button
                       onClick={() => onOpenProfile?.(friendship.account.handle)}
                       style={{
@@ -747,6 +711,43 @@ export default function FriendsPage({
                       }}
                     >
                       Challenge
+                    </button>
+                    <button
+                      onClick={() => void handleRemoveFriend(friendship)}
+                      disabled={busyRequestId === friendship.friendshipId}
+                      style={{
+                        minHeight: '36px',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(231,76,60,0.32)',
+                        background: 'rgba(120,20,20,0.18)',
+                        color: '#ffd3ce',
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        opacity: busyRequestId === friendship.friendshipId ? 0.7 : 1,
+                      }}
+                    >
+                      Remove
+                    </button>
+                    <button
+                      onClick={() => void handleBlockFriend(friendship)}
+                      disabled={busyRequestId === `block:${friendship.friendshipId}`}
+                      style={{
+                        minHeight: '36px',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(231,76,60,0.25)',
+                        background: 'rgba(120,20,20,0.28)',
+                        color: '#ffd3ce',
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        opacity: busyRequestId === `block:${friendship.friendshipId}` ? 0.6 : 1,
+                      }}
+                      aria-label={`Block ${friendship.account.handle}`}
+                    >
+                      Block
                     </button>
                   </div>
                 </div>
