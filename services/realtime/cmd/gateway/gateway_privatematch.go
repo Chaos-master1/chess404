@@ -59,7 +59,7 @@ func createGatewayPrivateMatch(config GatewayConfig, client *http.Client, reques
 	if statusCode, err := enforcePrivateRatedAccountPolicy(request.Queue, "private match creation", accountSession); statusCode != http.StatusOK {
 		return GatewayPrivateMatchResponse{}, statusCode, err
 	}
-	return createGatewayPrivateMatchForSession(config, client, session, accountSession, request.Queue, request.ModeID, request.ClockSeconds, request.PreferredSeat, request.Difficulty, r)
+	return createGatewayPrivateMatchForSession(config, client, session, accountSession, request.Queue, request.ModeID, request.ClockSeconds, request.ClockIncrement, request.PreferredSeat, request.Difficulty, r)
 }
 
 func createGatewayPrivateMatchForSession(
@@ -70,6 +70,7 @@ func createGatewayPrivateMatchForSession(
 	queue string, // caller-verified: rated-account policy already enforced upstream.
 	modeID contracts.MatchModeID,
 	clockSeconds int64,
+	clockIncrement int64,
 	preferredSeat string,
 	difficulty string,
 	r *http.Request,
@@ -91,6 +92,7 @@ func createGatewayPrivateMatchForSession(
 
 	createReq := contracts.CreateMatchRequest{
 		ClockSeconds:    clockSeconds,
+		ClockIncrement:  clockIncrement,
 		Queue:           matchQueue,
 		ModeID:          contracts.NormalizeMatchModeID(string(modeID)),
 		Difficulty:      strings.TrimSpace(difficulty),
@@ -293,6 +295,7 @@ func rematchGatewayPrivateMatch(config GatewayConfig, client *http.Client, match
 		snapshot.Match.Queue,
 		snapshot.Match.ModeID,
 		clockSeconds,
+		0,
 		requesterSeat,
 		"",
 		r,

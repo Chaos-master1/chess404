@@ -36,11 +36,13 @@ func createGatewayDirectChallenge(config GatewayConfig, client *http.Client, req
 	}
 
 	matchResponse, statusCode, err := createGatewayPrivateMatch(config, client, GatewayPrivateMatchRequest{
-		Guest:         request.Guest,
-		Account:       request.Account,
-		ModeID:        request.ModeID,
-		ClockSeconds:  request.ClockSeconds,
-		PreferredSeat: request.PreferredSeat,
+		Guest:          request.Guest,
+		Account:        request.Account,
+		Queue:          request.Queue,
+		ModeID:         request.ModeID,
+		ClockSeconds:   request.ClockSeconds,
+		ClockIncrement: request.ClockIncrement,
+		PreferredSeat:  request.PreferredSeat,
 	}, r)
 	if err != nil {
 		return GatewayDirectChallengeLaunchResponse{}, statusCode, err

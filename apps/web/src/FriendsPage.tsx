@@ -91,10 +91,10 @@ function describePresence(account: AccountProfile): {
   }
 }
 
-function persistChallengeRoom(result: DirectChallengeLaunchResponse): void {
+function persistChallengeRoom(result: DirectChallengeLaunchResponse, queue: 'casual' | 'rated' = 'casual'): void {
   const matchSnapshot = result.match.snapshot?.match;
   writeStoredRoomMeta(result.match.matchId, {
-    queue: 'direct',
+    queue,
     modeId: result.modeId ?? matchSnapshot?.modeId ?? DEFAULT_MATCH_MODE_ID,
     viewerSeat: result.match.seatColor,
     whiteGuestId: matchSnapshot?.whiteGuestId,
@@ -133,6 +133,16 @@ export default function FriendsPage({
   const [challengeTarget, setChallengeTarget] = React.useState<FriendshipView | null>(null);
   const [challengeColor, setChallengeColor] = React.useState<'black' | 'random' | 'white'>('white');
   const [challengeClock, setChallengeClock] = React.useState(CHALLENGE_CLOCK_OPTIONS[DEFAULT_CHALLENGE_CLOCK_INDEX]);
+  const [challengeQueue, setChallengeQueue] = React.useState<'casual' | 'rated'>('casual');
+  // Custom time control: when set (non-empty parsed minutes), it overrides
+  // the preset dropdown selection.
+  const [customMinutes, setCustomMinutes] = React.useState('');
+  const [customIncrement, setCustomIncrement] = React.useState('');
+  const parsedCustomMinutes = Number.parseInt(customMinutes, 10);
+  const parsedCustomIncrement = Number.parseInt(customIncrement, 10);
+  const customClockActive = Number.isFinite(parsedCustomMinutes) && parsedCustomMinutes > 0;
+  const effectiveClockSeconds = customClockActive ? parsedCustomMinutes * 60 : challengeClock.seconds;
+  const effectiveClockIncrement = customClockActive && Number.isFinite(parsedCustomIncrement) && parsedCustomIncrement > 0 ? parsedCustomIncrement : challengeClock.increment;
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const [notice, setNotice] = React.useState('');
@@ -280,7 +290,7 @@ export default function FriendsPage({
 
   const handleSendChallenge = React.useCallback(async (
     friendship: FriendshipView,
-    choices: { modeId: MatchModeId; seat: PieceColor; clockSeconds: number },
+    choices: { modeId: MatchModeId; seat: PieceColor; clockSeconds: number; clockIncrement: number; queue: 'casual' | 'rated' },
   ) => {
     if (!accountId || !sessionToken || !identity?.guestId) {
       setError('Sign in with an active player session to send direct challenges.');
@@ -296,8 +306,10 @@ export default function FriendsPage({
         modeId: choices.modeId,
         preferredSeat: choices.seat,
         clockSeconds: choices.clockSeconds,
+        clockIncrement: choices.clockIncrement,
+        queue: choices.queue,
       });
-      persistChallengeRoom(result);
+      persistChallengeRoom(result, choices.queue);
       setChallengeTarget(null);
       router.push(`/match/${encodeURIComponent(result.match.matchId)}`);
     } catch (err) {
@@ -779,8 +791,20 @@ export default function FriendsPage({
           onColorChange={setChallengeColor}
           clock={challengeClock}
           onClockChange={setChallengeClock}
+          queue={challengeQueue}
+          onQueueChange={setChallengeQueue}
+          customMinutes={customMinutes}
+          onCustomMinutesChange={setCustomMinutes}
+          customIncrement={customIncrement}
+          onCustomIncrementChange={setCustomIncrement}
           onCancel={() => setChallengeTarget(null)}
-          onSend={(modeId, seat, clockSeconds) => void handleSendChallenge(challengeTarget, { modeId, seat, clockSeconds })}
+          onSend={(modeId, seat) => void handleSendChallenge(challengeTarget, {
+            modeId,
+            seat,
+            clockSeconds: effectiveClockSeconds,
+            clockIncrement: effectiveClockIncrement,
+            queue: challengeQueue,
+          })}
         />
       )}
     </div>
@@ -796,6 +820,12 @@ function ChallengeModal({
   onColorChange,
   clock,
   onClockChange,
+  queue,
+  onQueueChange,
+  customMinutes,
+  onCustomMinutesChange,
+  customIncrement,
+  onCustomIncrementChange,
   onCancel,
   onSend,
 }: {
@@ -807,8 +837,14 @@ function ChallengeModal({
   onColorChange: (color: 'black' | 'random' | 'white') => void;
   clock: ChallengeClockOption;
   onClockChange: (clock: ChallengeClockOption) => void;
+  queue: 'casual' | 'rated';
+  onQueueChange: (queue: 'casual' | 'rated') => void;
+  customMinutes: string;
+  onCustomMinutesChange: (value: string) => void;
+  customIncrement: string;
+  onCustomIncrementChange: (value: string) => void;
   onCancel: () => void;
-  onSend: (modeId: MatchModeId, seat: PieceColor, clockSeconds: number) => void;
+  onSend: (modeId: MatchModeId, seat: PieceColor) => void;
 }): React.ReactElement {
   // Escape closes, like the rest of the app's overlays.
   React.useEffect(() => {
@@ -894,6 +930,59 @@ function ChallengeModal({
         </label>
 
         <div style={{ display: 'grid', gap: '6px' }}>
+          <span style={labelStyle}>Custom time (minutes + increment, overrides preset)</span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              inputMode="numeric"
+              placeholder="min"
+              value={customMinutes}
+              onChange={(event) => onCustomMinutesChange(event.target.value.replace(/[^0-9]/g, ''))}
+              style={{ ...controlStyle, flex: 1, minHeight: '38px', cursor: 'text' }}
+              aria-label="Custom minutes"
+            />
+            <input
+              inputMode="numeric"
+              placeholder="+inc"
+              value={customIncrement}
+              onChange={(event) => onCustomIncrementChange(event.target.value.replace(/[^0-9]/g, ''))}
+              style={{ ...controlStyle, flex: 1, minHeight: '38px', cursor: 'text' }}
+              aria-label="Custom increment seconds"
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <span style={labelStyle}>Queue</span>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {(['casual', 'rated'] as const).map((lane) => (
+              <button
+                key={lane}
+                onClick={() => onQueueChange(lane)}
+                style={{
+                  minHeight: '38px',
+                  padding: '8px 16px',
+                  borderRadius: '999px',
+                  border: queue === lane ? '1px solid rgba(255,215,0,0.34)' : '1px solid rgba(255,180,60,0.16)',
+                  background: queue === lane ? 'rgba(255,180,60,0.16)' : 'rgba(255,255,255,0.03)',
+                  color: queue === lane ? '#fff2c8' : 'rgba(255,232,180,0.72)',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {lane}
+              </button>
+            ))}
+          </div>
+          {queue === 'rated' ? (
+            <div style={{ color: 'rgba(255,214,130,0.66)', fontSize: '10px', lineHeight: 1.5 }}>
+              Rated: both players need accounts (you both do) and the result moves Elo.
+            </div>
+          ) : null}
+        </div>
+
+        <div style={{ display: 'grid', gap: '6px' }}>
           <span style={labelStyle}>Your color</span>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {(['white', 'random', 'black'] as const).map((choice) => (
@@ -943,7 +1032,7 @@ function ChallengeModal({
               // sides resolving independently is fine -- the challenged
               // player's ACCEPT flow assigns the opposite seat.
               const seat: PieceColor = color === 'random' ? (Math.random() < 0.5 ? 'white' : 'black') : color;
-              onSend(modeId, seat, clock.seconds);
+              onSend(modeId, seat);
             }}
             disabled={busy}
             style={{

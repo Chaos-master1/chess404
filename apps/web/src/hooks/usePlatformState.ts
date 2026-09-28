@@ -35,6 +35,7 @@ import {
   fetchDirectChallengeOverview,
   fetchFriendOverview,
   fetchAccountNotificationOverview,
+  markAccountNotificationRead,
   isAccountRestrictionError,
   formatAccountRestrictionNotice,
   parseAccountRestrictionMessage,
@@ -684,6 +685,44 @@ export function usePlatformState(props: UsePlatformStateProps) {
         if (!cancelled) {
           setInboxUnreadCount(notificationOverview.unreadCount);
           setFriendsAttentionCount(friendOverview.incoming.length + challengeOverview.incoming.length);
+
+          // Banner lifecycle: an alert whose moment has passed must never
+          // re-arm. Previously dismissing only hid the alert in memory, so
+          // the unread notification re-showed it on every refresh — forever,
+          // even after the match was over. Now: expired/played alerts are
+          // marked READ server-side (a) when their match is no longer the
+          // active room and (b) when they are older than 6 hours. What
+          // remains unread is genuinely new and actionable.
+          const staleCutoffMs = 6 * 60 * 60 * 1000;
+          const nowMs = Date.now();
+          const expiredUnread = notificationOverview.notifications.filter((notification) => {
+            if (notification.readAt) return false;
+            const built = buildSocialAlert(notification);
+            if (!built) return false;
+            if (dismissedSocialAlertIdsRef.current.has(built.id)) return true;
+            if (built.action === 'match' && built.matchId) {
+              if (built.matchId !== authoritativeMatchIdRef.current) return true;
+            }
+            const updatedMs = Date.parse(notification.updatedAt);
+            return Number.isFinite(updatedMs) && nowMs - updatedMs > staleCutoffMs;
+          });
+          if (expiredUnread.length > 0) {
+            void (async () => {
+              for (const notification of expiredUnread) {
+                try {
+                  await markAccountNotificationRead({
+                    accountId: identity.accountId ?? '',
+                    sessionToken: identity.sessionToken ?? '',
+                    notificationId: notification.notificationId,
+                  });
+                } catch {
+                  return; // retry on the next social refresh tick
+                }
+              }
+              if (!cancelled) pulseSocialLive();
+            })();
+          }
+
           const nextAlert = notificationOverview.notifications
             .filter((notification) => !notification.readAt)
             .map(buildSocialAlert)
@@ -692,6 +731,9 @@ export function usePlatformState(props: UsePlatformStateProps) {
                 return false;
               }
               if (dismissedSocialAlertIdsRef.current.has(candidate.id)) {
+                return false;
+              }
+              if (candidate.action === 'match' && candidate.matchId && candidate.matchId !== authoritativeMatchIdRef.current) {
                 return false;
               }
               if (candidate.action === 'match' && candidate.matchId && candidate.matchId === authoritativeMatchIdRef.current) {
@@ -718,7 +760,7 @@ export function usePlatformState(props: UsePlatformStateProps) {
     return () => {
       cancelled = true;
     };
-  }, [clearPrimaryAccountRestriction, socialLiveToken]);
+  }, [clearPrimaryAccountRestriction, pulseSocialLive, socialLiveToken]);
 
   // Initial bootstrap fetch
   React.useEffect(() => {

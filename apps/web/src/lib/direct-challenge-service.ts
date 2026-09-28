@@ -13,7 +13,11 @@ export async function sendDirectChallenge(input: {
   targetAccountId: string;
   modeId?: MatchModeId;
   clockSeconds?: number;
+  clockIncrement?: number;
   preferredSeat?: PieceColor;
+  /** 'casual' (default) or 'rated' — rated challenges require signed-in
+      accounts on both sides, which direct challenges always have. */
+  queue?: 'casual' | 'rated';
 }): Promise<DirectChallengeLaunchResponse> {
   const response = await fetch('/api/gateway/challenges', {
     method: 'POST',
@@ -33,7 +37,9 @@ export async function sendDirectChallenge(input: {
       targetAccountId: input.targetAccountId,
       modeId: input.modeId ?? DEFAULT_MATCH_MODE_ID,
       clockSeconds: input.clockSeconds ?? 600,
+      clockIncrement: input.clockIncrement ?? 0,
       preferredSeat: input.preferredSeat ?? 'white',
+      queue: input.queue ?? 'casual',
     }),
   });
 

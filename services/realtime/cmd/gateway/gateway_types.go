@@ -139,13 +139,14 @@ type GatewayBootstrapPayload struct {
 }
 
 type GatewayPrivateMatchRequest struct {
-	Guest         GatewayGuestIdentity    `json:"guest"`
-	Account       *GatewayAccountIdentity `json:"account,omitempty"`
-	Queue         string                  `json:"queue,omitempty"`
-	ModeID        contracts.MatchModeID   `json:"modeId,omitempty"`
-	Difficulty    string                  `json:"difficulty,omitempty"`
-	ClockSeconds  int64                   `json:"clockSeconds,omitempty"`
-	PreferredSeat string                  `json:"preferredSeat,omitempty"`
+	Guest          GatewayGuestIdentity    `json:"guest"`
+	Account        *GatewayAccountIdentity `json:"account,omitempty"`
+	Queue          string                  `json:"queue,omitempty"`
+	ModeID         contracts.MatchModeID   `json:"modeId,omitempty"`
+	Difficulty     string                  `json:"difficulty,omitempty"`
+	ClockSeconds   int64                   `json:"clockSeconds,omitempty"`
+	ClockIncrement int64                   `json:"clockIncrement,omitempty"`
+	PreferredSeat  string                  `json:"preferredSeat,omitempty"`
 }
 
 type GatewayPrivateMatchResponse struct {
@@ -163,7 +164,12 @@ type GatewayDirectChallengeRequest struct {
 	TargetAccountID string                  `json:"targetAccountId"`
 	ModeID          contracts.MatchModeID   `json:"modeId,omitempty"`
 	ClockSeconds    int64                   `json:"clockSeconds,omitempty"`
+	ClockIncrement  int64                   `json:"clockIncrement,omitempty"`
 	PreferredSeat   string                  `json:"preferredSeat,omitempty"`
+	// Queue picks the room's lane: "casual" (default) or "rated". Rated
+	// challenges still pass enforcePrivateRatedAccountPolicy — both sides of
+	// a direct challenge are accounts by construction, so rated is legal.
+	Queue string `json:"queue,omitempty"`
 }
 
 type GatewayDirectChallengeAcceptRequest struct {
