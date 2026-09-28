@@ -560,12 +560,17 @@ export default function ProfilesPage({
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start' }}>
                       <div style={{ minWidth: 0 }}>
+                        {/* Same show-once rule as the profile header: the
+                            server mirrors the handle into displayName, so
+                            rendering both lines duplicated the name. */}
                         <div style={{ color: '#fff2c8', fontSize: '14px', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {account.displayName ?? account.handle}
                         </div>
-                        <div style={{ color: '#ffd98f', fontSize: '11px', fontWeight: 700, marginTop: '4px' }}>
-                          @{account.handle}
-                        </div>
+                        {(account.displayName ?? account.handle) !== account.handle ? (
+                          <div style={{ color: '#ffd98f', fontSize: '11px', fontWeight: 700, marginTop: '4px' }}>
+                            @{account.handle}
+                          </div>
+                        ) : null}
                       </div>
                       <div style={{ color: '#7ce3aa', fontSize: '16px', fontWeight: 900, flexShrink: 0 }}>
                         {account.selectedSeason?.ratingEnd ?? account.rating ?? 1200}
