@@ -371,6 +371,11 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const [authoritativeLive, setAuthoritativeLive] = React.useState(false);
   const [authoritativeMatchId, setAuthoritativeMatchId] = React.useState<string | null>(null);
   const [matchLoadError, setMatchLoadError] = React.useState<string | null>(null);
+  // A rated private invite only accepts signed-in joiners (gateway 403s the
+  // join otherwise). Latched here so the shell can render a dedicated
+  // "create an account to enter this match" screen with an auto-retry once
+  // the visitor authenticates, instead of a dead-end access error.
+  const [ratedInviteSignInRequired, setRatedInviteSignInRequired] = React.useState(false);
   // Match IDs the server has definitively declared gone (finished/archived,
   // 404/410) in this page session. Without the latch, every navigation to a
   // stale /match/<id> (or any page while requestedMatchIdRef still points at
@@ -862,6 +867,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
               accountSessionToken: account.sessionToken,
             },
           });
+          setRatedInviteSignInRequired(false);
           const seatCredentials = joined.seatColor === 'white'
             ? {
               whitePlayerSecret: joined.claim?.playerSecret,
@@ -888,7 +894,19 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
           });
           applyAuthoritativeSnapshot(joined.snapshot);
           return;
-        } catch {
+        } catch (joinErr) {
+          // The gateway rejects a rated private join when the visitor holds no
+          // account session ("requires a signed-in account on both sides").
+          // Surface the dedicated sign-in prompt for that exact case instead of
+          // a dead-end "no access" error; any other failure keeps normal error
+          // handling below.
+          const joinStatus = (joinErr as { status?: number } | null)?.status;
+          const joinMessage = joinErr instanceof Error ? joinErr.message : '';
+          if (joinStatus === 403 && /rated|signed-in account/i.test(joinMessage)) {
+            setRatedInviteSignInRequired(true);
+            setMatchLoadError(null);
+            return;
+          }
           // A room may already be full. Its seated owner can still fetch a
           // seat-scoped view below; a third party receives the route's normal
           // private-match response instead of any fallback snapshot.
@@ -1260,6 +1278,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     roundNumber, streamDisconnected, hasPrimaryAccountSession,
     submitAuthoritativeIntent, bootstrapAuthoritativeMatch, requestedMatchIdRef,
     matchLoadError, setMatchLoadError,
+    ratedInviteSignInRequired, setRatedInviteSignInRequired,
     engineOn, setEngineOn, finalPositionRef, reviewBoard,
   };
 }

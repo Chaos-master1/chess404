@@ -1,119 +1,123 @@
 'use client';
 
 import React from 'react';
-import type { AccountProfile, GuestProfile, MatchArchiveEntry } from './lib/platform-service';
-import { fetchAccounts, fetchGuest, fetchGuestArchivedMatches, fetchGuests } from './lib/platform-service';
+import type { AccountProfile, MatchArchiveEntry } from './lib/platform-service';
+import { fetchAccountArchivedMatches, fetchAccounts } from './lib/platform-service';
 import { formatDateTime } from './lib/display';
 
-function statLabel(player: GuestProfile): string {
-  return `${player.wins}W ${player.losses}L ${player.draws}D`;
-}
-
 interface CommunityPageProps {
-  whiteProfile?: GuestProfile | null;
-  blackProfile?: GuestProfile | null;
-  focusGuestId?: string | null;
   onOpenMatch?: (matchId: string) => void;
-  onOpenGuestHistory?: (guestId: string) => void;
   onOpenAccount?: (handle: string) => void;
 }
 
+type MatchOutcome = 'win' | 'loss' | 'draw' | 'active';
+
+type Presence = 'online' | 'recently_active' | 'offline';
+
+function presenceOf(account: AccountProfile): Presence {
+  return account.presenceStatus ?? 'offline';
+}
+
+const PRESENCE_META: Record<Presence, { label: string; color: string }> = {
+  online: { label: 'Online now', color: '#7ce3aa' },
+  recently_active: { label: 'Recently active', color: '#ffd487' },
+  offline: { label: 'Offline', color: 'rgba(170,190,220,0.5)' },
+};
+
+// Guests are anonymous sessions: they have no handle and no meaningful Elo
+// until they finish rated games. Accounts without rated games are shown as
+// Unrated instead of surfacing the default 1200 ladder seed.
+function ratingLabel(account: AccountProfile): string {
+  const rating = account.modeRating ?? account.rating;
+  const played = account.matchesPlayed ?? 0;
+  if (!rating || played <= 0) {
+    return 'Unrated';
+  }
+  return String(rating);
+}
+
+function hasRecord(account: AccountProfile): boolean {
+  return (account.matchesPlayed ?? 0) > 0;
+}
+
+function recordLabel(account: AccountProfile): string {
+  return `${account.wins ?? 0}W ${account.losses ?? 0}L ${account.draws ?? 0}D`;
+}
+
+function describeAccountMatch(match: MatchArchiveEntry, accountId: string): { opponent: string; result: MatchOutcome } {
+  const isWhite = match.whiteAccountId === accountId;
+  const opponentBase = isWhite
+    ? (match.blackAccountHandle ? `@${match.blackAccountHandle}` : (match.blackName ?? 'Guest'))
+    : (match.whiteAccountHandle ? `@${match.whiteAccountHandle}` : (match.whiteName ?? 'Guest'));
+  const result: MatchOutcome =
+    match.winner === 'draw'
+      ? 'draw'
+      : match.winner === (isWhite ? 'white' : 'black')
+        ? 'win'
+        : match.status === 'finished'
+          ? 'loss'
+          : 'active';
+  return { opponent: opponentBase, result };
+}
+
+const OUTCOME_LABEL: Record<MatchOutcome, string> = {
+  win: 'Win',
+  loss: 'Loss',
+  draw: 'Draw',
+  active: 'In progress',
+};
+
 export default function CommunityPage({
-  whiteProfile = null,
-  blackProfile = null,
-  focusGuestId = null,
   onOpenMatch,
-  onOpenGuestHistory,
   onOpenAccount,
 }: CommunityPageProps): React.ReactElement {
-  const [guests, setGuests] = React.useState<GuestProfile[]>([]);
-  const [accountsByGuestId, setAccountsByGuestId] = React.useState<Record<string, AccountProfile>>({});
-  const [selectedGuestId, setSelectedGuestId] = React.useState<string | null>(null);
-  const [selectedGuest, setSelectedGuest] = React.useState<GuestProfile | null>(null);
+  const [accounts, setAccounts] = React.useState<AccountProfile[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = React.useState<string | null>(null);
+  const [selectedAccount, setSelectedAccount] = React.useState<AccountProfile | null>(null);
   const [recentMatches, setRecentMatches] = React.useState<MatchArchiveEntry[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [loadingDetail, setLoadingDetail] = React.useState(false);
   const [loadingMatches, setLoadingMatches] = React.useState(false);
-  const [error, setError] = React.useState('');
+  const [listError, setListError] = React.useState('');
+  const [matchesError, setMatchesError] = React.useState('');
 
-  const loadGuests = React.useCallback(async () => {
+  const loadAccounts = React.useCallback(async () => {
     setLoading(true);
-    setError('');
+    setListError('');
     try {
-      const [nextGuests, accounts] = await Promise.all([
-        fetchGuests(24),
-        fetchAccounts(100),
-      ]);
-      const nextAccountsByGuestId: Record<string, AccountProfile> = {};
-      for (const account of accounts) {
-        for (const guestId of account.linkedGuestIds) {
-          nextAccountsByGuestId[guestId] = account;
-        }
-      }
-      setGuests(nextGuests);
-      setAccountsByGuestId(nextAccountsByGuestId);
-      setSelectedGuestId(currentSelected => currentSelected && nextGuests.some(guest => guest.guestId === currentSelected)
-        ? currentSelected
-        : nextGuests[0]?.guestId ?? null);
+      const nextAccounts = await fetchAccounts(50, 'rating');
+      setAccounts(nextAccounts);
+      setSelectedAccountId(current => current && nextAccounts.some(account => account.accountId === current)
+        ? current
+        : nextAccounts[0]?.accountId ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load community players.');
+      setListError(err instanceof Error ? err.message : 'Failed to load community players.');
     } finally {
       setLoading(false);
     }
   }, []);
 
   React.useEffect(() => {
-    void loadGuests();
-  }, [loadGuests]);
+    void loadAccounts();
+  }, [loadAccounts]);
 
   React.useEffect(() => {
-    if (focusGuestId) {
-      setSelectedGuestId(focusGuestId);
-    }
-  }, [focusGuestId]);
-
-  React.useEffect(() => {
-    if (!selectedGuestId) {
-      setSelectedGuest(null);
+    if (!selectedAccountId) {
+      setSelectedAccount(null);
       setRecentMatches([]);
       return;
     }
 
-    let cancelled = false;
-    setLoadingDetail(true);
+    setMatchesError('');
 
-    void fetchGuest(selectedGuestId)
-      .then(guest => {
-        if (!cancelled) {
-          setSelectedGuest(guest);
-        }
-      })
-      .catch(err => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load guest profile.');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingDetail(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedGuestId]);
-
-  React.useEffect(() => {
-    if (!selectedGuestId) {
-      setRecentMatches([]);
-      return;
+    const known = accounts.find(account => account.accountId === selectedAccountId);
+    if (known) {
+      setSelectedAccount(known);
     }
 
     let cancelled = false;
     setLoadingMatches(true);
 
-    void fetchGuestArchivedMatches(selectedGuestId, 8)
+    void fetchAccountArchivedMatches(selectedAccountId, 8)
       .then(matches => {
         if (!cancelled) {
           setRecentMatches(matches);
@@ -121,7 +125,7 @@ export default function CommunityPage({
       })
       .catch(err => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load guest match history.');
+          setMatchesError(err instanceof Error ? err.message : 'Failed to load match history.');
         }
       })
       .finally(() => {
@@ -133,402 +137,331 @@ export default function CommunityPage({
     return () => {
       cancelled = true;
     };
-  }, [selectedGuestId]);
+  }, [selectedAccountId, accounts]);
 
-  const featuredGuest = selectedGuest ?? guests[0] ?? null;
-  const featuredAccount = featuredGuest ? accountsByGuestId[featuredGuest.guestId] ?? null : null;
-  const describeGuestMatch = React.useCallback((match: MatchArchiveEntry) => {
-    const isWhite = match.whiteGuestId === featuredGuest?.guestId;
-    const opponentBase = isWhite
-      ? (match.blackName ?? match.blackGuestId ?? 'Black guest')
-      : (match.whiteName ?? match.whiteGuestId ?? 'White guest');
-    const opponentHandle = isWhite ? match.blackAccountHandle : match.whiteAccountHandle;
-    const opponent = opponentHandle ? `${opponentBase} (@${opponentHandle})` : opponentBase;
-    const result =
-      match.winner === 'draw'
-        ? 'Draw'
-        : match.winner === (isWhite ? 'white' : 'black')
-          ? 'Win'
-          : match.status === 'finished'
-            ? 'Loss'
-            : 'Active';
-    return { opponent, result };
-  }, [featuredGuest?.guestId]);
+  const featuredAccount = selectedAccount ?? accounts.find(account => account.accountId === selectedAccountId) ?? null;
+  const featuredPresence = featuredAccount ? presenceOf(featuredAccount) : null;
 
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0, padding: '22px 28px 26px', gap: '18px' }}>
-      <div
-        style={{
-          width: '390px',
-          flexShrink: 0,
-          minWidth: 0,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'linear-gradient(180deg, rgba(14,18,30,0.98) 0%, rgba(9,12,20,0.96) 100%)',
-          border: '1px solid rgba(255,165,40,0.16)',
-          borderRadius: '14px',
-          boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid rgba(255,165,40,0.12)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-            <div>
-              <div style={{ color: '#ffcf72', fontSize: '13px', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase' }}>Community Guests</div>
-              <div style={{ color: 'rgba(255,232,180,0.72)', fontSize: '12px', marginTop: '4px' }}>
-                Recent local player identities with ratings, linked account handles, and match records from the platform service.
-              </div>
-            </div>
-            <button
-              onClick={() => void loadGuests()}
-              style={{
-                minHeight: '40px',
-                padding: '9px 16px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255,180,60,0.35)',
-                background: 'linear-gradient(180deg, rgba(200,134,10,0.32) 0%, rgba(122,79,8,0.4) 100%)',
-                color: '#fff2c8',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              Refresh
-            </button>
+    <div className="community-page">
+      <style>{`
+        .community-page {
+          display: flex; flex: 1; min-height: 0; padding: 22px 28px 26px; gap: 18px;
+        }
+        .community-pane {
+          min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .community-list-pane { width: min(380px, 36%); flex-shrink: 0; }
+        .community-detail-pane { flex: 1; }
+        .community-pane-header {
+          display: flex; justify-content: space-between; align-items: center; gap: 12px;
+          padding: 18px 20px 14px; border-bottom: 1px solid rgba(255,165,40,0.12);
+        }
+        .community-pane-title {
+          color: #ffcf72; font-size: 13px; font-weight: 800;
+          letter-spacing: 1.2px; text-transform: uppercase;
+        }
+        .community-pane-sub { color: var(--text-subtle, rgba(180,194,220,0.55)); font-size: 12px; margin-top: 4px; }
+        .community-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; }
+        .community-alert {
+          margin-bottom: 16px; padding: 12px 14px; border-radius: 10px;
+          background: rgba(120,20,20,0.22); border: 1px solid rgba(231,76,60,0.32);
+          color: #ffb1a7; font-size: 12px; font-weight: 700;
+        }
+        .community-skeleton {
+          height: 68px; border-radius: 12px; border: 1px solid rgba(255,165,40,0.1);
+          background: linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%);
+          background-size: 200% 100%;
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          .community-skeleton { animation: community-shimmer 1.8s infinite; }
+          @keyframes community-shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
+        }
+        .community-empty {
+          display: grid; place-items: center; text-align: center; gap: 8px;
+          padding: 36px 20px; border-radius: 14px;
+          border: 1px dashed rgba(255,190,90,0.22); background: rgba(255,255,255,0.02);
+          color: var(--text-subtle, rgba(180,194,220,0.55)); font-size: 13px;
+        }
+        .community-empty__icon { font-size: 30px; }
+        .community-empty__title { color: #ffd487; font-size: 15px; font-weight: 800; }
+        .community-account-list { display: flex; flex-direction: column; gap: 10px; }
+        .community-account-card {
+          cursor: pointer; text-align: left; border-radius: 12px; padding: 13px 14px;
+          border: 1px solid rgba(255,165,40,0.12); color: inherit; width: 100%;
+          background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%);
+          transition: border-color var(--transition-fast, 120ms), background var(--transition-fast, 120ms);
+        }
+        .community-account-card:hover { border-color: rgba(255,190,90,0.35); }
+        .community-account-card--selected {
+          border-color: rgba(255,190,90,0.32);
+          background: linear-gradient(180deg, rgba(200,134,10,0.18) 0%, rgba(70,42,8,0.2) 100%);
+        }
+        .community-account-card__top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+        .community-account-card__handle {
+          color: #fff2c8; font-size: 14px; font-weight: 800; min-width: 0;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          display: inline-flex; align-items: center; gap: 8px;
+        }
+        .community-account-card__rating { color: #7ce3aa; font-size: 15px; font-weight: 800; flex-shrink: 0; }
+        .community-account-card__rating--unrated { color: rgba(170,190,220,0.55); font-size: 12px; font-weight: 700; }
+        .community-account-card__meta {
+          margin-top: 5px; color: rgba(170,190,220,0.62); font-size: 11px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .community-presence-dot {
+          width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; display: inline-block;
+        }
+        .community-presence-dot--online { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.8); }
+        .community-presence-dot--recently_active { background: #fbbf24; }
+        .community-presence-dot--offline { background: rgba(140,160,190,0.4); }
+        .community-detail-header-card {
+          padding: 18px; border-radius: 14px;
+          background: linear-gradient(180deg, rgba(200,134,10,0.16) 0%, rgba(70,42,8,0.2) 100%);
+          border: 1px solid rgba(255,185,70,0.18);
+        }
+        .community-detail-header-card__top { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+        .community-detail-header-card__name { color: #fff2c8; font-size: 21px; font-weight: 900; }
+        .community-detail-header-card__meta { color: rgba(255,232,180,0.62); font-size: 12px; margin-top: 5px; }
+        .community-detail-header-card__rating { color: #7ce3aa; font-size: 26px; font-weight: 900; flex-shrink: 0; }
+        .community-detail-header-card__rating-label {
+          display: block; text-align: right; color: rgba(170,190,220,0.55);
+          font-size: 10px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; margin-top: 4px;
+        }
+        .community-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+        .community-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+        .community-stat-tile {
+          padding: 14px 14px 12px; border-radius: 12px;
+          background: rgba(255,255,255,0.035); border: 1px solid rgba(255,165,40,0.08);
+        }
+        .community-stat-tile__label {
+          color: rgba(255,232,180,0.58); font-size: 10px; font-weight: 700;
+          letter-spacing: 0.8px; text-transform: uppercase;
+        }
+        .community-stat-tile__value { font-size: 20px; font-weight: 900; margin-top: 6px; }
+        .community-stat-tile__hint { color: rgba(170,190,220,0.55); font-size: 11px; margin-top: 4px; }
+        .community-guests-note {
+          padding: 12px 16px; border-radius: 12px;
+          background: rgba(255,255,255,0.03); border: 1px solid rgba(255,165,40,0.08);
+          color: rgba(255,232,180,0.72); font-size: 12px;
+        }
+        .community-matches-card {
+          padding: 16px; border-radius: 14px;
+          background: rgba(255,255,255,0.03); border: 1px solid rgba(255,165,40,0.08);
+        }
+        .community-matches-card__title {
+          color: #ffcf72; font-size: 12px; font-weight: 800;
+          text-transform: uppercase; letter-spacing: 1px;
+        }
+        .community-matches-card__loading { color: rgba(255,232,180,0.55); font-size: 11px; }
+        .community-match-row {
+          text-align: left; cursor: pointer; width: 100%;
+          padding: 11px 12px; border-radius: 10px;
+          border: 1px solid rgba(255,165,40,0.12);
+          background: linear-gradient(180deg, rgba(18,23,36,0.95) 0%, rgba(11,14,24,0.94) 100%);
+          color: #fff2c8;
+          transition: border-color var(--transition-fast, 120ms);
+        }
+        .community-match-row:hover { border-color: rgba(255,190,90,0.3); }
+        .community-match-row__top { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+        .community-match-row__opponent { font-size: 12px; font-weight: 800; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .community-match-row__meta { margin-top: 5px; color: rgba(170,190,220,0.62); font-size: 11px; }
+        .community-match-row--win { border-left: 3px solid rgba(124,227,170,0.7); }
+        .community-match-row--loss { border-left: 3px solid rgba(255,120,100,0.6); }
+        .community-match-row--draw { border-left: 3px solid rgba(255,215,130,0.5); }
+        .community-match-row--active { border-left: 3px solid rgba(120,170,255,0.6); }
+        .community-match-row__result--win { color: #8ef0b6; }
+        .community-match-row__result--loss { color: #ffb3a0; }
+        .community-match-row__result--draw { color: #ffe2a5; }
+        .community-match-row__result--active { color: #a9c9ff; }
+        .community-stack { display: flex; flex-direction: column; gap: 16px; }
+        .community-detail-empty { color: rgba(255,232,180,0.65); font-size: 13px; }
+
+        @media (max-width: 1024px) {
+          .community-page { flex-direction: column; padding: 18px 18px 96px; }
+          .community-list-pane { width: 100%; flex-shrink: 1; }
+          .community-account-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+        }
+        @media (max-width: 640px) {
+          .community-page { padding: 12px 10px 18px; gap: 12px; }
+          .community-pane-header { padding: 14px 14px 12px; }
+          .community-body { padding: 12px 10px; }
+          .community-account-list { grid-template-columns: 1fr; }
+          .community-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+          .community-detail-header-card { padding: 14px; }
+        }
+      `}</style>
+
+      <div className="card-surface community-pane community-list-pane">
+        <div className="community-pane-header">
+          <div style={{ minWidth: 0 }}>
+            <div className="community-pane-title">Community</div>
+            <div className="community-pane-sub">Registered players on the platform.</div>
           </div>
+          <button className="btn-ghost" onClick={() => void loadAccounts()}>
+            Refresh
+          </button>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px' }}>
-          {error && (
-            <div style={{
-              marginBottom: '16px',
-              padding: '12px 14px',
-              borderRadius: '10px',
-              background: 'rgba(120,20,20,0.22)',
-              border: '1px solid rgba(231,76,60,0.32)',
-              color: '#ffb1a7',
-              fontSize: '12px',
-              fontWeight: 700,
-            }}>
-              {error}
-            </div>
-          )}
+        <div className="community-body">
+          {listError && <div className="community-alert" role="alert">{listError}</div>}
 
           {loading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} aria-busy="true" aria-label="Loading community profiles">
-              {[1, 2, 3, 4].map((i) => (
-                <div
-                  key={i}
-                  style={{
-                    height: '110px',
-                    borderRadius: '14px',
-                    background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%)',
-                    backgroundSize: '200% 100%',
-                    animation: 'shimmer 1.8s infinite',
-                    border: '1px solid rgba(255,165,40,0.1)',
-                  }}
-                />
-              ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }} aria-busy="true" aria-label="Loading community players">
+              {[1, 2, 3, 4, 5].map(i => <div key={i} className="community-skeleton" />)}
             </div>
-          ) : guests.length === 0 ? (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                textAlign: 'center',
-                padding: '36px 20px',
-                borderRadius: '16px',
-                background: 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-                border: '1px solid rgba(255,165,40,0.15)',
-                color: 'rgba(255,232,180,0.72)',
-                fontSize: '13px',
-                lineHeight: 1.65,
-                gap: '8px',
-              }}
-            >
-              <div style={{ fontSize: '32px', marginBottom: '4px' }}>👥</div>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#ffd487' }}>No Guest Profiles Yet</div>
-              <div style={{ maxWidth: '380px', color: 'rgba(255,232,180,0.65)' }}>
-                Create guest sessions or finish a queued match to populate the community directory.
+          ) : accounts.length === 0 ? (
+            <div className="community-empty">
+              <div className="community-empty__icon">👥</div>
+              <div className="community-empty__title">No players yet</div>
+              <div style={{ maxWidth: '300px' }}>
+                Create an account to appear on the community board.
               </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {guests.map(player => (
-                <button
-                  key={player.guestId}
-                  onClick={() => setSelectedGuestId(player.guestId)}
-                  style={{
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    borderRadius: '14px',
-                    border: selectedGuestId === player.guestId
-                      ? '1px solid rgba(255,190,90,0.32)'
-                      : '1px solid rgba(255,165,40,0.12)',
-                    background: selectedGuestId === player.guestId
-                      ? 'linear-gradient(180deg, rgba(200,134,10,0.2) 0%, rgba(70,42,8,0.22) 100%)'
-                      : 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-                    boxShadow: '0 10px 28px rgba(0,0,0,0.24)',
-                    padding: '16px 16px 14px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px',
-                    color: 'inherit',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ color: '#fff2c8', fontSize: '15px', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {player.displayName}
-                      </div>
-                      {accountsByGuestId[player.guestId] ? (
-                        <div style={{ color: '#ffd98f', fontSize: '11px', fontWeight: 700, marginTop: '4px' }}>
-                          @{accountsByGuestId[player.guestId].handle}
-                        </div>
-                      ) : null}
-                      <div style={{ color: 'rgba(170,190,220,0.62)', fontSize: '11px', marginTop: '4px' }}>
-                        Last seen {formatDateTime(player.lastSeenAt)}
-                      </div>
-                    </div>
-                    <div style={{ color: '#7ce3aa', fontSize: '15px', fontWeight: 800, flexShrink: 0 }}>
-                      {player.rating}
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {whiteProfile?.guestId === player.guestId && (
-                      <span style={{ padding: '3px 7px', borderRadius: '999px', background: 'rgba(80,140,255,0.18)', border: '1px solid rgba(110,170,255,0.22)', color: '#dcecff', fontSize: '10px', fontWeight: 800 }}>
-                        White Seat
+            <div className="community-account-list">
+              {accounts.map(account => {
+                const presence = presenceOf(account);
+                const rated = hasRecord(account);
+                return (
+                  <button
+                    key={account.accountId}
+                    onClick={() => setSelectedAccountId(account.accountId)}
+                    className={`community-account-card${selectedAccountId === account.accountId ? ' community-account-card--selected' : ''}`}
+                  >
+                    <div className="community-account-card__top">
+                      <span className="community-account-card__handle">
+                        <span className={`community-presence-dot community-presence-dot--${presence}`} aria-hidden="true" />
+                        @{account.handle}
                       </span>
-                    )}
-                    {blackProfile?.guestId === player.guestId && (
-                      <span style={{ padding: '3px 7px', borderRadius: '999px', background: 'rgba(170,100,255,0.14)', border: '1px solid rgba(190,130,255,0.22)', color: '#eadbff', fontSize: '10px', fontWeight: 800 }}>
-                        Black Seat
+                      <span className={`community-account-card__rating${rated ? '' : ' community-account-card__rating--unrated'}`}>
+                        {ratingLabel(account)}
                       </span>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
-                    <div style={{ padding: '10px 12px', borderRadius: '10px', background: 'rgba(255,180,60,0.08)', border: '1px solid rgba(255,180,60,0.1)' }}>
-                      <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Record</div>
-                      <div style={{ color: '#ffe9b5', fontSize: '13px', fontWeight: 800, marginTop: '4px' }}>{statLabel(player)}</div>
                     </div>
-                    <div style={{ padding: '10px 12px', borderRadius: '10px', background: 'rgba(100,160,255,0.08)', border: '1px solid rgba(120,180,255,0.1)' }}>
-                      <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Matches</div>
-                      <div style={{ color: '#d8eaff', fontSize: '13px', fontWeight: 800, marginTop: '4px' }}>{player.matchesPlayed}</div>
+                    <div className="community-account-card__meta">
+                      {rated
+                        ? `${recordLabel(account)} · ${account.matchesPlayed} ${(account.matchesPlayed ?? 0) === 1 ? 'match' : 'matches'} · ${PRESENCE_META[presence].label}`
+                        : PRESENCE_META[presence].label}
                     </div>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', color: 'rgba(255,232,180,0.6)', fontSize: '11px' }}>
-                    <span>Joined {formatDateTime(player.createdAt)}</span>
-                    <span>Seen {formatDateTime(player.lastSeenAt)}</span>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
       </div>
 
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'linear-gradient(180deg, rgba(14,18,30,0.98) 0%, rgba(9,12,20,0.96) 100%)',
-          border: '1px solid rgba(255,165,40,0.16)',
-          borderRadius: '14px',
-          boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid rgba(255,165,40,0.12)' }}>
-          <div style={{ color: '#ffcf72', fontSize: '13px', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase' }}>Profile Focus</div>
-          <div style={{ color: 'rgba(255,232,180,0.72)', fontSize: '12px', marginTop: '4px' }}>
-            Selected guest summary from the platform profile store.
+      <div className="card-surface community-pane community-detail-pane">
+        <div className="community-pane-header">
+          <div style={{ minWidth: 0 }}>
+            <div className="community-pane-title">Player Profile</div>
+            <div className="community-pane-sub">Stats and recent matches for the selected player.</div>
           </div>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px' }}>
-          {loadingDetail && !featuredGuest ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }} aria-busy="true" aria-label="Loading guest profile">
-              <div
-                style={{
-                  height: '140px',
-                  borderRadius: '16px',
-                  background: 'linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%)',
-                  backgroundSize: '200% 100%',
-                  animation: 'shimmer 1.8s infinite',
-                  border: '1px solid rgba(255,185,70,0.15)',
-                }}
-              />
-              <div
-                style={{
-                  height: '80px',
-                  borderRadius: '12px',
-                  background: 'linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 100%)',
-                  backgroundSize: '200% 100%',
-                  animation: 'shimmer 1.8s infinite',
-                  border: '1px solid rgba(255,165,40,0.08)',
-                }}
-              />
-            </div>
-          ) : !featuredGuest ? (
-            <div style={{ color: 'rgba(255,232,180,0.65)', fontSize: '13px' }}>Select a guest from the directory to inspect their profile.</div>
+        <div className="community-body">
+          {matchesError && <div className="community-alert" role="alert">{matchesError}</div>}
+
+          {!featuredAccount ? (
+            <div className="community-detail-empty">Select a player from the list to see their profile.</div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ padding: '18px', borderRadius: '16px', background: 'linear-gradient(180deg, rgba(200,134,10,0.18) 0%, rgba(70,42,8,0.22) 100%)', border: '1px solid rgba(255,185,70,0.18)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '14px', alignItems: 'flex-start' }}>
+            <div className="community-stack">
+              <div className="community-detail-header-card">
+                <div className="community-detail-header-card__top">
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ color: '#fff2c8', fontSize: '22px', fontWeight: 900 }}>{featuredGuest.displayName}</div>
-                    {featuredAccount ? (
-                      <div style={{ color: '#ffd98f', fontSize: '12px', fontWeight: 700, marginTop: '6px' }}>@{featuredAccount.handle}</div>
-                    ) : (
-                      <div style={{ color: 'rgba(255,232,180,0.62)', fontSize: '12px', marginTop: '6px' }}>Guest player · joined {formatDateTime(featuredGuest.createdAt)}</div>
-                    )}
+                    <div className="community-detail-header-card__name">@{featuredAccount.handle}</div>
+                    <div className="community-detail-header-card__meta">
+                      <span style={{ color: PRESENCE_META[featuredPresence ?? 'offline'].color, fontWeight: 700 }}>
+                        {PRESENCE_META[featuredPresence ?? 'offline'].label}
+                      </span>
+                      {' · joined '}
+                      {formatDateTime(featuredAccount.createdAt)}
+                    </div>
                   </div>
-                  <div style={{ color: '#7ce3aa', fontSize: '28px', fontWeight: 900 }}>{featuredGuest.rating}</div>
+                  <div>
+                    <span className="community-detail-header-card__rating">{ratingLabel(featuredAccount)}</span>
+                    <span className="community-detail-header-card__rating-label">Ladder</span>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
-                  {featuredAccount && (
-                    <span style={{ padding: '5px 9px', borderRadius: '999px', background: 'rgba(255,200,100,0.14)', border: '1px solid rgba(255,210,120,0.24)', color: '#ffe8af', fontSize: '11px', fontWeight: 800 }}>
-                      @{featuredAccount.handle}
-                    </span>
-                  )}
-                  {whiteProfile?.guestId === featuredGuest.guestId && (
-                    <span style={{ padding: '5px 9px', borderRadius: '999px', background: 'rgba(80,140,255,0.18)', border: '1px solid rgba(110,170,255,0.22)', color: '#dcecff', fontSize: '11px', fontWeight: 800 }}>
-                      Current White Player
-                    </span>
-                  )}
-                  {blackProfile?.guestId === featuredGuest.guestId && (
-                    <span style={{ padding: '5px 9px', borderRadius: '999px', background: 'rgba(170,100,255,0.14)', border: '1px solid rgba(190,130,255,0.22)', color: '#eadbff', fontSize: '11px', fontWeight: 800 }}>
-                      Current Black Player
-                    </span>
-                  )}
-                  <button
-                    onClick={() => onOpenGuestHistory?.(featuredGuest.guestId)}
-                    style={{
-                      padding: '5px 9px',
-                      borderRadius: '999px',
-                      background: 'rgba(255,255,255,0.06)',
-                      border: '1px solid rgba(255,255,255,0.12)',
-                      color: '#fff1c7',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      cursor: onOpenGuestHistory ? 'pointer' : 'default',
-                    }}
-                  >
-                    Full History
+
+                <div className="community-detail-actions">
+                  <button className="btn-ghost" onClick={() => onOpenAccount?.(featuredAccount.handle)} disabled={!onOpenAccount}>
+                    Open Full Profile
                   </button>
-                  {featuredAccount && (
-                    <button
-                      onClick={() => onOpenAccount?.(featuredAccount.handle)}
-                      style={{
-                        padding: '5px 9px',
-                        borderRadius: '999px',
-                        background: 'rgba(255,180,60,0.10)',
-                        border: '1px solid rgba(255,180,60,0.20)',
-                        color: '#ffe9b1',
-                        fontSize: '11px',
-                        fontWeight: 800,
-                        cursor: onOpenAccount ? 'pointer' : 'default',
-                      }}
-                    >
-                      Open Account Profile
-                    </button>
-                  )}
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px' }}>
-                {[
-                  { label: 'Matches', value: featuredGuest.matchesPlayed, color: '#d8eaff' },
-                  { label: 'Wins', value: featuredGuest.wins, color: '#8ef0b6' },
-                  { label: 'Losses', value: featuredGuest.losses, color: '#ffb3a0' },
-                  { label: 'Draws', value: featuredGuest.draws, color: '#ffe2a5' },
-                ].map(stat => (
-                  <div key={stat.label} style={{ padding: '14px 14px 12px', borderRadius: '12px', background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,165,40,0.08)' }}>
-                    <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>{stat.label}</div>
-                    <div style={{ color: stat.color, fontSize: '20px', fontWeight: 900, marginTop: '6px' }}>{stat.value}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ padding: '16px', borderRadius: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,165,40,0.08)', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '14px' }}>
-                <div>
-                  <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Joined</div>
-                  <div style={{ color: '#fff2c8', fontSize: '13px', fontWeight: 700, marginTop: '6px' }}>{formatDateTime(featuredGuest.createdAt)}</div>
+              {hasRecord(featuredAccount) ? (
+                (() => {
+                  const played = featuredAccount.matchesPlayed ?? 0;
+                  const winRate = played > 0 ? Math.round(((featuredAccount.wins ?? 0) / played) * 100) : null;
+                  const stats: Array<{ label: string; value: number | string; color: string; hint?: string }> = [
+                    { label: 'Matches', value: played, color: '#d8eaff', hint: winRate !== null ? `${winRate}% won` : undefined },
+                    { label: 'Wins', value: featuredAccount.wins ?? 0, color: '#8ef0b6' },
+                    { label: 'Losses', value: featuredAccount.losses ?? 0, color: '#ffb3a0' },
+                    { label: 'Draws', value: featuredAccount.draws ?? 0, color: '#ffe2a5' },
+                  ];
+                  return (
+                    <div className="community-stat-grid">
+                      {stats.map(stat => (
+                        <div key={stat.label} className="community-stat-tile">
+                          <div className="community-stat-tile__label">{stat.label}</div>
+                          <div className="community-stat-tile__value" style={{ color: stat.color }}>{stat.value}</div>
+                          {stat.hint && <div className="community-stat-tile__hint">{stat.hint}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="community-empty" style={{ padding: '24px 16px' }}>
+                  <div className="community-empty__title">No ranked games yet</div>
+                  <div>This player hasn&apos;t finished a rated match, so there are no stats to show.</div>
                 </div>
-                <div>
-                  <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Last Seen</div>
-                  <div style={{ color: '#fff2c8', fontSize: '13px', fontWeight: 700, marginTop: '6px' }}>{formatDateTime(featuredGuest.lastSeenAt)}</div>
-                </div>
-                {featuredAccount && (
-                  <>
-                    <div>
-                      <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Account Last Seen</div>
-                      <div style={{ color: '#fff2c8', fontSize: '13px', fontWeight: 700, marginTop: '6px' }}>{formatDateTime(featuredAccount.lastSeenAt)}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Account Ladder</div>
-                      <div style={{ color: '#fff2c8', fontSize: '13px', fontWeight: 700, marginTop: '6px' }}>
-                        {featuredAccount.rating ?? 1200} · {featuredAccount.matchesPlayed ?? 0} matches
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Account Record</div>
-                      <div style={{ color: '#fff2c8', fontSize: '13px', fontWeight: 700, marginTop: '6px' }}>
-                        {featuredAccount.wins ?? 0}W {featuredAccount.losses ?? 0}L {featuredAccount.draws ?? 0}D
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
+              )}
 
-              <div style={{ padding: '16px', borderRadius: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,165,40,0.08)' }}>
+              {(featuredAccount.guestCount ?? 0) > 0 && (
+                <div className="community-guests-note">
+                  Also has {featuredAccount.guestCount} linked guest session{(featuredAccount.guestCount ?? 0) === 1 ? '' : 's'} from before claiming a handle.
+                </div>
+              )}
+
+              <div className="community-matches-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
-                  <div style={{ color: '#ffcf72', fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Recent Matches</div>
-                  {loadingMatches && (
-                    <div style={{ color: 'rgba(255,232,180,0.55)', fontSize: '11px' }}>Loading...</div>
-                  )}
+                  <div className="community-matches-card__title">Recent Matches</div>
+                  {loadingMatches && <div className="community-matches-card__loading">Loading…</div>}
                 </div>
 
-                {recentMatches.length === 0 ? (
-                  <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '12px', marginTop: '12px' }}>
-                    {loadingMatches ? 'Looking up archived matches...' : 'No archived matches yet for this guest.'}
+                {!hasRecord(featuredAccount) ? (
+                  <div className="community-detail-empty" style={{ marginTop: '12px' }}>
+                    No matches to show yet.
+                  </div>
+                ) : recentMatches.length === 0 ? (
+                  <div className="community-detail-empty" style={{ marginTop: '12px' }}>
+                    {loadingMatches ? 'Looking up archived matches…' : 'No archived matches yet for this player.'}
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
                     {recentMatches.map(match => {
-                      const info = describeGuestMatch(match);
+                      const info = describeAccountMatch(match, featuredAccount.accountId);
                       return (
                         <button
                           key={match.matchId}
                           onClick={() => onOpenMatch?.(match.matchId)}
-                          style={{
-                            textAlign: 'left',
-                            cursor: onOpenMatch ? 'pointer' : 'default',
-                            padding: '12px 12px 11px',
-                            borderRadius: '12px',
-                            border: '1px solid rgba(255,165,40,0.12)',
-                            background: 'linear-gradient(180deg, rgba(18,23,36,0.95) 0%, rgba(11,14,24,0.94) 100%)',
-                            color: '#fff2c8',
-                          }}
+                          className={`community-match-row community-match-row--${info.result}`}
+                          disabled={!onOpenMatch}
                         >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
-                            <div style={{ fontSize: '12px', fontWeight: 800 }}>{info.result} vs {info.opponent}</div>
-                            <div style={{ color: 'rgba(160,184,216,0.64)', fontSize: '10px' }}>{match.status}</div>
+                          <div className="community-match-row__top">
+                            <span className="community-match-row__opponent">vs {info.opponent}</span>
+                            <span className={`community-match-row__result--${info.result}`} style={{ fontSize: '11px', fontWeight: 800, flexShrink: 0 }}>
+                              {OUTCOME_LABEL[info.result]}
+                            </span>
                           </div>
-                          <div style={{ marginTop: '6px', color: 'rgba(255,232,180,0.7)', fontSize: '11px' }}>
-                            {match.moveCount} moves{match.lastMove ? ` · last ${match.lastMove}` : ''}
-                          </div>
-                          <div style={{ marginTop: '4px', color: 'rgba(170,190,220,0.62)', fontSize: '11px' }}>
-                            {formatDateTime(match.updatedAt)}
+                          <div className="community-match-row__meta">
+                            {match.moveCount} moves · {formatDateTime(match.updatedAt)}
                           </div>
                         </button>
                       );

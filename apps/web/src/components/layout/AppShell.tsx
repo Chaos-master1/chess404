@@ -104,22 +104,10 @@ export default function AppShell({
             </div>
           </div>
 
-          <div className="app-shell__nav-group">
-            <div className="app-shell__nav-label">Core</div>
-            {primaryItems.map((item) => (
-              <SidebarItem
-                key={item.key}
-                item={item}
-                active={activeKey === item.key}
-                onClick={() => onNavigate(item.key)}
-              />
-            ))}
-          </div>
-
-          {utilityGroups.map((group, index) => (
-            <div className="app-shell__nav-group" key={`${group.label ?? 'utility'}-${index}`}>
-              {group.label ? <div className="app-shell__nav-label">{group.label}</div> : null}
-              {group.items.map((item) => (
+          <div className="app-shell__sidebar-scroll">
+            <div className="app-shell__nav-group">
+              <div className="app-shell__nav-label">Core</div>
+              {primaryItems.map((item) => (
                 <SidebarItem
                   key={item.key}
                   item={item}
@@ -128,7 +116,21 @@ export default function AppShell({
                 />
               ))}
             </div>
-          ))}
+
+            {utilityGroups.map((group, index) => (
+              <div className="app-shell__nav-group" key={`${group.label ?? 'utility'}-${index}`}>
+                {group.label ? <div className="app-shell__nav-label">{group.label}</div> : null}
+                {group.items.map((item) => (
+                  <SidebarItem
+                    key={item.key}
+                    item={item}
+                    active={activeKey === item.key}
+                    onClick={() => onNavigate(item.key)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
 
           <div className="app-shell__sidebar-footer">
             <button className={`app-shell__nav-item${activeKey === 'Account' ? ' app-shell__nav-item--active' : ''}`} onClick={onOpenAccount} aria-current={activeKey === 'Account' ? 'page' : undefined}>

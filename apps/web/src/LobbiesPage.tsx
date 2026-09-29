@@ -233,6 +233,21 @@ export default function LobbiesPage({ identity, displayName, hostedRuntime, embe
           >
             {creating ? 'Creating lobby...' : 'Create Private Invite Match'}
           </button>
+          {queue === 'rated' && (
+            <div style={{
+              marginTop: '12px',
+              padding: '10px 14px',
+              borderRadius: '10px',
+              background: 'rgba(255,180,60,0.08)',
+              border: '1px solid rgba(255,180,60,0.24)',
+              color: '#ffe7a9',
+              fontSize: '12px',
+              lineHeight: 1.6,
+              fontWeight: 600,
+            }}>
+              Rated invites can only be joined by signed-in players — guests who open this link will be asked to create an account first.
+            </div>
+          )}
         </div>
 
         <div className="stat-card" style={{ borderColor: 'rgba(120,150,255,0.14)' }}>

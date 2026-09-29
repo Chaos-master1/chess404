@@ -359,7 +359,22 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
             hostedRuntime={hostedRuntime}
             guestProfile={engineProps.whiteProfile}
             externalNotice={engine.shellAccountNotice}
-            onAuthenticated={engine.handlePrimaryShellAuthenticated}
+            onAuthenticated={(guestSession, accountSession) => {
+              // Arriving from the rated-invite prompt: after the account is
+              // minted, drop the visitor straight back into the match they
+              // were invited to. The join now carries the fresh account
+              // identity, so the gateway's rated gate passes and the empty
+              // seat is claimed. Otherwise, default shell behavior.
+              engine.handlePrimaryShellAuthenticated(guestSession, accountSession);
+              if (engine.ratedInviteSignInRequired) {
+                engine.setRatedInviteSignInRequired(false);
+                const invitedMatchId = engine.requestedMatchIdRef.current;
+                if (invitedMatchId) {
+                  setActivePage('Match');
+                  void engine.bootstrapAuthoritativeMatch({ force: true });
+                }
+              }
+            }}
             onOpenAccount={() => setActivePage('Account')}
             onContinue={() => setActivePage('Play')}
             onAuthStateChange={engine.syncPrimaryAccountIdentity}
@@ -419,6 +434,68 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
                     </button>
                     <button
                       onClick={() => { engine.setMatchLoadError(null); setActivePage('Play'); }}
+                      style={{
+                        padding:'12px 22px',
+                        background:'rgba(255,255,255,0.03)',
+                        color:'rgba(255,232,180,0.82)',
+                        border:'1px solid rgba(255,255,255,0.10)',
+                        borderRadius:'10px',
+                        cursor:'pointer',
+                        fontSize:'13px',
+                        fontWeight:700,
+                      }}
+                    >
+                      Back To Play Hub
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </ErrorBoundary>
+          ) : engine.ratedInviteSignInRequired ? (
+            <ErrorBoundary>
+              <div style={{
+                display:'flex', flex:1, minHeight:0, alignItems:'center', justifyContent:'center',
+                background:'#0a0d16', padding:'28px'
+              }}>
+                <div style={{
+                  width:'min(560px, 100%)',
+                  padding:'32px 30px',
+                  borderRadius:'20px',
+                  background:'linear-gradient(180deg, rgba(14,18,30,0.96) 0%, rgba(9,12,20,0.98) 100%)',
+                  border:'1px solid rgba(255,185,70,0.3)',
+                  boxShadow:'0 18px 60px rgba(0,0,0,0.35), 0 0 40px rgba(200,134,10,0.12)',
+                  textAlign:'center',
+                }}>
+                  <div style={{ fontSize:'32px', marginBottom:'12px' }}>{'🏆'}</div>
+                  <div style={{ fontSize:'13px', fontWeight:800, letterSpacing:'1.5px', textTransform:'uppercase', color:'#ffcf72', marginBottom:'10px' }}>
+                    Rated Match
+                  </div>
+                  <div style={{ color:'#f3e6bf', fontSize:'22px', fontWeight:800, marginBottom:'12px' }}>
+                    Create an account to enter this match
+                  </div>
+                  <div style={{ color:'rgba(255,232,180,0.72)', fontSize:'14px', lineHeight:1.65, maxWidth:'440px', margin:'0 auto 24px' }}>
+                    You followed a rated invite link. Rated games count toward the ladder, so they are for signed-in players only — guests don&apos;t carry a rating.
+                    Create a free account (or sign in) and you&apos;ll be seated into this match right after.
+                  </div>
+                  <div style={{ display:'flex', gap:'12px', justifyContent:'center', flexWrap:'wrap' }}>
+                    <button
+                      onClick={() => { engine.setRatedInviteSignInRequired(false); setActivePage('Account'); }}
+                      style={{
+                        padding:'12px 22px',
+                        background:'linear-gradient(180deg, #c8860a 0%, #7a5008 100%)',
+                        color:'#fff8e0',
+                        border:'1px solid rgba(255,180,60,0.45)',
+                        borderRadius:'10px',
+                        cursor:'pointer',
+                        fontSize:'13px',
+                        fontWeight:800,
+                        boxShadow:'0 6px 20px rgba(200,134,10,0.35)',
+                      }}
+                    >
+                      Create Account / Sign In
+                    </button>
+                    <button
+                      onClick={() => { engine.setRatedInviteSignInRequired(false); setActivePage('Play'); }}
                       style={{
                         padding:'12px 22px',
                         background:'rgba(255,255,255,0.03)',

@@ -7,12 +7,8 @@ export default function CommunityRoute() {
   const p = usePlatform();
   return (
     <CommunityPage
-      whiteProfile={p.whiteProfile}
-      blackProfile={p.blackProfile}
-      focusGuestId={p.communityFocusGuestId}
       onOpenAccount={p.openProfileHandle}
       onOpenMatch={p.openReplayMatch}
-      onOpenGuestHistory={p.openGuestHistory}
     />
   );
 }
