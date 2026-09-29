@@ -214,16 +214,28 @@ export function useMatchNav(props: UseMatchNavProps) {
             : null)
     : null;
   const activeFinishReasonLabel = finishReasonLabel(activeFinishReason);
-  // Name policy (formatPlayerLabel): a signed-in player's linked guest is
-  // renamed to their account handle server-side at claim/register/login, so
-  // a present displayName IS the handle. Anyone without a profile — guests,
-  // or a stale local profile from before that rename existed — shows as
-  // "Anonymous", never a generated placeholder name.
-  const displayedWhiteName = hostedRuntime && authoritativeMatchId
-    ? (matchSeatMeta?.whiteName ?? (computerDifficulty && viewerSeat !== 'white' ? computerDifficulty.name : undefined) ?? (viewerSeat === 'white' ? whiteProfile?.displayName : undefined) ?? 'Anonymous')
+  // Name policy: a signed-in player's linked guest carries the account
+  // handle (server renames it at claim/login AND on every account-session
+  // resume / presence heartbeat, self-healing pre-rename generated names).
+  // The server-side seat names win when present — EXCEPT generated guest
+  // names ("Ivory Bishop 101" pattern), which are legacy placeholders: a
+  // seat backed by the viewer's own profile must show the profile name or
+  // Anonymous, never a stale generated name burned in before that rename
+  // existed. Computer seats keep their "Computer <difficulty>" label.
+  const generatedNamePattern = /^[A-Z][a-z]+ [A-Z][a-z]+ \d{1,4}$/;
+  const sanitizeDisplayName = (seatName: string | undefined, profileName: string | undefined): string | undefined => {
+    if (seatName && !generatedNamePattern.test(seatName)) return seatName;
+    return profileName ?? 'Anonymous';
+  };
+  const displayedWhiteName: string = hostedRuntime && authoritativeMatchId
+    ? (computerDifficulty && viewerSeat !== 'white'
+        ? computerDifficulty.name
+        : sanitizeDisplayName(matchSeatMeta?.whiteName, viewerSeat === 'white' ? whiteProfile?.displayName : undefined) ?? 'Anonymous')
     : (whiteProfile?.displayName ?? 'Anonymous');
-  const displayedBlackName = hostedRuntime && authoritativeMatchId
-    ? (matchSeatMeta?.blackName ?? (computerDifficulty && viewerSeat !== 'black' ? computerDifficulty.name : undefined) ?? (viewerSeat === 'black' ? whiteProfile?.displayName : undefined) ?? 'Anonymous')
+  const displayedBlackName: string = hostedRuntime && authoritativeMatchId
+    ? (computerDifficulty && viewerSeat !== 'black'
+        ? computerDifficulty.name
+        : sanitizeDisplayName(matchSeatMeta?.blackName, viewerSeat === 'black' ? whiteProfile?.displayName : undefined) ?? 'Anonymous')
     : (blackProfile?.displayName ?? 'Anonymous');
   const disconnectGraceBanner = activeDisconnectGraceFor
     ? viewerSeat === activeDisconnectGraceFor

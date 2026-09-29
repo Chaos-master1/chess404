@@ -84,6 +84,12 @@ func renameLinkedGuestToHandle(guests platform.GuestDirectory, account platform.
 	if guestID == "" || handle == "" {
 		return
 	}
+	// Skip when already correct: this runs on every account-session resume
+	// (presence heartbeat every ~45s), so an unconditional write would
+	// persist the whole guest store each tick for no reason.
+	if existing, ok := guests.GetGuest(guestID); ok && strings.TrimSpace(existing.DisplayName) == handle {
+		return
+	}
 	if _, err := guests.RenameGuest(guestID, handle); err != nil && err != os.ErrNotExist {
 		log.Printf("[platform] WARN: could not rename guest %s to handle %s: %v", guestID, handle, err)
 	}

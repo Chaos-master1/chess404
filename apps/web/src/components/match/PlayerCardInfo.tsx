@@ -29,8 +29,13 @@ export default function PlayerCardInfo({ seat }: PlayerCardInfoProps) {
     <div style={{
       display:'flex', alignItems:'center', gap:'10px',
       padding:'6px 12px', borderRadius:'10px',
-      background: isTicking ? 'rgba(255,200,50,0.08)' : 'rgba(20,28,40,0.7)',
-      border: isTicking ? '1px solid rgba(255,200,50,0.25)' : '1px solid rgba(255,255,255,0.08)',
+      // Active vs idle differ ONLY by border + glow: the previous active
+      // style swapped the dark background for a near-transparent amber
+      // wash, so the thinking player's card looked see-through next to the
+      // opponent's solid one.
+      background: 'rgba(20,28,40,0.7)',
+      border: isTicking ? '1px solid rgba(255,200,50,0.55)' : '1px solid rgba(255,255,255,0.08)',
+      boxShadow: isTicking ? '0 0 14px rgba(255,200,50,0.18)' : 'none',
       transition:'all 0.3s ease',
     }}>
       <div style={{

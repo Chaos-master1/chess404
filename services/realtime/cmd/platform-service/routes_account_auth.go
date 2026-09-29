@@ -84,13 +84,18 @@ func registerAccountAuthRoutes(mux *http.ServeMux, guests platform.GuestDirector
 			}
 		}
 
-		session, ok := resumeAllowedAccountSessionOrWrite(w, accounts, moderation, payload.AccountID, payload.SessionToken)
+		accountSession, ok := resumeAllowedAccountSessionOrWrite(w, accounts, moderation, payload.AccountID, payload.SessionToken)
 		if !ok {
 			return
 		}
+		// Self-heal legacy generated guest names: the gateway resolves the
+		// account session here while creating matches, so the room's stored
+		// seat names must come from a guest that already carries the handle,
+		// not a pre-rename generated name (idempotent).
+		renameLinkedGuestToHandle(guests, accountSession.Account)
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(session)
+		_ = json.NewEncoder(w).Encode(accountSession)
 	})
 
 	mux.HandleFunc("/api/platform/account-sessions/overview", func(w http.ResponseWriter, r *http.Request) {
@@ -232,9 +237,14 @@ func registerAccountAuthRoutes(mux *http.ServeMux, guests platform.GuestDirector
 			}
 		}
 
-		if _, ok := resumeAllowedAccountSessionOrWrite(w, accounts, moderation, payload.AccountID, payload.SessionToken); !ok {
+		accountSession, ok := resumeAllowedAccountSessionOrWrite(w, accounts, moderation, payload.AccountID, payload.SessionToken)
+		if !ok {
 			return
 		}
+		// Presence heartbeat doubles as the rename self-heal tick: a guest
+		// created before the handle-rename policy shipped keeps its generated
+		// name until this runs (idempotent; skipped when already renamed).
+		renameLinkedGuestToHandle(guests, accountSession.Account)
 		session, err := accounts.TouchPresence(payload.AccountID, payload.SessionToken)
 		if err != nil {
 			writeAccountSessionError(w, err)
