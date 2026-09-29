@@ -53,16 +53,6 @@ export function MatchBoardView() {
     winner,
     topSeat,
     bottomSeat,
-    topPlayerName,
-    bottomPlayerName,
-    topSeatBadge,
-    bottomSeatBadge,
-    displayedWhiteRating,
-    displayedBlackRating,
-    displayedWhiteName,
-    displayedBlackName,
-    whiteSeatBadge,
-    blackSeatBadge,
     timeW,
     timeB,
     clockActive,
@@ -242,35 +232,6 @@ export function MatchBoardView() {
           </button>
         </div>
         <PlayerCardInfo seat={topSeat} />
-        {false && (
-        <div style={{
-          background: topSeat === 'white' ? 'rgba(8,45,18,0.50)' : 'rgba(40,10,80,0.50)',
-          backdropFilter:'blur(16px)', WebkitBackdropFilter:'blur(16px)',
-          border: topSeat === 'white' ? '1px solid rgba(60,220,110,0.45)' : '1px solid rgba(200,120,255,0.45)',
-          borderRadius:'16px', padding:'12px 16px',
-          display:'flex', alignItems:'center', gap:'12px',
-          boxShadow: topSeat === 'white'
-            ? '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(80,240,130,0.2), 0 0 30px rgba(30,180,70,0.2)'
-            : '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(220,140,255,0.2), 0 0 30px rgba(160,60,240,0.2)',
-        }}>
-          <div style={{ width:'58px', height:'58px', borderRadius:'50%', flexShrink:0, background:'linear-gradient(135deg, #1a0a30, #0d0520)', border:'2px solid rgba(150,100,220,0.7)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'28px', boxShadow:'0 0 20px rgba(150,100,220,0.5)' }}>🕵️</div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-              <div style={{ color: topSeat === 'white' ? '#d0fce8' : '#e8d8ff', fontWeight:700, fontSize:'16px', letterSpacing:'0.3px' }}>{topPlayerName}</div>
-              {topSeatBadge && (
-                <span style={{ padding:'2px 7px', borderRadius:'999px', background: topSeatBadge === 'You' ? (topSeat === 'white' ? 'rgba(74,222,128,0.16)' : 'rgba(96,165,250,0.18)') : 'rgba(255,255,255,0.06)', border: topSeatBadge === 'You' ? (topSeat === 'white' ? '1px solid rgba(74,222,128,0.32)' : '1px solid rgba(96,165,250,0.35)') : '1px solid rgba(255,255,255,0.10)', color: topSeatBadge === 'You' ? (topSeat === 'white' ? '#86efac' : '#93c5fd') : 'rgba(255,255,255,0.6)', fontSize:'9px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.8px' }}>
-                  {topSeatBadge}
-                </span>
-              )}
-            </div>
-            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginTop:'5px' }}>
-              <span style={{ color:'#b088f0', fontSize:'12px', fontWeight:600 }}>♟ {displayedBlackRating}</span>
-              <span style={{ color: timeB <= 30000 ? '#ff5555' : '#f0a030', fontSize:'13px', fontFamily:'monospace', fontWeight:700, background: tickingState==='black'&&clockActive&&!over ? 'rgba(240,160,48,0.18)' : 'rgba(0,0,0,0.3)', padding:'2px 8px', borderRadius:'5px', border:'1px solid rgba(240,160,48,0.2)' }}>⏱ {fmtClock(timeB)}</span>
-            </div>
-          </div>
-          <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:'#2ecc71', boxShadow:'0 0 12px #2ecc71', flexShrink:0 }} />
-        </div>
-        )}
 
         {/* Card preview panel */}
         <div style={{
@@ -509,33 +470,6 @@ export function MatchBoardView() {
         </div>
 
         <PlayerCardInfo seat={bottomSeat} />
-        {false && (
-        <div style={{
-          background:'rgba(8,45,18,0.50)',
-          backdropFilter:'blur(16px)', WebkitBackdropFilter:'blur(16px)',
-          border:'1px solid rgba(60,220,110,0.45)',
-          borderRadius:'16px', padding:'12px 16px',
-          display:'flex', alignItems:'center', gap:'12px',
-          boxShadow:'0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(80,240,130,0.2), 0 0 30px rgba(30,180,70,0.2)',
-        }}>
-          <div style={{ width:'58px', height:'58px', borderRadius:'50%', flexShrink:0, background:'linear-gradient(135deg, #0a200f, #051208)', border:'2px solid rgba(46,180,90,0.7)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'28px', boxShadow:'0 0 20px rgba(46,180,90,0.4)' }}>🧑‍💻</div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-              <div style={{ color:'#d0fce8', fontWeight:700, fontSize:'16px', letterSpacing:'0.3px' }}>{displayedWhiteName}</div>
-              {whiteSeatBadge && (
-                <span style={{ padding:'2px 7px', borderRadius:'999px', background:whiteSeatBadge === 'You' ? 'rgba(74,222,128,0.16)' : 'rgba(255,255,255,0.06)', border:whiteSeatBadge === 'You' ? '1px solid rgba(74,222,128,0.32)' : '1px solid rgba(255,255,255,0.10)', color:whiteSeatBadge === 'You' ? '#86efac' : 'rgba(255,255,255,0.6)', fontSize:'9px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.8px' }}>
-                  {whiteSeatBadge}
-                </span>
-              )}
-            </div>
-            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginTop:'5px' }}>
-              <span style={{ color:'#52c77a', fontSize:'12px', fontWeight:600 }}>♟ {displayedWhiteRating}</span>
-              <span style={{ color: timeW <= 30000 ? '#ff5555' : '#f0a030', fontSize:'13px', fontFamily:'monospace', fontWeight:700, background: tickingState==='white'&&clockActive&&!over ? 'rgba(240,160,48,0.18)' : 'rgba(0,0,0,0.3)', padding:'2px 8px', borderRadius:'5px', border:'1px solid rgba(240,160,48,0.2)' }}>⏱ {fmtClock(timeW)}</span>
-            </div>
-          </div>
-          <div style={{ width:'10px', height:'10px', borderRadius:'50%', background:'#2ecc71', boxShadow:'0 0 12px #2ecc71', flexShrink:0 }} />
-        </div>
-        )}
       </div>
 
       {/* ── Board column ── */}

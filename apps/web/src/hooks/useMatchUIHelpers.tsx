@@ -10,8 +10,9 @@ import { AUTHORITATIVE_JOKER_MECHANICS } from './useCardInteraction';
 export interface UseMatchUIHelpersProps {
   displayedWhiteName: string;
   displayedBlackName: string;
-  displayedWhiteRating: string | number;
-  displayedBlackRating: string | number;
+  /** null hides the rating line (waiting/guest seats have no real rating). */
+  displayedWhiteRating: string | number | null;
+  displayedBlackRating: string | number | null;
   whiteSeatBadge: string | null;
   blackSeatBadge: string | null;
   timeW: number;
@@ -77,7 +78,8 @@ export function useMatchUIHelpers(props: UseMatchUIHelpersProps) {
       <PlayerBar
         seat={seat}
         playerName={seatName}
-        rating={seatRating}
+        rating={seatRating ?? ''}
+        ratingHidden={seatRating == null}
         timeMs={seatTime}
         isClockActive={seatTicking}
         seatBadge={seatBadge ?? undefined}

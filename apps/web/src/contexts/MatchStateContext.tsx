@@ -46,6 +46,8 @@ export interface MatchStateContextShape {
   displayedBlackRating: number | null;
   displayedWhiteName: string | null;
   displayedBlackName: string | null;
+  whiteSeatWaiting: boolean;
+  blackSeatWaiting: boolean;
   whiteSeatBadge: string | null;
   blackSeatBadge: string | null;
   doubleMove: any | null;

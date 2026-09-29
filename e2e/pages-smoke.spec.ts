@@ -48,6 +48,29 @@ test.describe('all routes render clean', () => {
   }
 });
 
+test.describe('account page identity', () => {
+  test('account page never shows seat-panel ghosts or raw identity dumps', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto('/account', { waitUntil: 'domcontentloaded' });
+    await dismissOnboarding(page);
+    await page.waitForTimeout(4_000);
+
+    const body = (await page.locator('body').innerText().catch(() => '')) ?? '';
+
+    // The local-sandbox "two seats" vocabulary must never leak onto the
+    // hosted account page (ghost panel read a stale second-seat slot).
+    expect(body).not.toMatch(/white seat account/i);
+    expect(body).not.toMatch(/black seat account/i);
+
+    // Raw internal identifiers stay behind the collapsed disclosure, and the
+    // disclosure is closed by default, so the first paint shows none of them.
+    expect(body).not.toMatch(/guest_[0-9a-f]{8,}/);
+    expect(body).not.toMatch(/accttok_/);
+
+    expect(errors.pageErrors, 'account page uncaught exceptions').toEqual([]);
+  });
+});
+
 test.describe('dev-only routes stay private', () => {
   for (const route of BLOCKED_ROUTES) {
     test(`${route} is not served in production`, async ({ page }) => {

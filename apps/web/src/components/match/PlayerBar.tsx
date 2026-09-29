@@ -4,6 +4,8 @@ export interface PlayerBarProps {
   seat: 'white' | 'black';
   playerName: string;
   rating: string | number;
+  /** True when the seat has no real rating (waiting/guest): render nothing. */
+  ratingHidden?: boolean;
   timeMs: number;
   isClockActive: boolean;
   seatBadge?: string;
@@ -20,6 +22,7 @@ export function PlayerBar({
   seat,
   playerName,
   rating,
+  ratingHidden = false,
   timeMs,
   isClockActive,
   seatBadge
@@ -40,7 +43,7 @@ export function PlayerBar({
           {seatBadge && <span className={`badge ${seatBadge === 'You' ? 'badge--success' : ''}`}>{seatBadge}</span>}
         </div>
         <div className="player-bar__stats">
-          <span className="player-bar__rating">♟ {rating}</span>
+          {!ratingHidden && <span className="player-bar__rating">♟ {rating}</span>}
           <span className={`player-bar__clock mono ${timeUrgent ? 'player-bar__clock--urgent' : ''} ${isClockActive ? 'player-bar__clock--active' : ''}`}>
             ⏱ {formatClock(timeMs)}
           </span>

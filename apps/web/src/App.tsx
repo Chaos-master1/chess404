@@ -47,7 +47,7 @@ export default function App({ runtimeConfig, children }: { runtimeConfig?: { mat
   const [whiteProfile, setWhiteProfile] = React.useState<GuestProfile | null>(null);
   const [blackProfile, setBlackProfile] = React.useState<GuestProfile | null>(null);
   const [viewerSeat, setViewerSeat] = React.useState<PieceColor | null>(null);
-  const [matchSeatMeta, setMatchSeatMeta] = React.useState<{ whiteGuestId?: string; blackGuestId?: string; whiteName?: string; blackName?: string } | null>(null);
+  const [matchSeatMeta, setMatchSeatMeta] = React.useState<{ whiteGuestId?: string; blackGuestId?: string; whiteAccountId?: string; blackAccountId?: string; whiteName?: string; blackName?: string } | null>(null);
   const [guestProfilesReady, setGuestProfilesReady] = React.useState(false);
 
   React.useEffect(() => {

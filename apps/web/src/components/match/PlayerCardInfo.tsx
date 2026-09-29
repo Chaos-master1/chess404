@@ -13,6 +13,7 @@ export default function PlayerCardInfo({ seat }: PlayerCardInfoProps) {
   const {
     displayedWhiteName, displayedBlackName,
     displayedWhiteRating, displayedBlackRating,
+    whiteSeatWaiting, blackSeatWaiting,
     timeW, timeB, fmtClock, tickingState,
   } = useMatchState();
   const { whiteHand, blackHand } = useMatchCard();
@@ -20,6 +21,9 @@ export default function PlayerCardInfo({ seat }: PlayerCardInfoProps) {
   const isWhite = seat === 'white';
   const name = isWhite ? displayedWhiteName : displayedBlackName;
   const rating = isWhite ? displayedWhiteRating : displayedBlackRating;
+  // The invite room exists before the opponent does: show that honestly
+  // ("Waiting for opponent", no name, no rating) instead of junk defaults.
+  const waiting = isWhite ? whiteSeatWaiting : blackSeatWaiting;
   const time = isWhite ? timeW : timeB;
   const isTicking = tickingState === seat;
   const hand = isWhite ? whiteHand : blackHand;
@@ -46,8 +50,15 @@ export default function PlayerCardInfo({ seat }: PlayerCardInfoProps) {
       }} />
       <div style={{ flex:1, display:'flex', alignItems:'center', gap:'8px' }}>
         <div>
-          <div style={{ fontWeight:700, fontSize:'12px', color:'#f0e6d0' }}>{name}</div>
-          {rating != null && (
+          <div style={{
+            fontWeight: waiting ? 600 : 700,
+            fontSize:'12px',
+            color: waiting ? 'rgba(240,230,208,0.55)' : '#f0e6d0',
+            fontStyle: waiting ? 'italic' : 'normal',
+          }}>
+            {waiting ? 'Waiting for opponent — share the invite link' : name}
+          </div>
+          {!waiting && rating != null && (
             <div style={{ fontSize:'10px', color:'rgba(200,190,170,0.7)' }}>Rating: {rating}</div>
           )}
         </div>

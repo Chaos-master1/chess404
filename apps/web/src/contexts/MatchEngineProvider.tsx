@@ -70,6 +70,8 @@ export default function MatchEngineProvider(props: MatchEngineProviderProps) {
     displayedBlackRating: engine.displayedBlackRating,
     displayedWhiteName: engine.displayedWhiteName,
     displayedBlackName: engine.displayedBlackName,
+    whiteSeatWaiting: engine.whiteSeatWaiting,
+    blackSeatWaiting: engine.blackSeatWaiting,
     whiteSeatBadge: engine.whiteSeatBadge,
     blackSeatBadge: engine.blackSeatBadge,
     doubleMove: engine.doubleMove,

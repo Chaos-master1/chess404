@@ -174,6 +174,8 @@ export interface UseMatchEngineProps {
   setMatchSeatMeta: React.Dispatch<React.SetStateAction<{
     whiteGuestId?: string;
     blackGuestId?: string;
+    whiteAccountId?: string;
+    blackAccountId?: string;
     whiteName?: string;
     blackName?: string;
   } | null>>;
@@ -507,6 +509,8 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     setMatchSeatMeta({
       whiteGuestId: nextRoomMeta.whiteGuestId,
       blackGuestId: nextRoomMeta.blackGuestId,
+      whiteAccountId: nextRoomMeta.whiteAccountId,
+      blackAccountId: nextRoomMeta.blackAccountId,
       whiteName: nextRoomMeta.whiteName,
       blackName: nextRoomMeta.blackName,
     });

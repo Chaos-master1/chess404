@@ -22,6 +22,8 @@ import {
 import { modeLabel, queueLabel, finishReasonLabel } from '../lib/match-labels';
 import { buildLiveMatchUrl, buildReplayPageUrl } from '../lib/session-storage';
 import { readStoredRoomMeta } from '../lib/match-service';
+import { accountRatingForMode, resolveSeatIdentity, type MatchSeatMeta } from '../lib/seat-identity';
+import { useOpponentAccountProfile } from './useOpponentAccountProfile';
 
 interface UseMatchNavProps {
   authoritativeMatchId: string | null;
@@ -46,12 +48,7 @@ interface UseMatchNavProps {
   mate: boolean;
   whiteProfile: GuestProfile | null;
   blackProfile: GuestProfile | null;
-  matchSeatMeta: {
-    whiteGuestId?: string;
-    blackGuestId?: string;
-    whiteName?: string;
-    blackName?: string;
-  } | null;
+  matchSeatMeta: MatchSeatMeta | null;
   authoritativeDisconnectGraceFor: PieceColor | null;
   authoritativeDisconnectGraceDeadline: string | null;
   authoritativeWhiteConnected: boolean;
@@ -214,46 +211,70 @@ export function useMatchNav(props: UseMatchNavProps) {
             : null)
     : null;
   const activeFinishReasonLabel = finishReasonLabel(activeFinishReason);
-  // Name policy: a signed-in player's linked guest carries the account
-  // handle (server renames it at claim/login AND on every account-session
-  // resume / presence heartbeat, self-healing pre-rename generated names).
-  // The server-side seat names win when present — EXCEPT generated guest
-  // names ("Ivory Bishop 101" pattern), which are legacy placeholders: a
-  // seat backed by the viewer's own profile must show the profile name or
-  // Anonymous, never a stale generated name burned in before that rename
-  // existed. Computer seats keep their "Computer <difficulty>" label.
-  const generatedNamePattern = /^[A-Z][a-z]+ [A-Z][a-z]+ \d{1,4}$/;
-  const sanitizeDisplayName = (seatName: string | undefined, profileName: string | undefined): string | undefined => {
-    if (seatName && !generatedNamePattern.test(seatName)) return seatName;
-    return profileName ?? 'Anonymous';
-  };
+  // Seat identity policy (lib/seat-identity.ts): an empty seat in a waiting
+  // room renders "Waiting for opponent" with no rating; an account-backed
+  // seat renders @handle + the account's rating for this mode; a pure guest
+  // renders "Guest" with no rating — never a generated "Ivory Bishop 101"
+  // name and never a borrowed 1200. The viewer's own seat keeps the local
+  // profile, and computer seats keep their difficulty label. The opponent's
+  // public account profile is fetched once per opponent (cached) so the real
+  // identity appears live the moment the snapshot announces the join — no
+  // reload involved.
+  const activeMatchModeId = activeMatchRoomMeta?.modeId;
+  const whiteAccountId = matchSeatMeta?.whiteAccountId ?? null;
+  const blackAccountId = matchSeatMeta?.blackAccountId ?? null;
+  const whiteAccountProfile = useOpponentAccountProfile(
+    hostedRuntime && authoritativeMatchId && viewerSeat !== 'white' ? whiteAccountId : null,
+  );
+  const blackAccountProfile = useOpponentAccountProfile(
+    hostedRuntime && authoritativeMatchId && viewerSeat !== 'black' ? blackAccountId : null,
+  );
+  const seatWaiting = (seat: PieceColor): boolean => Boolean(
+    hostedRuntime && authoritativeMatchId !== null && authoritativeStatus === 'waiting'
+    && !(seat === 'white' ? matchSeatMeta?.whiteGuestId : matchSeatMeta?.blackGuestId),
+  );
+  const whiteWaiting = seatWaiting('white');
+  const blackWaiting = seatWaiting('black');
+  const whiteIdentity = resolveSeatIdentity({
+    waiting: whiteWaiting,
+    isViewer: viewerSeat === 'white',
+    viewerProfileName: whiteProfile?.displayName,
+    viewerRating: guestRatingForMode(whiteProfile, activeMatchModeId) ?? null,
+    seatName: matchSeatMeta?.whiteName,
+    accountHandle: whiteAccountProfile?.handle,
+    accountRating: whiteAccountProfile ? accountRatingForMode(whiteAccountProfile, activeMatchModeId) : null,
+    computerSeat: computerDifficulty && viewerSeat !== 'white' ? computerDifficulty : null,
+  });
+  const blackIdentity = resolveSeatIdentity({
+    waiting: blackWaiting,
+    isViewer: viewerSeat === 'black',
+    viewerProfileName: viewerSeat === 'black' ? whiteProfile?.displayName : blackProfile?.displayName,
+    viewerRating: guestRatingForMode(viewerSeat === 'black' ? whiteProfile : blackProfile, activeMatchModeId) ?? null,
+    seatName: matchSeatMeta?.blackName,
+    accountHandle: blackAccountProfile?.handle,
+    accountRating: blackAccountProfile ? accountRatingForMode(blackAccountProfile, activeMatchModeId) : null,
+    computerSeat: computerDifficulty && viewerSeat !== 'black' ? computerDifficulty : null,
+  });
   const displayedWhiteName: string = hostedRuntime && authoritativeMatchId
-    ? (computerDifficulty && viewerSeat !== 'white'
-        ? computerDifficulty.name
-        : sanitizeDisplayName(matchSeatMeta?.whiteName, viewerSeat === 'white' ? whiteProfile?.displayName : undefined) ?? 'Anonymous')
+    ? whiteIdentity.name
     : (whiteProfile?.displayName ?? 'Anonymous');
   const displayedBlackName: string = hostedRuntime && authoritativeMatchId
-    ? (computerDifficulty && viewerSeat !== 'black'
-        ? computerDifficulty.name
-        : sanitizeDisplayName(matchSeatMeta?.blackName, viewerSeat === 'black' ? whiteProfile?.displayName : undefined) ?? 'Anonymous')
+    ? blackIdentity.name
     : (blackProfile?.displayName ?? 'Anonymous');
+  const whiteSeatWaiting = whiteIdentity.waiting;
+  const blackSeatWaiting = blackIdentity.waiting;
   const disconnectGraceBanner = activeDisconnectGraceFor
     ? viewerSeat === activeDisconnectGraceFor
       ? `Your seat is in reconnect grace. Rejoin before ${disconnectGraceDeadlineLabel ?? 'the timer expires'} or the match will be forfeited.`
       : `${activeDisconnectGraceFor === 'white' ? displayedWhiteName : displayedBlackName} disconnected. The match will forfeit if they do not return by ${disconnectGraceDeadlineLabel ?? 'the end of the grace window'}.`
     : null;
-  // Ratings follow the match's mode: a guest's open/hidden ladders are
-  // separate (server maintains both), so the card shows the ladder the
-  // current game feeds. Falls back to the blended rating for guests/rooms
-  // without a per-mode ladder yet. Computer difficulty keeps its own rating.
-  const activeMatchModeId = activeMatchRoomMeta?.modeId;
-  const whiteGuestRating = viewerSeat === 'white' ? whiteProfile : blackProfile;
-  const blackGuestRating = viewerSeat === 'black' ? whiteProfile : blackProfile;
-  const displayedWhiteRating = hostedRuntime && authoritativeMatchId
-    ? (computerDifficulty && viewerSeat !== 'white' ? computerDifficulty.rating : guestRatingForMode(whiteGuestRating, activeMatchModeId) ?? 1200)
+  // Ratings: null hides the line entirely (waiting/guest/unknown seats).
+  // Outside a hosted match the local sandbox keeps its historical behavior.
+  const displayedWhiteRating: number | null = hostedRuntime && authoritativeMatchId
+    ? whiteIdentity.rating
     : guestRatingForMode(whiteProfile, activeMatchModeId) ?? 1200;
-  const displayedBlackRating = hostedRuntime && authoritativeMatchId
-    ? (computerDifficulty && viewerSeat !== 'black' ? computerDifficulty.rating : guestRatingForMode(blackGuestRating, activeMatchModeId) ?? 1200)
+  const displayedBlackRating: number | null = hostedRuntime && authoritativeMatchId
+    ? blackIdentity.rating
     : guestRatingForMode(blackProfile, activeMatchModeId) ?? 1200;
   const activeMatchModeLabel = modeLabel(activeMatchRoomMeta?.modeId);
   const activeMatchQueueLabel = queueLabel(activeMatchRoomMeta?.queue);
@@ -444,6 +465,8 @@ export function useMatchNav(props: UseMatchNavProps) {
     activeFinishReasonLabel,
     displayedWhiteName,
     displayedBlackName,
+    whiteSeatWaiting,
+    blackSeatWaiting,
     disconnectGraceBanner,
     displayedWhiteRating,
     displayedBlackRating,

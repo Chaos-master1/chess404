@@ -283,6 +283,8 @@ function describeOpponent(entry: MatchArchiveEntry, accountId: string): string {
 interface AccountPageProps {
   whiteProfile?: GuestProfile | null;
   blackProfile?: GuestProfile | null;
+  /** Hosted platform: one browser = one player, so only one seat panel. */
+  hostedRuntime?: boolean | null;
   externalNotice?: string | null;
   onOpenProfile?: (handle: string) => void;
   onSeatAuthenticated?: (side: 'white' | 'black', guestSession: GuestSession, accountSession: AccountSession) => void;
@@ -1110,6 +1112,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
     }
   }, [activeAccount?.accountId, verificationAccountId]);
 
+  const [showSessionDetails, setShowSessionDetails] = React.useState(false);
   const profile = guestProfile;
   const activeSessions = sessionOverview?.sessions ?? [];
   const currentSessionToken = accountSession?.sessionToken ?? '';
@@ -1134,10 +1137,10 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
         <div>
           <div style={{ color: '#ffcf72', fontSize: '11px', fontWeight: 800, letterSpacing: '1.8px', textTransform: 'uppercase', marginBottom: '6px' }}>{label}</div>
           <div style={{ color: '#fff4d6', fontSize: '24px', fontWeight: 800 }}>
-            {profile?.displayName ?? guestIdentity.guestId ?? 'Guest seat'}
+            {activeAccount?.handle ? `@${activeAccount.handle}` : (profile?.displayName ?? 'Guest player')}
           </div>
           <div style={{ color: 'rgba(244,232,200,0.68)', fontSize: '13px', marginTop: '6px' }}>
-            {profile ? `Guest rating ${profile.rating} · ${profile.wins}W ${profile.losses}L ${profile.draws}D` : 'Waiting for guest profile bootstrap.'}
+            {profile ? `Rating ${profile.rating} · ${profile.wins}W ${profile.losses}L ${profile.draws}D` : 'No games played yet.'}
           </div>
         </div>
         <div style={{
@@ -1149,19 +1152,49 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
           fontWeight: 700,
           background: 'rgba(255,255,255,0.04)',
         }}>
-          {accountSession ? 'Signed in locally' : activeAccount ? 'Claimed account' : 'Guest-only'}
+          {accountSession ? 'Signed in' : activeAccount ? 'Account claimed' : 'Playing as guest'}
         </div>
       </div>
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: '10px',
-      }}>
-        <MetaTile label="Guest ID" value={guestIdentity.guestId ?? 'Not available'} />
-        <MetaTile label="Guest token" value={guestIdentity.sessionToken ? 'Active' : guestIdentity.sessionSecret ? 'Secret only' : 'Missing'} />
-        <MetaTile label="Account handle" value={activeAccount?.handle ?? 'Unclaimed'} />
-        <MetaTile label="Account session" value={accountSession?.expiresAt ? `Expires ${formatDateTime(accountSession.expiresAt)}` : 'No active session'} />
+      {/* Internal seat plumbing (guest IDs, token states, account IDs) reads
+          like a debug dump to players. Keep it reachable for support but out
+          of the default view. */}
+      <div>
+        <button
+          onClick={() => setShowSessionDetails(current => !current)}
+          style={{
+            padding: '6px 10px',
+            borderRadius: '999px',
+            border: '1px solid rgba(255,255,255,0.10)',
+            background: 'rgba(255,255,255,0.03)',
+            color: 'rgba(244,232,200,0.6)',
+            fontSize: '11px',
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          {showSessionDetails ? 'Hide session details' : 'Session details'}
+        </button>
+        {showSessionDetails && (
+          <div style={{
+            marginTop: '10px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: '10px',
+          }}>
+            <MetaTile label="Guest ID" value={guestIdentity.guestId ?? 'Not available'} />
+            <MetaTile label="Guest session" value={guestIdentity.sessionToken ? 'Active' : guestIdentity.sessionSecret ? 'Secret only' : 'Not signed in'} />
+            <MetaTile label="Account handle" value={activeAccount?.handle ?? 'Unclaimed'} />
+            <MetaTile label="Account session" value={accountSession?.expiresAt ? `Expires ${formatDateTime(accountSession.expiresAt)}` : 'No active session'} />
+            {activeAccount && (
+              <>
+                <MetaTile label="Account ID" value={activeAccount.accountId} />
+                <MetaTile label="Primary guest" value={activeAccount.primaryGuestId} />
+                <MetaTile label="Linked guests" value={String(activeAccount.linkedGuestIds.length)} />
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (
@@ -1200,16 +1233,8 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
             <div className="stat-card" style={{ display: 'grid', gap: '8px' }}>
               <div style={{ color: '#fff2c8', fontSize: '18px', fontWeight: 800 }}>@{activeAccount.handle}</div>
               <div style={{ color: 'rgba(244,232,200,0.72)', fontSize: '13px' }}>
-                Account ID: <span style={{ color: '#ffe9b1', fontFamily: 'monospace' }}>{activeAccount.accountId}</span>
-              </div>
-              <div style={{ color: 'rgba(244,232,200,0.72)', fontSize: '13px' }}>
-                Primary guest: <span style={{ color: '#ffe9b1', fontFamily: 'monospace' }}>{activeAccount.primaryGuestId}</span>
-              </div>
-              <div style={{ color: 'rgba(244,232,200,0.72)', fontSize: '13px' }}>
-                Linked guests: {activeAccount.linkedGuestIds.length}
-              </div>
-              <div style={{ color: 'rgba(244,232,200,0.72)', fontSize: '13px' }}>
-                Ladder: {activeAccount.rating ?? 1200} · {activeAccount.matchesPlayed ?? 0} matches · {activeAccount.wins ?? 0}W {activeAccount.losses ?? 0}L {activeAccount.draws ?? 0}D
+                {activeAccount.matchesPlayed ?? 0} matches · {activeAccount.wins ?? 0}W {activeAccount.losses ?? 0}L {activeAccount.draws ?? 0}D
+                {activeAccount.lastSeenAt ? ` · last seen ${formatDateTime(activeAccount.lastSeenAt)}` : ''}
               </div>
               {(activeAccount.openCards || activeAccount.hiddenCards) ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px', marginTop: '4px' }}>
@@ -1225,9 +1250,6 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                   />
                 </div>
               ) : null}
-              <div style={{ color: 'rgba(244,232,200,0.72)', fontSize: '13px' }}>
-                Last seen: {formatDateTime(activeAccount.lastSeenAt)}
-              </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
                 <button
                   onClick={() => onOpenProfile?.(activeAccount.handle)}
@@ -2159,7 +2181,7 @@ function AccountSessionCard({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ color: '#fff4d6', fontSize: '14px', fontWeight: 800 }}>{label}</div>
         <div style={{ color: '#ffcf72', fontSize: '11px', fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase' }}>
-          {describeSessionTokenFingerprint(sessionToken)}
+          {sessionToken ? describeSessionTokenFingerprint(sessionToken) : 'unnamed session'}
         </div>
       </div>
       <div style={{ color: 'rgba(244,232,200,0.72)', fontSize: '12px' }}>
@@ -2313,11 +2335,22 @@ function SeasonSummaryRow({ summary }: { summary: NonNullable<AccountProfile['cu
 export default function AccountPage({
   whiteProfile = null,
   blackProfile = null,
+  hostedRuntime = false,
   externalNotice = null,
   onOpenProfile,
   onSeatAuthenticated,
   onAuthStateChange,
 }: AccountPageProps): React.ReactElement {
+  // "White/Black Seat Account" is local-sandbox vocabulary. On the hosted
+  // platform a browser owns exactly one player, so the second panel read a
+  // stale localStorage slot and rendered ghost identities ("Ember Spark 513,
+  // Guest ID Not available") — junk with no meaning for the player.
+  const seatPanels: { side: 'white' | 'black'; label: string; accent: string; guestProfile: GuestProfile | null }[] = hostedRuntime
+    ? [{ side: 'white', label: 'My Account', accent: 'rgba(255,210,120,0.34)', guestProfile: whiteProfile }]
+    : [
+        { side: 'white', label: 'White Player (this device)', accent: 'rgba(255,210,120,0.34)', guestProfile: whiteProfile },
+        { side: 'black', label: 'Black Player (this device)', accent: 'rgba(158,120,255,0.34)', guestProfile: blackProfile },
+      ];
   return (
     <div style={{
       flex: 1,
@@ -2327,20 +2360,33 @@ export default function AccountPage({
       color: '#f4e8c8',
     }}>
       <div style={{ marginBottom: '22px' }}>
-        <div style={{ color: '#ffb830', fontSize: '11px', fontWeight: 800, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '6px' }}>Account Layer</div>
-        <h2 style={{ margin: 0, fontSize: '30px', color: '#fff4d6' }}>Accounts and identity</h2>
+        <div style={{ color: '#ffb830', fontSize: '11px', fontWeight: 800, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '6px' }}>Account</div>
+        <h2 style={{ margin: 0, fontSize: '30px', color: '#fff4d6' }}>Your Chess404 account</h2>
         <div style={{ color: 'rgba(222, 210, 180, 0.72)', fontSize: '13px', marginTop: '8px', maxWidth: '760px' }}>
-          Chess404 still bridges through seat guest identity for live play, but this page now supports direct account creation, cross-device sign-in, verification, and recovery so the platform can move toward real account-first onboarding without breaking hosted matches.
+          {hostedRuntime
+            ? 'Claim a handle, keep your rating and match history across devices, and manage who is signed in where.'
+            : 'This sandbox device can seat two local players, one per side, each with its own account.'}
         </div>
       </div>
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+        gridTemplateColumns: hostedRuntime ? '1fr' : 'repeat(auto-fit, minmax(340px, 1fr))',
         gap: '18px',
       }}>
-        <AccountSeatPanel side="white" label="White Seat Account" accent="rgba(255,210,120,0.34)" guestProfile={whiteProfile} externalNotice={externalNotice} onOpenProfile={onOpenProfile} onSeatAuthenticated={onSeatAuthenticated} onAuthStateChange={onAuthStateChange} />
-        <AccountSeatPanel side="black" label="Black Seat Account" accent="rgba(158,120,255,0.34)" guestProfile={blackProfile} onOpenProfile={onOpenProfile} onSeatAuthenticated={onSeatAuthenticated} onAuthStateChange={onAuthStateChange} />
+        {seatPanels.map(panel => (
+          <AccountSeatPanel
+            key={panel.side}
+            side={panel.side}
+            label={panel.label}
+            accent={panel.accent}
+            guestProfile={panel.guestProfile}
+            externalNotice={panel.side === 'white' ? externalNotice : null}
+            onOpenProfile={onOpenProfile}
+            onSeatAuthenticated={onSeatAuthenticated}
+            onAuthStateChange={onAuthStateChange}
+          />
+        ))}
       </div>
     </div>
   );

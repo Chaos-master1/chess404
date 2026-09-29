@@ -4,7 +4,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { DEFAULT_MATCH_MODE_ID, OFFICIAL_MATCH_MODES, type MatchModeId, type PieceColor } from '@chess404/contracts';
 import { createPrivateMatch, type PrivateMatchIdentity } from './lib/private-match-service';
-import { writeStoredRoomMeta } from './lib/match-service';
+import { fetchMatch, writeStoredRoomMeta } from './lib/match-service';
 import { queueLabel } from './lib/match-labels';
 
 interface LobbiesPageProps {
@@ -77,6 +77,42 @@ export default function LobbiesPage({ identity, displayName, hostedRuntime, embe
     if (!created?.inviteUrl) return;
     await navigator.clipboard.writeText(created.inviteUrl);
   }, [created?.inviteUrl]);
+
+  // While the host stays on this page, the created card must not sit frozen
+  // on "waiting". A light poll flips it to "Opponent joined" the moment the
+  // second seat is claimed — the room itself already updates live over the
+  // WebSocket, so no reload is ever needed.
+  const pollJoinRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!created?.matchId || !created.waitingForOpponent) {
+      return;
+    }
+    let cancelled = false;
+    pollJoinRef.current = true;
+    const stop = () => { pollJoinRef.current = false; };
+    const check = async () => {
+      if (!pollJoinRef.current || cancelled) return;
+      try {
+        const snapshot = await fetchMatch(created.matchId);
+        if (cancelled || !pollJoinRef.current) return;
+        if (snapshot.match.status !== 'waiting') {
+          stop();
+          setCreated(current => current && current.matchId === created.matchId
+            ? { ...current, waitingForOpponent: false }
+            : current);
+        }
+      } catch {
+        // Transient gateway errors: keep polling until the room fills.
+      }
+    };
+    const interval = window.setInterval(() => { void check(); }, 5000);
+    void check();
+    return () => {
+      cancelled = true;
+      stop();
+      window.clearInterval(interval);
+    };
+  }, [created?.matchId, created?.waitingForOpponent]);
 
   const openRoom = React.useCallback(() => {
     if (!created?.matchId) return;
@@ -240,16 +276,36 @@ export default function LobbiesPage({ identity, displayName, hostedRuntime, embe
                 <button className="btn-secondary" onClick={() => { void copyInviteLink(); }} style={{ padding: '11px 14px' }}>Copy Invite Link</button>
                 <button className="btn-primary" onClick={openRoom} style={{ padding: '11px 14px' }}>Open Match Route</button>
               </div>
-              <div style={{ color: created.waitingForOpponent ? '#9de4b0' : '#ffd487', fontSize: '12px', lineHeight: 1.6 }}>
+              <div style={{
+                padding: '10px 12px',
+                borderRadius: '10px',
+                fontSize: '12px',
+                fontWeight: 700,
+                lineHeight: 1.6,
+                color: created.waitingForOpponent ? '#9de4b0' : '#ffd487',
+                background: created.waitingForOpponent ? 'rgba(24,120,62,0.10)' : 'rgba(168,110,22,0.10)',
+                border: created.waitingForOpponent
+                  ? '1px solid rgba(78,210,132,0.26)'
+                  : '1px solid rgba(255,180,60,0.26)',
+              }}>
                 {created.waitingForOpponent
-                  ? 'Room is live and waiting for the second seat to join.'
-                  : 'Both seats are already claimed. New visitors will spectate or see the room as full.'}
+                  ? 'Room is live and waiting for the second seat to join. This updates here automatically the moment your friend opens the link.'
+                  : 'Opponent joined — the match is live! Open the room to play.'}
               </div>
+              {!created.waitingForOpponent && (
+                <button
+                  data-testid="btn-open-live-room"
+                  className="btn-primary"
+                  onClick={openRoom}
+                  style={{ padding: '11px 14px' }}
+                >
+                  Enter The Match →
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ marginTop: '18px', padding: '14px 16px', borderRadius: '12px', background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.12)', color: 'rgba(214,224,255,0.62)', fontSize: '12px', lineHeight: 1.6 }}>
-              Create a lobby first, then copy the invite link to your phone or another browser.
-              {!hostedRuntime && <div style={{ marginTop: '8px', color: '#ffd487' }}>Localhost still keeps its dev behavior, but hosted private lobbies are now the real platform path.</div>}
+              Create a lobby first, then copy the invite link to your phone or another browser. On this device the room runs in local sandbox mode, so both seats stay on this machine.
             </div>
           )}
         </div>

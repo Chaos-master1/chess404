@@ -45,6 +45,12 @@ test.describe('private invite', () => {
     await host.goto(`/match/${matchId}`);
     await expect(host.getByTestId('board-root')).toBeVisible({ timeout: 90_000 });
 
+    // Identity policy: before the second seat is claimed the room must show
+    // an honest waiting state — no junk default name/rating on the seat card.
+    await expect(host.getByText(/waiting for opponent/i).first()).toBeVisible({ timeout: 30_000 });
+    await expect(host.getByText(/rating: 1200/i)).toHaveCount(0);
+    await expect(host.getByText(/anonymous/i)).toHaveCount(0);
+
     // Second browser opens the shared link cold: no local storage, no claim.
     await guest.goto(`/match/${matchId}`);
     await dismissOnboarding(guest);
@@ -56,6 +62,11 @@ test.describe('private invite', () => {
       guest.getByTestId('btn-resign'),
       'invitee never received a seat in the private match',
     ).toBeVisible({ timeout: 60_000 });
+
+    // The host's page must learn about the join LIVE over its WebSocket —
+    // no reload. The waiting placeholder disappears and the match starts.
+    await expect(host.getByText(/waiting for opponent/i)).toHaveCount(0, { timeout: 60_000 });
+    await expect(host.getByText(/private room is waiting/i)).toHaveCount(0, { timeout: 60_000 });
 
     await expect(guest.getByText(/missing player credentials/i)).toHaveCount(0);
     await expect(guest.getByText(/spectat/i)).toHaveCount(0);

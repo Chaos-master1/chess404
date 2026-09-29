@@ -368,6 +368,7 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
           <AccountPage
             whiteProfile={engineProps.whiteProfile}
             blackProfile={engineProps.blackProfile}
+            hostedRuntime={hostedRuntime}
             externalNotice={engine.shellAccountNotice}
             onOpenProfile={engine.openProfileHandle}
             onSeatAuthenticated={engine.handleSeatAuthenticated}

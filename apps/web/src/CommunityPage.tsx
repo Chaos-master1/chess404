@@ -284,13 +284,13 @@ export default function CommunityPage({
                       <div style={{ color: '#fff2c8', fontSize: '15px', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {player.displayName}
                       </div>
-                      {accountsByGuestId[player.guestId] && (
+                      {accountsByGuestId[player.guestId] ? (
                         <div style={{ color: '#ffd98f', fontSize: '11px', fontWeight: 700, marginTop: '4px' }}>
                           @{accountsByGuestId[player.guestId].handle}
                         </div>
-                      )}
+                      ) : null}
                       <div style={{ color: 'rgba(170,190,220,0.62)', fontSize: '11px', marginTop: '4px' }}>
-                        {player.guestId}
+                        Last seen {formatDateTime(player.lastSeenAt)}
                       </div>
                     </div>
                     <div style={{ color: '#7ce3aa', fontSize: '15px', fontWeight: 800, flexShrink: 0 }}>
@@ -386,7 +386,11 @@ export default function CommunityPage({
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '14px', alignItems: 'flex-start' }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ color: '#fff2c8', fontSize: '22px', fontWeight: 900 }}>{featuredGuest.displayName}</div>
-                    <div style={{ color: 'rgba(255,232,180,0.62)', fontSize: '12px', marginTop: '6px' }}>{featuredGuest.guestId}</div>
+                    {featuredAccount ? (
+                      <div style={{ color: '#ffd98f', fontSize: '12px', fontWeight: 700, marginTop: '6px' }}>@{featuredAccount.handle}</div>
+                    ) : (
+                      <div style={{ color: 'rgba(255,232,180,0.62)', fontSize: '12px', marginTop: '6px' }}>Guest player · joined {formatDateTime(featuredGuest.createdAt)}</div>
+                    )}
                   </div>
                   <div style={{ color: '#7ce3aa', fontSize: '28px', fontWeight: 900 }}>{featuredGuest.rating}</div>
                 </div>
@@ -466,10 +470,6 @@ export default function CommunityPage({
                 </div>
                 {featuredAccount && (
                   <>
-                    <div>
-                      <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Account ID</div>
-                      <div style={{ color: '#fff2c8', fontSize: '13px', fontWeight: 700, marginTop: '6px', fontFamily: 'monospace' }}>{featuredAccount.accountId}</div>
-                    </div>
                     <div>
                       <div style={{ color: 'rgba(255,232,180,0.58)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase' }}>Account Last Seen</div>
                       <div style={{ color: '#fff2c8', fontSize: '13px', fontWeight: 700, marginTop: '6px' }}>{formatDateTime(featuredAccount.lastSeenAt)}</div>
