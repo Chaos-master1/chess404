@@ -1233,6 +1233,26 @@ func (s *Service) finalizeAbandonedMatch(matchID string, now time.Time) {
 		c.mu.Unlock()
 		return
 	}
+	// A zombie with zero moves was never a game: abort it (no winner, no
+	// archive row) instead of recording a phantom "draw by abandonment" that
+	// would still show up as a finished match in both players' history.
+	if len(c.state.MoveHistory) == 0 {
+		markMatchFinished(c.state, "aborted", "abort", now)
+		finishEvents := []contracts.ResolvedEvent{
+			makeEvent(matchID, "match_finished", now, "system", map[string]any{
+				"result":       "abort",
+				"winner":       "aborted",
+				"disconnected": disconnectGraceBoth,
+			}),
+		}
+		c.events = append(c.events, finishEvents...)
+		snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), finishEvents, now)
+		persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
+		s.flushCommit(persistSnap, c.presence)
+		s.broadcastLocked(c, snapshot)
+		c.mu.Unlock()
+		return
+	}
 	markMatchFinished(c.state, "draw", "abandon", now)
 	finishEvents := []contracts.ResolvedEvent{
 		makeEvent(matchID, "match_finished", now, "system", map[string]any{

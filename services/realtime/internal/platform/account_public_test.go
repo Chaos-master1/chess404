@@ -286,3 +286,38 @@ func TestBuildPublicAccountProfileFallsBackToLastSeenForPresence(t *testing.T) {
 		t.Fatalf("expected profile to expose derived lastActiveAt, got %#v", profile)
 	}
 }
+
+func TestBuildAccountLeaderboardSummaryExcludesUnplayedAndComputesAllTimeClimb(t *testing.T) {
+	profiles := []PublicAccountProfile{
+		{
+			AccountID:     "acct_played",
+			Handle:        "active_player",
+			Rating:        1216,
+			MatchesPlayed: 1,
+			Wins:          1,
+		},
+		{
+			AccountID:     "acct_unplayed",
+			Handle:        "brand_new",
+			Rating:        1200,
+			MatchesPlayed: 0,
+		},
+	}
+
+	summary := BuildAccountLeaderboardSummary(profiles, "", "")
+	if summary == nil {
+		t.Fatal("expected summary, got nil")
+	}
+	if summary.Leader == nil || summary.Leader.Handle != "active_player" {
+		t.Fatalf("expected active_player as leader, got %#v", summary.Leader)
+	}
+	if summary.BiggestClimber == nil || summary.BiggestClimber.Handle != "active_player" || summary.BiggestClimber.NetDelta != 16 {
+		t.Fatalf("expected active_player with NetDelta=16 as biggest climber, got %#v", summary.BiggestClimber)
+	}
+	if summary.HighestPeak == nil || summary.HighestPeak.Handle != "active_player" {
+		t.Fatalf("expected active_player as peak holder, got %#v", summary.HighestPeak)
+	}
+	if summary.MostActive == nil || summary.MostActive.Handle != "active_player" {
+		t.Fatalf("expected active_player as most active, got %#v", summary.MostActive)
+	}
+}

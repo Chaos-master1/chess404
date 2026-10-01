@@ -305,21 +305,23 @@ func BuildAccountLeaderboardSummary(items []PublicAccountProfile, seasonID strin
 			summary.MatchCount += item.MatchesPlayed
 		}
 
-		if summary.Leader == nil || spotlight.Rating > summary.Leader.Rating || (spotlight.Rating == summary.Leader.Rating && spotlight.MatchesPlayed > summary.Leader.MatchesPlayed) {
-			candidate := spotlight
-			summary.Leader = &candidate
-		}
-		if summary.BiggestClimber == nil || spotlight.NetDelta > summary.BiggestClimber.NetDelta || (spotlight.NetDelta == summary.BiggestClimber.NetDelta && spotlight.Rating > summary.BiggestClimber.Rating) {
-			candidate := spotlight
-			summary.BiggestClimber = &candidate
-		}
-		if summary.HighestPeak == nil || spotlight.PeakRating > summary.HighestPeak.PeakRating || (spotlight.PeakRating == summary.HighestPeak.PeakRating && spotlight.Rating > summary.HighestPeak.Rating) {
-			candidate := spotlight
-			summary.HighestPeak = &candidate
-		}
-		if summary.MostActive == nil || spotlight.MatchesPlayed > summary.MostActive.MatchesPlayed || (spotlight.MatchesPlayed == summary.MostActive.MatchesPlayed && spotlight.Rating > summary.MostActive.Rating) {
-			candidate := spotlight
-			summary.MostActive = &candidate
+		if spotlight.MatchesPlayed > 0 {
+			if summary.Leader == nil || spotlight.Rating > summary.Leader.Rating || (spotlight.Rating == summary.Leader.Rating && spotlight.MatchesPlayed > summary.Leader.MatchesPlayed) {
+				candidate := spotlight
+				summary.Leader = &candidate
+			}
+			if summary.BiggestClimber == nil || spotlight.NetDelta > summary.BiggestClimber.NetDelta || (spotlight.NetDelta == summary.BiggestClimber.NetDelta && spotlight.Rating > summary.BiggestClimber.Rating) {
+				candidate := spotlight
+				summary.BiggestClimber = &candidate
+			}
+			if summary.HighestPeak == nil || spotlight.PeakRating > summary.HighestPeak.PeakRating || (spotlight.PeakRating == summary.HighestPeak.PeakRating && spotlight.Rating > summary.HighestPeak.Rating) {
+				candidate := spotlight
+				summary.HighestPeak = &candidate
+			}
+			if summary.MostActive == nil || spotlight.MatchesPlayed > summary.MostActive.MatchesPlayed || (spotlight.MatchesPlayed == summary.MostActive.MatchesPlayed && spotlight.Rating > summary.MostActive.Rating) {
+				candidate := spotlight
+				summary.MostActive = &candidate
+			}
 		}
 	}
 
@@ -556,6 +558,8 @@ func buildAccountLeaderboardSpotlight(item PublicAccountProfile, season *Account
 		spotlight.Wins = season.Wins
 		spotlight.Losses = season.Losses
 		spotlight.Draws = season.Draws
+	} else if item.MatchesPlayed > 0 {
+		spotlight.NetDelta = item.Rating - 1200
 	}
 	return spotlight
 }

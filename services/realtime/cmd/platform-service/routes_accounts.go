@@ -22,8 +22,9 @@ func registerAccountRoutes(mux *http.ServeMux, archive *platform.MatchArchiveSto
 		seasonID := strings.TrimSpace(r.URL.Query().Get("seasonId"))
 		modeID := parseOptionalModeID(r.URL.Query().Get("modeId"))
 		query := normalizeAccountQuery(r.URL.Query().Get("query"))
+		rankedOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("ranked")), "true")
 
-		cacheKey := fmt.Sprintf("%s|%s|%s|%s|%d", sortMode, seasonID, modeID, query, limit)
+		cacheKey := fmt.Sprintf("%s|%s|%s|%s|%t|%d", sortMode, seasonID, modeID, query, rankedOnly, limit)
 		if cached, ok := accountsCache.Get(cacheKey); ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Cache", "HIT")
@@ -40,6 +41,9 @@ func registerAccountRoutes(mux *http.ServeMux, archive *platform.MatchArchiveSto
 				continue
 			}
 			if modeID != "" && profile.MatchesPlayed == 0 {
+				continue
+			}
+			if rankedOnly && profile.MatchesPlayed == 0 {
 				continue
 			}
 			accountsList = append(accountsList, profile)

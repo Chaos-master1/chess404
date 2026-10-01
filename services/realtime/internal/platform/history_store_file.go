@@ -62,6 +62,12 @@ func (s *fileArchiveStore) persist(entries map[string]MatchArchiveEntry, private
 	return os.WriteFile(s.path, data, 0o644)
 }
 
+func (s *fileArchiveStore) delete(_ string) error {
+	// The file backend rewrites the whole map on each persist; the in-memory
+	// delete in MatchArchiveStore.Upsert plus the next persist removes the row.
+	return nil
+}
+
 func (s *fileArchiveStore) close() error {
 	return nil
 }

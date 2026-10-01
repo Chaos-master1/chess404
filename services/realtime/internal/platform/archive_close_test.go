@@ -126,6 +126,8 @@ func (b *blockingPersistBackend) persist(entries map[string]MatchArchiveEntry, p
 
 func (b *blockingPersistBackend) backend() string { return b.delegate.backend() }
 
+func (b *blockingPersistBackend) delete(matchID string) error { return b.delegate.delete(matchID) }
+
 func (b *blockingPersistBackend) load() (map[string]MatchArchiveEntry, map[string]MatchArchivePrivateEntry, error) {
 	return b.delegate.load()
 }

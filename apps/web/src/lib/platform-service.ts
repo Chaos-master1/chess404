@@ -1419,6 +1419,7 @@ export async function fetchAccountLeaderboard(limit = 24, sort: 'recent' | 'rati
   const params = new URLSearchParams({
     limit: String(limit),
     sort,
+    ranked: 'true',
   });
   if (seasonId) {
     params.set('seasonId', seasonId);

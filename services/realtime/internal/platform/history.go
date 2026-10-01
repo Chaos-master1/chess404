@@ -247,6 +247,21 @@ func (s *MatchArchiveStore) Upsert(snapshot contracts.MatchSnapshotResponse) err
 	}
 
 	match := snapshot.Match
+	// Aborted games (early abort before black's first reply, or both players
+	// vanishing with zero moves) are not real games: they must not persist to
+	// the archive at all, so they never appear in history, watch, or replays,
+	// and can never be misread as a timeout win for the other seat. The
+	// match may have been archived earlier while it was live, so the abort
+	// must actively DELETE the stored row, not just skip the upsert.
+	if strings.EqualFold(strings.TrimSpace(match.Winner), "aborted") || strings.EqualFold(strings.TrimSpace(match.FinishReason), "abort") {
+		delete(s.entries, match.MatchID)
+		delete(s.private, match.MatchID)
+		if s.store != nil {
+			_ = s.store.delete(match.MatchID)
+		}
+		delete(s.dirty, match.MatchID)
+		return nil
+	}
 	entry := MatchArchiveEntry{
 		MatchID:        match.MatchID,
 		Status:         match.Status,

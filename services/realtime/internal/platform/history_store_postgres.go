@@ -314,6 +314,14 @@ func (s *postgresArchiveStore) persist(entries map[string]MatchArchiveEntry, pri
 	return tx.Commit()
 }
 
+func (s *postgresArchiveStore) delete(matchID string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	_, err := s.db.Exec(`delete from archives where match_id = $1`, matchID)
+	return err
+}
+
 func (s *postgresArchiveStore) close() error {
 	if s == nil || s.db == nil {
 		return nil

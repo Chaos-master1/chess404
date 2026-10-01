@@ -103,13 +103,19 @@ export function formatMatchResult(options: {
   if (options.status === 'active') {
     return 'Live now';
   }
+  // Aborted games (early abort with at most one move played) are not wins for
+  // either seat. Guard here too: a stray aborted entry must never render as
+  // "Black won by timeout" — the winner field is 'aborted' for those games.
+  if (options.winner === 'aborted' || options.finishReason === 'abort') {
+    return 'Aborted';
+  }
   if (options.winner === 'draw') {
     return finish ? `Draw by ${finish.toLowerCase()}` : 'Draw';
   }
-  if (options.winner === 'aborted') {
-    return finish ? `Aborted by ${finish.toLowerCase()}` : 'Aborted';
-  }
   if (options.winner === 'white' || options.winner === 'black') {
+    if (options.finishReason === 'timeout' && (options.winner === 'white' || options.winner === 'black') && finish) {
+      return `${options.winner === 'white' ? 'White' : 'Black'} won by timeout`;
+    }
     return finish ? `${options.winner === 'white' ? 'White' : 'Black'} won by ${finish.toLowerCase()}` : `${options.winner === 'white' ? 'White' : 'Black'} won`;
   }
   if (finish) {

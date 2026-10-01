@@ -230,6 +230,7 @@ func (f *freshnessFakeStore) queryByAccount(string, []string, int, int) ([]Match
 	return nil, nil
 }
 func (f *freshnessFakeStore) queryStats() (MatchArchiveStats, error) { return MatchArchiveStats{}, nil }
+func (f *freshnessFakeStore) delete(string) error                    { return nil }
 func (f *freshnessFakeStore) close() error                           { return nil }
 
 // The gateway syncs a match at creation (overlay entry status "active");

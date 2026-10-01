@@ -81,6 +81,18 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
     void loadRankings(selectedSeasonId || undefined, selectedModeId || undefined);
   }, [loadRankings, selectedModeId, selectedSeasonId]);
 
+  const rankedAccounts = React.useMemo(() => {
+    return accounts.filter((account) => {
+      if (selectedModeId === 'open_cards') {
+        return (account.openCards?.matchesPlayed ?? 0) > 0 || (account.matchesPlayed ?? 0) > 0;
+      }
+      if (selectedModeId === 'hidden_cards') {
+        return (account.hiddenCards?.matchesPlayed ?? 0) > 0 || (account.matchesPlayed ?? 0) > 0;
+      }
+      return (account.matchesPlayed ?? 0) > 0;
+    });
+  }, [accounts, selectedModeId]);
+
   return (
     <div className="rankings-page">
       <style>{`
@@ -203,21 +215,49 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
         </div>
 
         <div className="rankings-body">
-          {!loading && summary && accounts.length > 1 && (
+          {!loading && summary && rankedAccounts.length > 1 && (
             <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
               <div className="rankings-spotlight-grid">
                 <div style={{ padding: '14px 16px', borderRadius: '12px', background: 'rgba(255,180,60,0.08)', border: '1px solid rgba(255,180,60,0.16)' }}>
                   <div style={{ color: '#ffcf72', fontSize: '11px', fontWeight: 800, letterSpacing: '0.9px', textTransform: 'uppercase' }}>{renderSpotlightLabel(summary, selectedModeId)}</div>
                   <div style={{ color: '#fff4d2', fontSize: '20px', fontWeight: 900, marginTop: '8px' }}>{summary.playerCount}</div>
                   <div style={{ color: 'rgba(255,232,180,0.6)', fontSize: '11px', marginTop: '4px' }}>
-                    players in this lane · {summary.matchCount} rated results tracked
+                    {summary.playerCount === 1 ? 'player' : 'players'} in this lane · {summary.matchCount} rated {summary.matchCount === 1 ? 'result' : 'results'} tracked
                   </div>
                 </div>
                 {[
-                  { label: 'Leader', spotlight: summary.leader, value: summary.leader ? `${summary.leader.rating}` : '--', detail: summary.leader ? `${summary.leader.matchesPlayed} matches · ${formatWinRate(summary.leader)} win rate` : 'No leader yet' },
-                  { label: 'Biggest climb', spotlight: summary.biggestClimber, value: summary.biggestClimber ? formatRatingDelta(summary.biggestClimber.netDelta) : '--', detail: summary.biggestClimber ? `${summary.biggestClimber.matchesPlayed} matches · rating ${summary.biggestClimber.rating}` : 'No climb data yet' },
-                  { label: 'Peak holder', spotlight: summary.highestPeak, value: summary.highestPeak ? `${summary.highestPeak.peakRating}` : '--', detail: summary.highestPeak ? `${summary.highestPeak.matchesPlayed} matches · ${summary.highestPeak.displayName}` : 'No peak yet' },
-                  { label: 'Most active', spotlight: summary.mostActive, value: summary.mostActive ? `${summary.mostActive.matchesPlayed}` : '--', detail: summary.mostActive ? `${summary.mostActive.displayName} · ${formatWinRate(summary.mostActive)} win rate` : 'No volume yet' },
+                  {
+                    label: 'Leader',
+                    spotlight: summary.leader,
+                    value: summary.leader ? `${summary.leader.rating}` : '--',
+                    detail: summary.leader
+                      ? `${summary.leader.matchesPlayed} ${summary.leader.matchesPlayed === 1 ? 'match' : 'matches'} · ${formatWinRate(summary.leader)} win rate`
+                      : 'No leader yet',
+                  },
+                  {
+                    label: 'Biggest climb',
+                    spotlight: summary.biggestClimber,
+                    value: summary.biggestClimber ? formatRatingDelta(summary.biggestClimber.netDelta) : '--',
+                    detail: summary.biggestClimber
+                      ? `${summary.biggestClimber.matchesPlayed} ${summary.biggestClimber.matchesPlayed === 1 ? 'match' : 'matches'} · rating ${summary.biggestClimber.rating}`
+                      : 'No climb data yet',
+                  },
+                  {
+                    label: 'Peak holder',
+                    spotlight: summary.highestPeak,
+                    value: summary.highestPeak ? `${summary.highestPeak.peakRating}` : '--',
+                    detail: summary.highestPeak
+                      ? `${summary.highestPeak.matchesPlayed} ${summary.highestPeak.matchesPlayed === 1 ? 'match' : 'matches'} · peak ${summary.highestPeak.peakRating}`
+                      : 'No peak yet',
+                  },
+                  {
+                    label: 'Most active',
+                    spotlight: summary.mostActive,
+                    value: summary.mostActive ? `${summary.mostActive.matchesPlayed}` : '--',
+                    detail: summary.mostActive
+                      ? `${summary.mostActive.wins}W ${summary.mostActive.losses}L ${summary.mostActive.draws}D · ${formatWinRate(summary.mostActive)} win rate`
+                      : 'No volume yet',
+                  },
                 ].map((card) => (
                   <div key={card.label} style={{ padding: '14px 16px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,165,40,0.1)' }}>
                     <div style={{ color: '#ffcf72', fontSize: '11px', fontWeight: 800, letterSpacing: '0.9px', textTransform: 'uppercase' }}>{card.label}</div>
@@ -234,7 +274,7 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
             </div>
           )}
 
-          {!loading && summary && accounts.length === 1 && (
+          {!loading && summary && rankedAccounts.length === 1 && (
             <div
               style={{
                 marginBottom: '18px',
@@ -248,7 +288,7 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                 First account on this lane
               </div>
               <div style={{ color: '#fff4d2', fontSize: '20px', fontWeight: 900, marginTop: '8px' }}>
-                @{accounts[0]?.handle} sets the first benchmark
+                @{rankedAccounts[0]?.handle} sets the first benchmark
               </div>
               <div style={{ color: 'rgba(255,232,180,0.7)', fontSize: '12px', lineHeight: 1.6, marginTop: '6px' }}>
                 {renderSpotlightLabel(summary, selectedModeId)} has only one claimed competitor right now. More rated results will unlock richer ladder comparisons and momentum cards.
@@ -287,7 +327,7 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                 />
               ))}
             </div>
-          ) : accounts.length === 0 ? (
+          ) : rankedAccounts.length === 0 ? (
             <div
               style={{
                 display: 'flex',
@@ -313,7 +353,7 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {accounts.map((account, index) => {
+              {rankedAccounts.map((account, index) => {
                 const season = resolveDisplayedSeason(account);
                 return (
                   <div
@@ -340,14 +380,11 @@ export default function RankingsPage({ onViewGuest, onViewAccount }: RankingsPag
                       #{index + 1}
                     </div>
                     <div className="rankings-row__name">
-                      {/* The server's displayName IS the handle for accounts, so
-                          rendering both showed every name twice. One line: the
-                          canonical @handle (formatPlayerLabel policy). */}
                       <div style={{ color: '#fff2c8', fontSize: '14px', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         @{account.handle}
                       </div>
                       <div style={{ color: 'rgba(170,190,220,0.62)', fontSize: '11px', marginTop: '4px' }}>
-                        {account.matchesPlayed ?? 0} matches - {account.wins ?? 0}W {account.losses ?? 0}L {account.draws ?? 0}D - {account.guestCount ?? account.linkedGuestIds.length} guest{(account.guestCount ?? account.linkedGuestIds.length) === 1 ? '' : 's'}
+                        {account.matchesPlayed ?? 0} {(account.matchesPlayed ?? 0) === 1 ? 'match' : 'matches'} - {account.wins ?? 0}W {account.losses ?? 0}L {account.draws ?? 0}D - {account.guestCount ?? account.linkedGuestIds.length} guest{(account.guestCount ?? account.linkedGuestIds.length) === 1 ? '' : 's'}
                       </div>
                       <div style={{ color: 'rgba(255,232,180,0.56)', fontSize: '11px', marginTop: '4px' }}>
                         {describeSeason(season)}

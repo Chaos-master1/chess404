@@ -35,5 +35,9 @@ type archivePersistence interface {
 	// scanning the in-memory map.
 	queryStats() (MatchArchiveStats, error)
 
+	// delete removes a single match row (aborted games). Implementations may
+	// return nil when the row does not exist.
+	delete(matchID string) error
+
 	close() error
 }

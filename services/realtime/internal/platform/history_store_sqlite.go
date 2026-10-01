@@ -124,6 +124,14 @@ func (s *sqliteArchiveStore) persist(entries map[string]MatchArchiveEntry, priva
 	return tx.Commit()
 }
 
+func (s *sqliteArchiveStore) delete(matchID string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	_, err := s.db.Exec(`delete from archives where match_id = ?`, matchID)
+	return err
+}
+
 func (s *sqliteArchiveStore) close() error {
 	if s == nil || s.db == nil {
 		return nil
