@@ -1219,6 +1219,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
           accountSessionToken: primaryAccountIdentity?.sessionToken,
         },
         clockSeconds: roomMeta?.clockSeconds ?? 600,
+        difficulty: roomMeta?.difficulty ?? '',
       });
       writeStoredRoomMeta(result.matchId, {
         queue: 'direct',

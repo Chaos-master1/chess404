@@ -35,7 +35,7 @@ func enforcePrivateRatedAccountPolicy(queue, action string, accountSession *plat
 // (unknown room or match-service trouble) the join proceeds and surfaces the
 // real upstream error instead of a misleading 502, and platform-service's
 // rated finalize gate still blocks archival of unaccounted rated games.
-func enforcePrivateRatedJoinPolicy(config GatewayConfig, client *http.Client, matchID string, r *http.Request) (int, error) {
+func enforcePrivateRatedJoinPolicy(config GatewayConfig, client *http.Client, matchID string, accountSession *platform.AccountSession, r *http.Request) (int, error) {
 	result := fetchGatewayJSONRequest(r, client, http.MethodGet, config.MatchServiceURL+"/api/matches/"+matchID, nil)
 	if !result.Healthy {
 		return http.StatusOK, nil
@@ -44,7 +44,7 @@ func enforcePrivateRatedJoinPolicy(config GatewayConfig, client *http.Client, ma
 	if err != nil {
 		return http.StatusOK, nil
 	}
-	return enforcePrivateRatedAccountPolicy(snapshot.Match.Queue, "private match join", nil)
+	return enforcePrivateRatedAccountPolicy(snapshot.Match.Queue, "private match join", accountSession)
 }
 
 func createGatewayPrivateMatch(config GatewayConfig, client *http.Client, request GatewayPrivateMatchRequest, r *http.Request) (GatewayPrivateMatchResponse, int, error) {
@@ -180,7 +180,7 @@ func joinGatewayPrivateMatch(config GatewayConfig, client *http.Client, matchID 
 		log.Printf("note: account session bootstrap skipped: %v", accountSessionErr)
 	}
 
-	if statusCode, err := enforcePrivateRatedJoinPolicy(config, client, matchID, r); statusCode != http.StatusOK {
+	if statusCode, err := enforcePrivateRatedJoinPolicy(config, client, matchID, accountSession, r); statusCode != http.StatusOK {
 		return GatewayPrivateMatchResponse{}, statusCode, err
 	}
 
@@ -297,7 +297,7 @@ func rematchGatewayPrivateMatch(config GatewayConfig, client *http.Client, match
 		clockSeconds,
 		0,
 		requesterSeat,
-		"",
+		request.Difficulty,
 		r,
 	)
 }

@@ -151,6 +151,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
           accountSessionToken: primaryAccountIdentity.sessionToken,
         },
         clockSeconds: roomMeta?.clockSeconds ?? 600,
+        difficulty: roomMeta?.difficulty ?? '',
       });
       writeStoredRoomMeta(result.matchId, {
         queue: 'direct',

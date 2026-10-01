@@ -99,10 +99,11 @@ export async function rematchPrivateMatch(input: {
   matchId: string;
   identity: PrivateMatchIdentity;
   clockSeconds?: number;
+  difficulty?: string;
 }): Promise<PrivateMatchAccessResponse> {
   const response = await fetchPrivateMatchAccess(
     `/api/gateway/private-matches/${encodeURIComponent(input.matchId)}/rematch`,
-    { clockSeconds: input.clockSeconds ?? 600 },
+    { clockSeconds: input.clockSeconds ?? 600, difficulty: input.difficulty ?? '' },
     input.identity,
   );
 
