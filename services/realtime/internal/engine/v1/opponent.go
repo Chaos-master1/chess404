@@ -12,9 +12,9 @@ import (
 const (
 	timeBeginner = 100 * time.Millisecond
 	timeEasy     = 250 * time.Millisecond
-	timeMedium   = 500 * time.Millisecond
-	timeHard     = 1000 * time.Millisecond
-	timeExpert   = 2000 * time.Millisecond
+	timeMedium   = 750 * time.Millisecond
+	timeHard     = 2000 * time.Millisecond
+	timeExpert   = 5000 * time.Millisecond
 )
 
 type Difficulty int

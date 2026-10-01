@@ -215,8 +215,8 @@ func applySelectTarget(state *contracts.MatchState, intent contracts.PlayerInten
 				return nil, errors.New("jump requires selecting your piece first")
 			}
 			targetPiece := pieceAt(state.Board, *intent.Target)
-			if targetPiece == nil || targetPiece.Color != pending.OwnerColor || targetPiece.Type == "king" || targetPiece.Type == "knight" {
-				return nil, errors.New("jump requires your own non-king, non-knight target")
+			if targetPiece == nil || targetPiece.Color != pending.OwnerColor || targetPiece.Type == "king" {
+				return nil, errors.New("jump requires your own non-king target")
 			}
 			if targetPiece.Frozen {
 				return nil, errors.New("jump cannot target a frozen piece")
@@ -237,6 +237,17 @@ func applySelectTarget(state *contracts.MatchState, intent contracts.PlayerInten
 		if !inBounds(intent.Target.Row, intent.Target.Col) {
 			return nil, errors.New("jump destination is out of bounds")
 		}
+		// Half board constraint from original vision:
+		// White's half: rows 0..3. Black's half: rows 4..7
+		halfStart := 0
+		halfEnd := 3
+		if pending.OwnerColor == "black" {
+			halfStart = 4
+			halfEnd = 7
+		}
+		if intent.Target.Row < halfStart || intent.Target.Row > halfEnd {
+			return nil, errors.New("jump destination must be in your half of the board")
+		}
 		if fortressEntryBlocked(state.FortressZones, pending.OwnerColor, *intent.Target) {
 			return nil, errors.New("jump destination is protected by an enemy fortress")
 		}
@@ -248,20 +259,8 @@ func applySelectTarget(state *contracts.MatchState, intent contracts.PlayerInten
 			return nil, errors.New("jump cannot move a frozen piece")
 		}
 		destinationPiece := pieceAt(state.Board, *intent.Target)
-		if destinationPiece != nil && destinationPiece.Color == pending.OwnerColor {
-			return nil, errors.New("jump cannot land on your own piece")
-		}
-		if destinationPiece != nil && destinationPiece.Type == "king" {
-			return nil, errors.New("jump cannot capture the king")
-		}
-		if !jumpDirectionValid(*pending.Target, *intent.Target, fromPiece.Type, fromPiece.Color) {
-			return nil, errors.New("jump destination is invalid for that piece")
-		}
-		if !jumpHasExactlyOnePieceBetween(state.Board, *pending.Target, *intent.Target) {
-			return nil, errors.New("jump must have exactly one piece in between")
-		}
-		if fromPiece.Type == "pawn" && pending.Target.Col == intent.Target.Col && destinationPiece != nil {
-			return nil, errors.New("pawn can only jump straight to an empty square")
+		if destinationPiece != nil {
+			return nil, errors.New("jump destination square must be empty")
 		}
 		nextBoard := cloneBoard(state.Board)
 		nextMovingPiece := nextBoard[pending.Target.Row][pending.Target.Col]

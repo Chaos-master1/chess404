@@ -162,11 +162,11 @@ func searchBudgetFor(inner *v1.ComputerOpponent) (time.Duration, int) {
 	case v1.DifficultyEasy:
 		return 150 * time.Millisecond, 3
 	case v1.DifficultyHard:
-		return 400 * time.Millisecond, 6
+		return 1500 * time.Millisecond, 8
 	case v1.DifficultyExpert:
-		return 700 * time.Millisecond, 8
+		return 4000 * time.Millisecond, 12
 	default: // medium
-		return 250 * time.Millisecond, 4
+		return 600 * time.Millisecond, 5
 	}
 }
 

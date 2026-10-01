@@ -760,20 +760,48 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       return;
     }
     const myColor = viewerSeatRef.current ?? (hostedRuntime ? 'white' : turn);
-    if (turn === myColor && premoveRef.current) {
-      const pm = premoveRef.current;
+    if (turn !== myColor || !premoveRef.current) return;
+
+    const pm = premoveRef.current;
+
+    // In hosted matches, give the authoritative snapshot a moment to settle
+    // before firing: the effect can run before turnRef is in sync with the
+    // server's board, causing canSubmitAuthoritativeMove to return false and
+    // silently drop the premove. A short delay avoids the race without losing
+    // responsiveness (premoves still feel instant to the player).
+    const fire = () => {
+      // Re-read: the turn or premove may have changed while we were waiting.
+      if (overRef.current) return;
+      const pm2 = premoveRef.current;
+      if (!pm2) return;
+      const currentMyColor = viewerSeatRef.current ?? (hostedRuntime ? 'white' : turnRef.current);
+      if (turnRef.current !== currentMyColor) return;
+
+      // Only clear premove once we are confident the move will be submitted.
+      // canSubmitAuthoritativeMove checks credentials — if not ready yet, keep
+      // the premove queued so it fires on the next snapshot instead of being lost.
+      if (hostedRuntime && !canSubmitAuthoritativeMove(pm2.from.row, pm2.from.col, pm2.to.row, pm2.to.col)) {
+        return; // leave premoveRef intact; will retry when state updates
+      }
+
+      const legalMoves = getMoves(pm2.from.row, pm2.from.col);
+      const isLegal = legalMoves.some(m => m.row === pm2.to.row && m.col === pm2.to.col);
       setPremove(null);
       premoveRef.current = null;
-      const legalMoves = getMoves(pm.from.row, pm.from.col);
-      const isLegal = legalMoves.some(m => m.row === pm.to.row && m.col === pm.to.col);
       if (!isLegal) {
         setCardMsg('⚠️ Premove cancelled: no longer legal');
         setTimeout(() => setCardMsg(''), 2000);
         return;
       }
-      doMove(pm.from.row, pm.from.col, pm.to.row, pm.to.col);
+      doMove(pm2.from.row, pm2.from.col, pm2.to.row, pm2.to.col);
+    };
+
+    if (hostedRuntime) {
+      const t = setTimeout(fire, 20);
+      return () => clearTimeout(t);
     }
-  }, [turn, over, hostedRuntime, doMove, setPremove, premoveRef, viewerSeatRef, getMoves, setCardMsg]);
+    fire();
+  }, [turn, over, hostedRuntime, doMove, canSubmitAuthoritativeMove, setPremove, premoveRef, overRef, turnRef, viewerSeatRef, getMoves, setCardMsg]);
 
   const bootstrapAuthoritativeMatch = React.useCallback(async (options?: { force?: boolean }) => {
     if (!hostedRuntime) return;

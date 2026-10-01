@@ -519,6 +519,45 @@ func TestCardJump(t *testing.T) {
 	if len(result.Match.WhiteHand) != len(snapshot.Match.WhiteHand)-1 {
 		t.Fatal("expected card consumed")
 	}
+
+	// Test 2: Test that jumping outside own half is rejected
+	snapshot2 := createTestMatch(service, contracts.CreateMatchRequest{MatchID: "test_jump_half"}, now)
+	cardID2 := cardIDByMechanic(t, snapshot2.Match.WhiteHand, "jump")
+	state2 := service.getMatchContainer("test_jump_half").state
+	state2.Board = emptyBoard()
+	state2.Board[0][0] = &contracts.Piece{Type: "king", Color: "white"}
+	state2.Board[7][7] = &contracts.Piece{Type: "king", Color: "black"}
+	state2.Board[1][1] = &contracts.Piece{Type: "knight", Color: "white"}
+
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "play_card", MatchID: "test_jump_half", PlayerID: "white_player", CardID: cardID2,
+	}, now.Add(time.Second)); err != nil {
+		t.Fatalf("play_card: %v", err)
+	}
+	// Knight selection succeeds (original vision allows knight jump)
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "select_target", MatchID: "test_jump_half", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 1, Col: 1},
+	}, now.Add(2*time.Second)); err != nil {
+		t.Fatalf("knight source should succeed: %v", err)
+	}
+	// Jumping to row 5 (Black half) must be rejected
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "select_target", MatchID: "test_jump_half", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 5, Col: 1},
+	}, now.Add(3*time.Second)); err == nil {
+		t.Fatal("expected jumping outside own half to be rejected")
+	}
+	// Jumping to row 2 (own half) succeeds
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "select_target", MatchID: "test_jump_half", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 2, Col: 3},
+	}, now.Add(4*time.Second)); err != nil {
+		t.Fatalf("jumping knight within own half should succeed: %v", err)
+	}
+	if p := service.getMatchContainer("test_jump_half").state.Board[2][3]; p == nil || p.Type != "knight" {
+		t.Fatalf("expected knight at (2,3), got %#v", p)
+	}
 }
 
 func TestCardTeleport(t *testing.T) {
