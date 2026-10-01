@@ -105,3 +105,39 @@ func TestServiceSnapshotStubsOpponentHand(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterStateForColorRedactsFogVillagePiecesFromOpponent(t *testing.T) {
+	state := handVisibilityTestState()
+	state.Board = emptyBoard()
+	// Place white king, black king, and a black queen inside black's fog zone at (3, 3)
+	state.Board[0][0] = &contracts.Piece{Type: "king", Color: "white"}
+	state.Board[7][7] = &contracts.Piece{Type: "king", Color: "black"}
+	state.Board[3][3] = &contracts.Piece{Type: "queen", Color: "black"}
+
+	state.FogZones = []contracts.FogZone{
+		{CenterRow: 3, CenterCol: 3, TurnsLeft: 2, OwnerColor: "black"},
+	}
+
+	// For black (the owner), the fog zone and queen are both intact
+	blackView := filterStateForColor(state, "black")
+	if len(blackView.FogZones) != 1 {
+		t.Fatalf("black should see their fog zone")
+	}
+	if blackView.Board[3][3] == nil || blackView.Board[3][3].Type != "queen" {
+		t.Fatalf("black should see their own queen inside their fog zone")
+	}
+
+	// For white (the opponent), the fog zone is visible, but the black queen is redacted (nil)
+	whiteView := filterStateForColor(state, "white")
+	if len(whiteView.FogZones) != 1 {
+		t.Fatalf("white should see the fog zone overlay")
+	}
+	if whiteView.Board[3][3] != nil {
+		t.Fatalf("white must NOT see the black queen inside black's fog zone; got %+v", whiteView.Board[3][3])
+	}
+	// Kings outside fog zone remain visible
+	if whiteView.Board[0][0] == nil || whiteView.Board[7][7] == nil {
+		t.Fatalf("pieces outside fog zone must remain visible")
+	}
+}
+

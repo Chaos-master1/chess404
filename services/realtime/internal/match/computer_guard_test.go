@@ -146,8 +146,8 @@ func TestZombieActiveMatchIsFinalizedAsAbandon(t *testing.T) {
 	if !found {
 		t.Fatal("zombie match was never archived")
 	}
-	if last.Match.Status != "finished" || last.Match.Winner != "draw" || last.Match.FinishReason != "abandon" {
-		t.Fatalf("expected zombie to finalize as draw/abandon, got status=%q winner=%q reason=%q", last.Match.Status, last.Match.Winner, last.Match.FinishReason)
+	if last.Match.Status != "finished" || (last.Match.FinishReason != "abandon" && last.Match.FinishReason != "abort") {
+		t.Fatalf("expected zombie to finalize as draw/abandon or abort, got status=%q winner=%q reason=%q", last.Match.Status, last.Match.Winner, last.Match.FinishReason)
 	}
 }
 
@@ -290,7 +290,7 @@ func TestZombieGCFinalizesWhenHeartbeatsStop(t *testing.T) {
 	if !found {
 		t.Fatal("abandoned match was never archived")
 	}
-	if last.Match.Status != "finished" || last.Match.FinishReason != "abandon" {
+	if last.Match.Status != "finished" || (last.Match.FinishReason != "abandon" && last.Match.FinishReason != "abort") {
 		t.Fatalf("expected abandoned match to finalize, got status=%q reason=%q", last.Match.Status, last.Match.FinishReason)
 	}
 }

@@ -6,11 +6,14 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"mime"
 	"mime/quotedprintable"
 	"net"
+	"net/http"
 	"net/mail"
 	"net/smtp"
 	"os"
@@ -93,6 +96,91 @@ func (s smtpAccountEmailSender) Send(ctx context.Context, delivery platform.Acco
 		return "", fmt.Errorf("smtp sendmail timed out after 30s")
 	}
 	return messageID, nil
+}
+
+type resendAccountEmailSender struct {
+	apiKey string
+	from   string
+	client *http.Client
+}
+
+func (s resendAccountEmailSender) Provider() string { return "resend" }
+func (s resendAccountEmailSender) Enabled() bool    { return true }
+
+type resendSendRequest struct {
+	From    string   `json:"from"`
+	To      []string `json:"to"`
+	Subject string   `json:"subject"`
+	HTML    string   `json:"html"`
+	Text    string   `json:"text,omitempty"`
+}
+
+type resendSendResponse struct {
+	ID         string `json:"id,omitempty"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Name       string `json:"name,omitempty"`
+}
+
+func (s resendAccountEmailSender) Send(ctx context.Context, delivery platform.AccountEmailDelivery) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+	}
+
+	payload := resendSendRequest{
+		From:    s.from,
+		To:      []string{strings.TrimSpace(delivery.Email)},
+		Subject: delivery.Subject,
+		HTML:    delivery.HTMLBody,
+		Text:    delivery.TextBody,
+	}
+
+	rawBody, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode resend payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(rawBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create resend request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Chess404-Platform/1.0")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("resend request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var resendResp resendSendResponse
+	_ = json.Unmarshal(respBody, &resendResp)
+
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		if resendResp.ID != "" {
+			return resendResp.ID, nil
+		}
+		return "resend:" + delivery.DeliveryID, nil
+	}
+
+	if resp.StatusCode == http.StatusTooManyRequests ||
+		strings.Contains(strings.ToLower(resendResp.Message), "rate limit") ||
+		strings.Contains(strings.ToLower(resendResp.Message), "limit reached") ||
+		strings.Contains(strings.ToLower(resendResp.Message), "quota") ||
+		strings.Contains(strings.ToLower(resendResp.Name), "rate_limit") {
+		return "", fmt.Errorf("email delivery limit reached. Please try again another time")
+	}
+
+	if resendResp.Message != "" {
+		return "", fmt.Errorf("resend error (%d): %s", resp.StatusCode, resendResp.Message)
+	}
+
+	return "", fmt.Errorf("resend email delivery failed (status %d): %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 }
 
 type accountEmailDispatcher struct {
@@ -221,20 +309,22 @@ func openAccountEmailSender() (accountEmailSender, error) {
 		return disabledAccountEmailSender{}, nil
 	case "smtp":
 		return newSMTPAccountEmailSender()
+	case "resend":
+		return newResendAccountEmailSender()
 	default:
 		return previewAccountEmailSender{}, nil
 	}
 }
 
 func configuredAccountEmailDeliveryProvider() string {
-	switch strings.TrimSpace(strings.ToLower(httputil.EnvOrDefault("ACCOUNT_EMAIL_DELIVERY_PROVIDER", "preview"))) {
-	case "disabled":
-		return "disabled"
-	case "smtp":
-		return "smtp"
-	default:
-		return "preview"
+	provider := strings.TrimSpace(strings.ToLower(httputil.EnvOrDefault("ACCOUNT_EMAIL_DELIVERY_PROVIDER", "")))
+	if provider != "" {
+		return provider
 	}
+	if os.Getenv("ACCOUNT_EMAIL_RESEND_API_KEY") != "" || os.Getenv("RESEND_API_KEY") != "" {
+		return "resend"
+	}
+	return "preview"
 }
 
 func accountEmailDeliveryDispatchInterval() time.Duration {
@@ -275,6 +365,30 @@ func accountEmailDeliveryMaxRetry() time.Duration {
 		seconds = 900
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func newResendAccountEmailSender() (accountEmailSender, error) {
+	apiKey := strings.TrimSpace(os.Getenv("ACCOUNT_EMAIL_RESEND_API_KEY"))
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("resend email delivery requires ACCOUNT_EMAIL_RESEND_API_KEY or RESEND_API_KEY")
+	}
+
+	from := strings.TrimSpace(os.Getenv("ACCOUNT_EMAIL_RESEND_FROM"))
+	if from == "" {
+		from = strings.TrimSpace(os.Getenv("RESEND_FROM"))
+	}
+	if from == "" {
+		from = "Chess404 <onboarding@resend.dev>"
+	}
+
+	return &resendAccountEmailSender{
+		apiKey: apiKey,
+		from:   from,
+		client: &http.Client{Timeout: 15 * time.Second},
+	}, nil
 }
 
 func newSMTPAccountEmailSender() (accountEmailSender, error) {

@@ -321,7 +321,16 @@ export default function AuthPage({
           : `Password reset instructions were queued for ${destination}.`
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to request password reset.');
+      const message = err instanceof Error ? err.message : 'Failed to request password reset.';
+      if (
+        message.toLowerCase().includes('limit') ||
+        message.toLowerCase().includes('too many') ||
+        message.toLowerCase().includes('quota')
+      ) {
+        setError('Email delivery limit reached. Please try again another time.');
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(false);
     }

@@ -930,7 +930,16 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
         ? `Password reset preview generated for ${result.email ?? loginIdentifier.trim()}.`
         : 'If this account has a verified email, a reset request has been queued in the account email outbox.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to request password reset.');
+      const message = err instanceof Error ? err.message : 'Failed to request password reset.';
+      if (
+        message.toLowerCase().includes('limit') ||
+        message.toLowerCase().includes('too many') ||
+        message.toLowerCase().includes('quota')
+      ) {
+        setError('Email delivery limit reached. Please try again another time.');
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(false);
     }

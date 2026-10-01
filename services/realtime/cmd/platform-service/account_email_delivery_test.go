@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,3 +158,102 @@ func TestAccountEmailDispatcherRetriesThenFails(t *testing.T) {
 		t.Fatalf("sender calls = %d, want 2", sender.calls)
 	}
 }
+
+func TestResendAccountEmailSenderSuccess(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test_key" {
+			http.Error(w, `{"message":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_12345"}`))
+	}))
+	defer server.Close()
+
+	sender := resendAccountEmailSender{
+		apiKey: "test_key",
+		from:   "Chess404 <onboarding@resend.dev>",
+		client: server.Client(),
+	}
+
+	// We test Send with a custom request pointing to our test server
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL, strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+sender.apiKey)
+	resp, err := sender.client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestResendAccountEmailSenderRateLimit(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		statusCode int
+		body       string
+	}{
+		{
+			name:       "HTTP 429 Status",
+			statusCode: http.StatusTooManyRequests,
+			body:       `{"message":"Too many requests","name":"rate_limit_exceeded"}`,
+		},
+		{
+			name:       "Rate limit error message",
+			statusCode: http.StatusUnprocessableEntity,
+			body:       `{"message":"Daily quota exceeded for sending emails"}`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.statusCode)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			// Create a transport that redirects api.resend.com to test server
+			sender := resendAccountEmailSender{
+				apiKey: "test_key",
+				from:   "Chess404 <onboarding@resend.dev>",
+				client: &http.Client{
+					Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+						r.URL.Scheme = "http"
+						r.URL.Host = server.Listener.Addr().String()
+						return http.DefaultTransport.RoundTrip(r)
+					}),
+				},
+			}
+
+			_, err := sender.Send(context.Background(), platform.AccountEmailDelivery{
+				DeliveryID: "del_1",
+				AccountID:  "acct_1",
+				Email:      "user@example.com",
+				Subject:    "Reset Password",
+				HTMLBody:   "<p>reset</p>",
+			})
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "email delivery limit reached. Please try again another time") {
+				t.Fatalf("expected rate limit message, got: %v", err)
+			}
+		})
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+

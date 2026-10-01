@@ -202,14 +202,44 @@ func filterStateForColor(state contracts.MatchState, color string) contracts.Mat
 	if state.InvisiblePiece != nil && state.InvisiblePiece.OwnerColor != color {
 		state.InvisiblePiece = nil
 	}
-	if state.FogZones != nil {
-		filteredFog := make([]contracts.FogZone, 0, len(state.FogZones))
+	if len(state.FogZones) > 0 {
+		needBoardClone := false
 		for _, fz := range state.FogZones {
-			if fz.OwnerColor == color {
-				filteredFog = append(filteredFog, fz)
+			if fz.OwnerColor != color && !openMode {
+				needBoardClone = true
+				break
 			}
 		}
-		state.FogZones = filteredFog
+		if needBoardClone {
+			state.Board = cloneBoard(state.Board)
+			for _, fz := range state.FogZones {
+				if fz.OwnerColor != color && !openMode {
+					minR := fz.CenterRow - 1
+					if minR < 0 {
+						minR = 0
+					}
+					maxR := fz.CenterRow + 1
+					if maxR > 7 {
+						maxR = 7
+					}
+					minC := fz.CenterCol - 1
+					if minC < 0 {
+						minC = 0
+					}
+					maxC := fz.CenterCol + 1
+					if maxC > 7 {
+						maxC = 7
+					}
+					for r := minR; r <= maxR; r++ {
+						for c := minC; c <= maxC; c++ {
+							if p := state.Board[r][c]; p != nil && p.Color == fz.OwnerColor {
+								state.Board[r][c] = nil
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 	return state
 }
