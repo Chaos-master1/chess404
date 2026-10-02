@@ -310,7 +310,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const {
     timeW, setTimeW, timeB, setTimeB, tickingState, setTicking, clockActive, setClockActive,
     resetTimer,
-  } = useMatchTimer({ over, authoritativeLive: hostedRuntime });
+  } = useMatchTimer({ over: Boolean(over), authoritativeLive: Boolean(hostedRuntime) });
 
   const {
     reviewIdx, setReviewIdx, reviewBoard, setReviewBoard, isReviewing,

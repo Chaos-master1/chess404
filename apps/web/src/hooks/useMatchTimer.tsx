@@ -6,8 +6,8 @@ import { CLOCK_START } from '../constants';
 
 export interface UseMatchTimerProps {
   initialClockStart?: number;
-  over?: boolean;
-  authoritativeLive?: boolean;
+  over?: boolean | null;
+  authoritativeLive?: boolean | null;
   onTimeout?: (loser: PieceColor) => void;
 }
 
@@ -17,6 +17,8 @@ export function useMatchTimer({
   authoritativeLive = false,
   onTimeout = () => {},
 }: UseMatchTimerProps = {}) {
+  const isOver = Boolean(over);
+  const isAuthoritative = Boolean(authoritativeLive);
   const initialMs = initialClockStart * 1000;
   const [timeW, setTimeWState] = React.useState(initialMs);
   const [timeB, setTimeBState] = React.useState(initialMs);
@@ -105,7 +107,7 @@ export function useMatchTimer({
 
   // Smooth local ticking interval: interpolates countdown between server snapshots
   React.useEffect(() => {
-    if (!clockActive || over || !tickingState) {
+    if (!clockActive || isOver || !tickingState) {
       return;
     }
 
@@ -116,13 +118,13 @@ export function useMatchTimer({
       if (tickingRef.current === 'white') {
         const remaining = Math.max(0, baseWRef.current - elapsed);
         setTimeWState(remaining);
-        if (remaining === 0 && !authoritativeLive) {
+        if (remaining === 0 && !isAuthoritative) {
           onTimeoutRef.current?.('white');
         }
       } else if (tickingRef.current === 'black') {
         const remaining = Math.max(0, baseBRef.current - elapsed);
         setTimeBState(remaining);
-        if (remaining === 0 && !authoritativeLive) {
+        if (remaining === 0 && !isAuthoritative) {
           onTimeoutRef.current?.('black');
         }
       }
@@ -131,7 +133,7 @@ export function useMatchTimer({
     return () => {
       window.clearInterval(interval);
     };
-  }, [clockActive, over, tickingState, authoritativeLive]);
+  }, [clockActive, isOver, tickingState, isAuthoritative]);
 
   return {
     timeW, setTimeW,
