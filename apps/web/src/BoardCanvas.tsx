@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import type { Board, Piece, PieceType, PieceColor, Sq, CardPendingState, BombPiece, LavaSquare, DoubleMove } from './types';
+import type { Board, Piece, PieceType, PieceColor, Sq, CardPendingState, BombPiece, LavaSquare, DoubleMove, FortressZone } from './types';
 import { SQ as IMPORTED_SQ, FILES } from './constants';
 import { SQ, setSQ } from './canvas/animations';
 import {
@@ -55,7 +55,7 @@ export interface BoardCanvasProps {
   fuseAnim: FuseAnim | null;
   fuseSelectedSq: { row: number; col: number } | null; // step-1 selected square highlight
   fogZones: { centerRow: number; centerCol: number; ownerColor: PieceColor }[];
-  fortressZones?: { centerRow: number; centerCol: number; ownerColor: PieceColor }[];
+  fortressZones?: (FortressZone | { topRow?: number; leftCol?: number; centerRow?: number; centerCol?: number; ownerColor: PieceColor; turnsLeft?: number })[];
   cloneAnim?: CloneAnim | null;
   blackHoleAnim?: BlackHoleAnim | null;
   poofAnim?: PoofAnim | null;
@@ -1405,13 +1405,15 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
         }
       }
 
-      // ── Fortress zones: sealed 3×3 stone walls ─────────────────────────────
+      // ── Fortress zones: sealed stone walls ─────────────────────────────
       for (const zone of fortressZones ?? []) {
         const isW = !isFlipped;
-        const cr0 = Math.max(0, zone.centerRow - 1);
-        const cr1 = Math.min(7, zone.centerRow + 1);
-        const cc0 = Math.max(0, zone.centerCol - 1);
-        const cc1 = Math.min(7, zone.centerCol + 1);
+        const topRow = (zone as any).topRow ?? ((zone as any).centerRow !== undefined ? (zone as any).centerRow - 1 : 0);
+        const leftCol = (zone as any).leftCol ?? ((zone as any).centerCol !== undefined ? (zone as any).centerCol - 1 : 0);
+        const cr0 = Math.max(0, topRow);
+        const cr1 = Math.min(7, topRow + 1);
+        const cc0 = Math.max(0, leftCol);
+        const cc1 = Math.min(7, leftCol + 1);
         const zx  = (isW ? cc0 : 7 - cc1) * SQ;
         const zy  = (isW ? 7 - cr1 : cr0) * SQ;
         const zw  = (cc1 - cc0 + 1) * SQ;
