@@ -16,14 +16,12 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
   const { selectedCard, setSelectedCard, cardUsedBy, dealPhase, canUseCard } = useMatchCard();
   const { radarActive } = useMatchState();
 
-  const CW = 68, CH = 96;
+  const CW = 56, CH = 78;
   const isBottom = position === 'bottom';
 
   // The fan must fit the space it actually has: a hard 580px container let a
-  // full 10-card hand (~506px of cards) spill over the board and side panels
-  // on narrow laptop windows. Measure the wrapper and clamp the per-card x
-  // step so the widest fan stays inside the container. At the full 580px
-  // width this computes the exact same steps as the old fixed formula.
+  // full 10-card hand spill over the board and side panels on narrow windows.
+  // Clamp the per-card x step so the widest fan stays inside the container.
   const fanRef = React.useRef<HTMLDivElement | null>(null);
   const [fanWidth, setFanWidth] = React.useState(580);
   React.useEffect(() => {
@@ -37,14 +35,14 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
     return () => observer.disconnect();
   }, []);
 
-  const xStep  = hand.length > 1 ? Math.min(54, (Math.max(fanWidth, CW + 40) - CW - 8) / (hand.length - 1), 520 / hand.length) : 0;
+  const xStep  = hand.length > 1 ? Math.min(52, (Math.max(fanWidth, CW + 40) - CW - 8) / (hand.length - 1), 500 / hand.length) : 0;
   const spread = hand.length > 1 ? Math.min(18, 60 / hand.length)  : 0;
 
   if (!hand || hand.length === 0) return null;
 
   return (
     <div ref={fanRef} style={{
-      position:'relative', height: isBottom ? '118px' : '98px', width:'min(580px, 100%)',
+      position:'relative', height: isBottom ? '100px' : '88px', width:'min(580px, 100%)',
       display:'flex', alignItems: isBottom ? 'flex-end' : 'flex-start',
       justifyContent:'center',
       marginTop: isBottom ? '4px' : 0, marginBottom: isBottom ? 0 : '4px',
@@ -61,35 +59,27 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
 
         if (!isBottom) {
           // Face-down stubs from the server carry no card fields at all; they
-          // must never reach the radar renderer (RARITY_STYLE[card.rarity]
-          // would throw on an unknown rarity).
+          // must never reach the radar renderer.
           const isHiddenStub = !card.id && !card.mechanic && !card.rarity;
-          if (!isHiddenStub) {
-            const glow = radarActive
-              ? '0 8px 24px rgba(0,0,0,0.85), 0 0 16px rgba(96,165,250,0.5)'
-              : '0 8px 20px rgba(0,0,0,0.85), 0 0 12px rgba(168,85,247,0.35)';
-            const border = radarActive ? '2px solid #60a5fa' : '1.5px solid rgba(168,85,247,0.6)';
+          if (!isHiddenStub && radarActive) {
             return (
               <div key={key} style={{
                 position:'absolute', top:`${yOff}px`,
                 left:`calc(50% + ${xOff}px - ${CW/2}px)`,
                 width:`${CW}px`, height:`${CH}px`,
                 transform:`rotate(${-angle}deg)`, transformOrigin:'50% -20%',
-                borderRadius:'8px',
-                boxShadow: glow,
-                background:`linear-gradient(160deg, ${card.color} 0%, color-mix(in srgb, ${card.color} 50%, #000) 100%)`,
-                border: border, overflow:'hidden', zIndex:i,
-                pointerEvents:'none',
-                animation: radarActive ? 'radarReveal 0.4s cubic-bezier(0.34,1.56,0.64,1)' : 'none',
+                borderRadius:'7px',
+                boxShadow:`0 6px 24px rgba(0,0,0,0.8), 0 0 16px rgba(96,165,250,0.5)`,
+                background:`linear-gradient(160deg, ${card.color} 0%, color-mix(in srgb, ${card.color} 60%, #000) 100%)`,
+                border:`2px solid #60a5fa`, overflow:'hidden', zIndex:i,
+                pointerEvents:'none', animation:'radarReveal 0.4s cubic-bezier(0.34,1.56,0.64,1)',
               }}>
-                {radarActive && <div style={{ position:'absolute', inset:0, background:'rgba(96,165,250,0.08)', zIndex:0 }} />}
-                <div style={{ width:'100%', height:'44px', background:`radial-gradient(ellipse at 50% 30%, ${card.accent}44 0%, transparent 70%)`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', borderBottom:`1px solid ${card.accent}33` }}>{card.icon}</div>
-                <div style={{ padding:'2px 3px', fontSize:'7px', fontWeight:700, color:'#fff', textAlign:'center', lineHeight:'1.2' }}>{card.name}</div>
-                <div style={{ margin:'2px 4px 0', padding:'1px 3px', background:`${card.accent}33`, border:`1px solid ${card.accent}55`, borderRadius:'3px', fontSize:'6px', color:card.accent, textAlign:'center', fontWeight:700, textTransform:'uppercase' }}>{card.type}</div>
-                <div style={{ margin:'1px 4px 0', padding:'1px 2px', border:`1px solid ${RARITY_STYLE[card.rarity].accent}88`, borderRadius:'3px', fontSize:'5.5px', color:RARITY_STYLE[card.rarity].accent, textAlign:'center', fontWeight:800, textTransform:'uppercase' }}>{RARITY_STYLE[card.rarity].label}</div>
-                {radarActive && (
-                  <div style={{ position:'absolute', top:'2px', left:'2px', fontSize:'8px', background:'rgba(96,165,250,0.9)', borderRadius:'3px', padding:'1px 3px', color:'#fff', fontWeight:800 }}>📡</div>
-                )}
+                <div style={{ position:'absolute', inset:0, background:'rgba(96,165,250,0.08)', zIndex:0 }} />
+                <div style={{ width:'100%', height:'38px', background:`radial-gradient(ellipse at 50% 30%, ${card.accent}44 0%, transparent 70%)`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', borderBottom:`1px solid ${card.accent}33` }}>{card.icon}</div>
+                <div style={{ padding:'2px 3px', fontSize:'6px', fontWeight:700, color:'#fff', textAlign:'center', lineHeight:'1.2' }}>{card.name}</div>
+                <div style={{ margin:'2px 4px 0', padding:'1px 3px', background:`${card.accent}33`, border:`1px solid ${card.accent}55`, borderRadius:'3px', fontSize:'5px', color:card.accent, textAlign:'center', fontWeight:700, textTransform:'uppercase' }}>{card.type}</div>
+                <div style={{ margin:'1px 4px 0', padding:'1px 2px', border:`1px solid ${RARITY_STYLE[card.rarity].accent}88`, borderRadius:'3px', fontSize:'4.5px', color:RARITY_STYLE[card.rarity].accent, textAlign:'center', fontWeight:800, textTransform:'uppercase' }}>{RARITY_STYLE[card.rarity].label}</div>
+                <div style={{ position:'absolute', top:'2px', left:'2px', fontSize:'7px', background:'rgba(96,165,250,0.9)', borderRadius:'3px', padding:'1px 3px', color:'#fff', fontWeight:800 }}>📡</div>
               </div>
             );
           }
@@ -99,42 +89,13 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
               left:`calc(50% + ${xOff}px - ${CW/2}px)`,
               width:`${CW}px`, height:`${CH}px`,
               transform:`rotate(${-angle}deg)`, transformOrigin:'50% -20%',
-              borderRadius:'8px',
-              boxShadow:'0 8px 24px rgba(0,0,0,0.85), 0 0 14px rgba(168,85,247,0.3)',
-              background:'linear-gradient(150deg, #180f2d 0%, #0d081b 50%, #05030a 100%)',
-              border:'1.5px solid rgba(212,175,55,0.65)',
-              overflow:'hidden', zIndex:i, pointerEvents:'none',
+              borderRadius:'7px', boxShadow:'0 6px 18px rgba(0,0,0,0.7)',
+              background:'linear-gradient(160deg, #1a1a3e 0%, #0d0d1f 100%)',
+              border:'1px solid rgba(80,80,160,0.45)', overflow:'hidden', zIndex:i, pointerEvents:'none',
             }}>
-              <div style={{ position:'absolute', inset:'3px', borderRadius:'6px', border:'1px solid rgba(212,175,55,0.35)', pointerEvents:'none' }} />
-              <div style={{ position:'absolute', inset:0, backgroundImage:'radial-gradient(circle at 50% 50%, rgba(168,85,247,0.18) 0%, transparent 60%)', pointerEvents:'none' }} />
-              <div style={{
-                position:'absolute', inset:0, display:'flex', flexDirection:'column',
-                alignItems:'center', justifyContent:'center',
-              }}>
-                <div style={{
-                  width: '32px', height: '32px', borderRadius: '50%',
-                  border: '1px solid rgba(212,175,55,0.5)',
-                  background: 'radial-gradient(circle, rgba(212,175,55,0.15) 0%, rgba(13,8,27,0.8) 100%)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: '0 0 10px rgba(212,175,55,0.25)',
-                }}>
-                  <span style={{
-                    fontSize: '18px', color: '#ffd700',
-                    filter: 'drop-shadow(0 0 6px rgba(255,215,0,0.8))',
-                    transform: 'translateY(-1px)',
-                  }}>♔</span>
-                </div>
-                <div style={{
-                  fontSize: '5.5px', fontWeight: 900, color: 'rgba(212,175,55,0.8)',
-                  letterSpacing: '1.2px', marginTop: '3px', textTransform: 'uppercase',
-                }}>
-                  404 CHESS
-                </div>
-              </div>
-              <div style={{ position:'absolute', top:'5px', left:'5px', width:'5px', height:'5px', borderTop:'1.5px solid #fbbf24', borderLeft:'1.5px solid #fbbf24' }} />
-              <div style={{ position:'absolute', top:'5px', right:'5px', width:'5px', height:'5px', borderTop:'1.5px solid #fbbf24', borderRight:'1.5px solid #fbbf24' }} />
-              <div style={{ position:'absolute', bottom:'5px', left:'5px', width:'5px', height:'5px', borderBottom:'1.5px solid #fbbf24', borderLeft:'1.5px solid #fbbf24' }} />
-              <div style={{ position:'absolute', bottom:'5px', right:'5px', width:'5px', height:'5px', borderBottom:'1.5px solid #fbbf24', borderRight:'1.5px solid #fbbf24' }} />
+              <div style={{ position:'absolute', inset:0, backgroundImage:'repeating-linear-gradient(45deg, rgba(60,60,120,0.12) 0px, rgba(60,60,120,0.12) 2px, transparent 2px, transparent 10px)' }} />
+              <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', opacity:0.35 }}>♛</div>
+              <div style={{ position:'absolute', inset:'4px', borderRadius:'5px', border:'1px solid rgba(100,100,200,0.25)' }} />
             </div>
           );
         }
@@ -148,128 +109,82 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
               position:'absolute', bottom:`${yOff}px`,
               left:`calc(50% + ${xOff}px - ${CW/2}px)`,
               width:`${CW}px`, height:`${CH}px`,
-              transform: isSelected ? `rotate(${angle}deg) translateY(-22px) scale(1.08)` : `rotate(${angle}deg)`,
+              transform: isSelected ? `rotate(${angle}deg) translateY(-20px) scale(1.08)` : `rotate(${angle}deg)`,
               transformOrigin:'50% 120%',
               cursor: !canUse ? 'not-allowed' : 'pointer',
               transition:'transform 0.18s ease, filter 0.18s ease',
               zIndex: isSelected ? 99 : i + 1,
               filter: isSelected
-                ? `brightness(1.3) drop-shadow(0 0 16px ${card.accent}cc)`
+                ? `brightness(1.3) drop-shadow(0 0 14px ${card.accent}cc)`
                 : !canUse ? 'brightness(0.45) saturate(0.3)' : 'none',
-              borderRadius:'8px',
+              borderRadius:'7px',
               boxShadow: isJokerCard && canUse
-                ? `0 6px 20px rgba(0,0,0,0.8), 0 0 20px rgba(245,158,11,0.5), inset 0 1px 0 rgba(255,255,255,0.15)`
+                ? `0 6px 18px rgba(0,0,0,0.7), 0 0 20px rgba(245,158,11,0.5), inset 0 1px 0 rgba(255,255,255,0.12)`
                 : `0 6px 18px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.12)`,
-              background:`linear-gradient(160deg, ${card.color} 0%, color-mix(in srgb, ${card.color} 55%, #000) 100%)`,
-              border: isJokerCard && canUse ? `1.5px solid ${card.accent}cc` : `1.5px solid ${card.accent}66`,
+              background:`linear-gradient(160deg, ${card.color} 0%, color-mix(in srgb, ${card.color} 60%, #000) 100%)`,
+              border: isJokerCard && canUse ? `1px solid ${card.accent}99` : `1px solid ${card.accent}55`,
               overflow:'visible',
               animation: isJokerCard && canUse ? 'jokerFloat 3s ease-in-out infinite' : 'none',
-            }}
-            onPointerDown={e => {
-              const el = e.currentTarget as HTMLDivElement;
-              el.style.transform = '';
             }}
             onClick={() => {
               if (!canUse) return;
               setSelectedCard(isSelected ? null : card);
             }}
             onMouseEnter={e => {
-              if (!canUse || isSelected) return;
+              if (!canUse) return;
               const el = e.currentTarget as HTMLDivElement;
-              el.style.transform = `rotate(${angle}deg) translateY(-22px) scale(1.08)`;
+              el.style.transform = `rotate(${angle}deg) translateY(-20px) scale(1.08)`;
               el.style.zIndex = '99';
               const tip = el.querySelector('.card-tooltip') as HTMLElement;
               if (tip) tip.style.display = 'block';
             }}
             onMouseLeave={e => {
               const el = e.currentTarget as HTMLDivElement;
-              el.style.transform = isSelected ? `rotate(${angle}deg) translateY(-22px) scale(1.08)` : `rotate(${angle}deg)`;
+              el.style.transform = isSelected ? `rotate(${angle}deg) translateY(-20px) scale(1.08)` : `rotate(${angle}deg)`;
               el.style.zIndex = String(isSelected ? 99 : i + 1);
               const tip = el.querySelector('.card-tooltip') as HTMLElement;
               if (tip) tip.style.display = 'none';
             }}
           >
-            {/* Header: name + element gem */}
             <div style={{
-              padding: '3px 4px 1px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 100%)',
-              borderBottom: `1px solid ${card.accent}33`,
+              width:'100%', height:'38px',
+              background:`radial-gradient(ellipse at 50% 30%, ${card.accent}44 0%, transparent 70%)`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:'20px', borderBottom:`1px solid ${card.accent}33`,
+              position:'relative', borderRadius:'7px 7px 0 0', overflow:'hidden',
             }}>
-              <div style={{
-                fontSize: '7px', fontWeight: 800, color: '#fff',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                maxWidth: `${CW - 18}px`,
-                textShadow: '0 1px 3px rgba(0,0,0,0.9)',
-              }}>{card.name}</div>
-              <div style={{
-                width: '6px', height: '6px', borderRadius: '50%',
-                background: card.accent,
-                boxShadow: `0 0 5px ${card.accent}`,
-                flexShrink: 0,
-              }} />
-            </div>
-
-            {/* Art Box Window */}
-            <div style={{
-              width: 'calc(100% - 6px)', height: '46px',
-              margin: '2px auto 0',
-              borderRadius: '5px',
-              background: `radial-gradient(circle at 50% 35%, ${card.accent}44 0%, rgba(6,10,18,0.92) 80%)`,
-              border: `1px solid ${card.accent}55`,
-              boxShadow: `inset 0 1px 6px rgba(0,0,0,0.8), 0 0 8px ${card.accent}22`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '22px', position: 'relative', overflow: 'hidden',
-            }}>
-              <div style={{ filter: `drop-shadow(0 0 6px ${card.accent})` }}>
-                {card.icon}
-              </div>
+              {card.icon}
               {isJokerCard && canUse && (
                 <>
                   {[0,1,2].map(j => (
                     <div key={j} style={{
-                      position:'absolute', top:`${5+j*8}px`, left:`${6+j*18}px`,
-                      width:'3px', height:'3px', borderRadius:'50%',
+                      position:'absolute',
+                      top:`${5+j*7}px`, left:`${8+j*15}px`,
+                      width:'4px', height:'4px', borderRadius:'50%',
                       background:'#f59e0b',
                       animation:`jokerGlitter ${1.2+j*0.4}s ease-in-out infinite`,
-                      animationDelay:`${j*0.35}s`, pointerEvents:'none',
+                      animationDelay:`${j*0.35}s`,
+                      pointerEvents:'none',
                     }}/>
                   ))}
                 </>
               )}
             </div>
-
-            {/* Archetype banner */}
+            <div style={{ padding:'3px 4px 1px', fontSize:'6.5px', fontWeight:700, color:'#fff', textAlign:'center', lineHeight:'1.2', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{card.name}</div>
+            <div style={{ margin:'2px 4px 0', padding:'1px 3px', background:`${card.accent}33`, border:`1px solid ${card.accent}55`, borderRadius:'3px', fontSize:'5.5px', color:card.accent, textAlign:'center', fontWeight:700, textTransform:'uppercase' }}>{card.type}</div>
             <div style={{
-              margin: '3px 4px 0', padding: '1px 3px',
-              background: `${card.accent}25`,
-              border: `1px solid ${card.accent}66`,
-              borderRadius: '3px',
-              fontSize: '6px', color: card.accent,
-              textAlign: 'center', fontWeight: 800, textTransform: 'uppercase',
-              letterSpacing: '0.4px',
-            }}>
-              {card.type === 'spell' ? 'SPELL' : 'TRAP'}
-            </div>
-
-            {/* Rarity footer */}
-            <div style={{
-              margin: '2px 4px 0', padding: '1px 2px',
-              border: `1px solid ${RARITY_STYLE[card.rarity].accent}88`,
-              borderRadius: '3px', fontSize: '5.5px',
+              margin:'1px 4px 0', padding:'1px 3px',
+              border:`1px solid ${RARITY_STYLE[card.rarity].accent}88`,
+              borderRadius:'3px', fontSize:'5px',
               color: RARITY_STYLE[card.rarity].accent,
-              textAlign: 'center', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.3px',
+              textAlign:'center', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.3px',
               boxShadow: card.rarity === 'legendary' ? `0 0 6px ${RARITY_STYLE[card.rarity].glow}` : card.rarity === 'epic' ? `0 0 4px ${RARITY_STYLE[card.rarity].glow}` : 'none',
-            }}>
-              {RARITY_STYLE[card.rarity].label}
-            </div>
-
-            {/* Sheen overlay */}
-            <div style={{ position:'absolute', inset:0, borderRadius:'8px', background:'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%)', pointerEvents:'none' }} />
-
+            }}>{RARITY_STYLE[card.rarity].label}</div>
+            <div style={{ position:'absolute', inset:0, borderRadius:'7px', background:'linear-gradient(135deg, rgba(255,255,255,0.07) 0%, transparent 50%)', pointerEvents:'none' }} />
+            <div style={{ position:'absolute', top:'3px', right:'3px', width:'6px', height:'6px', borderRadius:'50%', background:card.accent, boxShadow:`0 0 4px ${card.accent}` }} />
             {!canUse && (
-              <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:'8px', background:'rgba(0,0,0,0.35)' }}>
-                <span style={{ fontSize:'15px', opacity:0.8 }}>{alreadyUsedThisTurn ? '✓' : card.type === 'trap' ? '' : '🔒'}</span>
+              <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:'7px', background:'rgba(0,0,0,0.25)' }}>
+                <span style={{ fontSize:'14px', opacity:0.7 }}>{alreadyUsedThisTurn ? '✓' : card.type === 'trap' ? '' : '🔒'}</span>
               </div>
             )}
             <div className="card-tooltip" style={{

@@ -1,6 +1,7 @@
 'use client';
 
 import type { CardPendingState, GameCard, PendingCardState } from '@chess404/contracts';
+import { CARD_POOL } from '../cardPool';
 
 /**
  * Rebuilds the local pending-card UI state from the authoritative snapshot's
@@ -19,7 +20,9 @@ export function buildPendingCardFromSnapshot(
 ): CardPendingState {
   if (!pending || pending.mechanic === 'joker') return null;
   const ownerCards = pending.ownerColor === 'white' ? whiteCards : blackCards;
-  const card = ownerCards.find(item => item.id === pending.cardId);
+  const card = ownerCards.find(item => item.id === pending.cardId)
+    || ownerCards.find(item => item.mechanic === pending.mechanic)
+    || (CARD_POOL.find(item => item.mechanic === pending.mechanic) as GameCard | undefined);
   if (!card) return null;
   const mechanic = pending.mechanic;
   const target = pending.target ?? undefined;

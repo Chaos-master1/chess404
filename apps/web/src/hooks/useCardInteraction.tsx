@@ -376,164 +376,1031 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     const piece = b[row][col];
     const opp   = OPP[playerColor];
 
-    if (authoritativeMatchIdRef.current && (mechanic === 'freeze' || mechanic === 'shield' || mechanic === 'sniper' || mechanic === 'badsniper' || mechanic === 'promote' || mechanic === 'demote' || mechanic === 'promotehim' || mechanic === 'demotehim' || mechanic === 'teleport' || mechanic === 'jump' || mechanic === 'swapme' || mechanic === 'swapus' || mechanic === 'swaphim' || mechanic === 'borrow' || mechanic === 'mindcontrol' || mechanic === 'parasite' || mechanic === 'clone' || mechanic === 'fakepiece' || mechanic === 'smallsacrifice' || mechanic === 'bigsacrifice' || mechanic === 'lavaground' || mechanic === 'blackhole' || mechanic === 'fortress' || mechanic === 'fog_village' || mechanic === 'invisible' || mechanic === 'unabomber' || mechanic === 'halffuse' || mechanic === 'fullfusion')) {
+    // Helper for sending authoritative target intents
+    const sendAuthoritativeTarget = (target: Sq, extra?: Partial<Extract<PlayerIntent, { type: 'select_target' }>>) => {
+      if (!authoritativeMatchIdRef.current) return Promise.resolve(null);
       const targetIntent: Omit<Extract<PlayerIntent, { type: 'select_target' }>, 'matchId'> = {
         type: 'select_target',
         ...authoritativeActorForColor(playerColor),
-        target: { row, col }
+        target,
+        ...extra,
       };
-
-      void applyIntent(authoritativeMatchIdRef.current, targetIntent).then(snapshot => {
+      return applyIntent(authoritativeMatchIdRef.current, targetIntent).then(snapshot => {
         applyAuthoritativeSnapshot(snapshot);
         if (!snapshot.match?.pendingCard) {
           setSelectedCard(null);
         }
-        if (mechanic === 'freeze') {
-          setCardMsg(`Freeze applied at ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'shield') {
-          setCardMsg(`Shield applied at ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'sniper') {
-          triggerSniperAnim({ row, col }, piece!.type, piece!.color, 'sniper');
-          setCardMsg(`Sniper removed ${piece!.type} on ${FILES[col]}${RANKS[row]}`);
-          fireCardAnim('sniper', `${piece!.type} eliminated`);
-        } else if (mechanic === 'badsniper') {
-          triggerSniperAnim({ row, col }, piece!.type, piece!.color, 'badsniper');
-          setCardMsg(`Bad Sniper removed your ${piece!.type} on ${FILES[col]}${RANKS[row]}`);
-          fireCardAnim('sniper', `${piece!.type} eliminated`);
-        } else if (mechanic === 'promote') {
-          setCardMsg(`Choose promotion for ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'promotehim') {
-          setCardMsg(`Choose enemy promotion for ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'demotehim') {
-          setCardMsg(`Choose demotion for ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'lavaground') {
-          setCardMsg(`Lava trap placed on ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'fortress') {
-          setCardMsg(`Fortress placed with top-left at ${FILES[Math.min(col, 6)]}${RANKS[Math.min(row, 6)]}`);
-        } else if (mechanic === 'fog_village') {
-          setCardMsg(`Fog Village placed around ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'invisible') {
-          setCardMsg(`Invisible applied to ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'unabomber') {
-          setCardMsg(`Bomb attached on ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'halffuse' || mechanic === 'fullfusion') {
-          const sq1 = step === 2 ? (data.sq1 as Sq | undefined) : undefined;
-          const type1 = data.type1 as PieceType | undefined;
-          if (sq1 && type1 && piece) {
-            triggerFuseAnim({ sq1, sq2: { row, col }, type1, type2: piece.type, color: playerColor });
-            setCardMsg(`${mechanic === 'halffuse' ? 'Half Fuse' : 'Full Fusion'} applied to ${FILES[col]}${RANKS[row]}`);
-          } else {
-            setCardMsg('Now click an adjacent own piece to fuse');
-          }
-        } else if (mechanic === 'teleport') {
-          const from = step === 2 ? (data.from as Sq | undefined) : undefined;
-          if (from) {
-            triggerTeleportAnim(from, { row, col }, piece?.type ?? 'queen', playerColor);
-            fireCardAnim('teleport', `Teleported to ${FILES[col]}${RANKS[row]}`);
-            playMoveSound('move');
-            setCardMsg(`Teleported to ${FILES[col]}${RANKS[row]}`);
-          } else {
-            setCardMsg('Now click destination square');
-          }
-        } else if (mechanic === 'jump') {
-          const from = step === 2 ? (data.from as Sq | undefined) : undefined;
-          if (from) {
-            triggerJumpAnim(from, { row, col }, piece?.type ?? 'knight', playerColor, Boolean(piece));
-            fireCardAnim('teleport', `Jumped to ${FILES[col]}${RANKS[row]}`);
-            playMoveSound(piece ? 'capture' : 'move');
-            setCardMsg(`Jumped to ${FILES[col]}${RANKS[row]}`);
-          } else {
-            setCardMsg('Now click landing square');
-          }
-        } else if (mechanic === 'swapme' || mechanic === 'swapus' || mechanic === 'swaphim') {
-          const sq1 = step === 2 ? (data.sq1 as Sq | undefined) : undefined;
-          if (sq1) {
-            triggerSwapAnim(sq1, { row, col });
-            fireCardAnim('swap', `Swapped ${FILES[sq1.col]}${RANKS[sq1.row]} ↔ ${FILES[col]}${RANKS[row]}`);
-            playMoveSound('move');
-            setCardMsg(`Swapped ${FILES[sq1.col]}${RANKS[sq1.row]} with ${FILES[col]}${RANKS[row]}`);
-          } else {
-            setCardMsg('Now click second piece to swap');
-          }
-        } else if (mechanic === 'borrow') {
-          setCardMsg(`Borrowed piece on ${FILES[col]}${RANKS[row]}`);
-          if (piece) {
-            fireCardAnim('smallsacrifice', `Borrowed ${piece.type}`);
-            playCardSound('borrow');
-          }
-        } else if (mechanic === 'mindcontrol') {
-          setCardMsg(`Converted piece on ${FILES[col]}${RANKS[row]}`);
-          if (piece) {
-            triggerMindControlAnim({ row, col }, playerColor, piece.type);
-            fireCardAnim('mindcontrol', `Controlled ${piece.type}`);
-            playCardSound('mindcontrol');
-          }
-        } else if (mechanic === 'parasite') {
-          const hostSq = step === 2 ? (data.hostSq as Sq | undefined) : undefined;
-          if (hostSq) {
-            setCardMsg(`Parasite linked ${FILES[hostSq.col]}${RANKS[hostSq.row]} to ${FILES[col]}${RANKS[row]}`);
-          } else {
-            setCardMsg('Now click matching enemy piece to infect');
-          }
-        } else if (mechanic === 'clone') {
-          const sq1 = step === 2 ? (data.sq1 as Sq | undefined) : undefined;
-          if (sq1 && piece) {
-            triggerCloneAnim?.(sq1, { row, col }, piece.type, playerColor);
-          }
-          setCardMsg(`Cloned ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'fakepiece') {
-          setCardMsg(`Decoy placed at ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'smallsacrifice' || mechanic === 'bigsacrifice') {
-          const sq1 = step === 2 ? (data.sq1 as Sq | undefined) : undefined;
-          if (sq1) {
-            triggerSacrificeAnim([sq1, { row, col }]);
-          }
-          fireCardAnim('smallsacrifice', mechanic === 'bigsacrifice' ? 'Big Sacrifice' : 'Small Sacrifice');
-          playMoveSound('capture');
-          setCardMsg(`Sacrifice completed on ${FILES[col]}${RANKS[row]}`);
-        } else if (mechanic === 'blackhole') {
-          triggerBlackHoleAnim?.({ row, col });
-          setCardMsg(`Black hole consumed 3x3 at ${FILES[col]}${RANKS[row]}`);
-          fireCardAnim('blackhole', 'Black Hole');
-          playMoveSound('bomb');
-        }
-      }).catch(err => {
-        const message = err instanceof Error ? err.message : 'Target selection failed';
-        setCardMsg(message);
-        setTimeout(() => setCardMsg(''), 2000);
+        return snapshot;
       });
+    };
+
+    // ─── SWAP US (swap 1 own piece with 1 enemy piece) ───
+    if (mechanic === 'swapus') {
+      if (step === 1) {
+        if (!piece || piece.color !== playerColor || piece.type === 'king') {
+          setCardMsg('↔️ Click YOUR piece to swap with enemy (not king)');
+          return;
+        }
+        if (piece.frozen) {
+          setCardMsg('❄️ Cannot swap a frozen piece!');
+          return;
+        }
+        setCardMsg('↔️ Now click an ENEMY piece to swap with (not king)');
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, sq1: { row, col } } } : null);
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Step 1 selection failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+        return;
+      }
+      if (step === 2) {
+        const sq1 = (data.sq1 as Sq) || (data.sq as Sq) || (cardPending.data?.sq1 as Sq) || (cardPending.data?.sq as Sq);
+        if (!sq1) {
+          setCardMsg('↔️ Click YOUR piece first');
+          return;
+        }
+        if (!piece || piece.color !== opp || piece.type === 'king') {
+          setCardMsg('↔️ Must pick an ENEMY piece (not king)!');
+          return;
+        }
+        if (piece.frozen) {
+          setCardMsg('❄️ Cannot swap a frozen piece!');
+          return;
+        }
+        const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+        const p1 = nb[sq1.row]?.[sq1.col];
+        const p2 = nb[row]?.[col];
+        if (!p1 || !p2) {
+          setCardMsg('↔️ Pieces for swap not found');
+          return;
+        }
+        nb[sq1.row][sq1.col] = p2;
+        nb[row][col] = p1;
+        const kp  = findKing(nb, playerColor);
+        const okp = findKing(nb, opp);
+        if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+          setCardMsg('↔️ That swap would leave your king in check!');
+          return;
+        }
+        if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
+          setCardMsg('↔️ That swap would put enemy king in check — not allowed!');
+          return;
+        }
+
+        triggerSwapAnim(sq1, { row, col }, '#4ade80', '#f87171');
+        fireCardAnim('swap', `Swapped ${p1.type} ↔ ${p2.type}`);
+        playMoveSound('move');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`↔️ Swapped ${p1.type} with enemy ${p2.type}!`);
+            setTimeout(() => setCardMsg(''), 2500);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Swap failed';
+            setCardMsg(message);
+            setTimeout(() => setCardMsg(''), 2500);
+          });
+        } else {
+          setBoard(nb);
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`↔️ Swapped ${p1.type} with enemy ${p2.type}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+    }
+
+    // ─── SWAP ME (swap 2 of your own pieces) ───
+    if (mechanic === 'swapme') {
+      if (step === 1) {
+        if (!piece || piece.color !== playerColor || piece.type === 'king') {
+          setCardMsg('🔄 Click the FIRST of your pieces to swap (not king)');
+          return;
+        }
+        if (piece.frozen) {
+          setCardMsg('❄️ Cannot swap a frozen piece!');
+          return;
+        }
+        setCardMsg('🔄 Now click the SECOND of your pieces to swap with');
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, sq1: { row, col } } } : null);
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Step 1 selection failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+        return;
+      }
+      if (step === 2) {
+        const sq1 = (data.sq1 as Sq) || (data.sq as Sq) || (cardPending.data?.sq1 as Sq) || (cardPending.data?.sq as Sq);
+        if (!sq1) {
+          setCardMsg('🔄 Click YOUR first piece first');
+          return;
+        }
+        if (!piece || piece.color !== playerColor || piece.type === 'king') {
+          setCardMsg('🔄 Must pick YOUR piece (not king)!');
+          return;
+        }
+        if (row === sq1.row && col === sq1.col) {
+          setCardMsg('🔄 Pick a different piece!');
+          return;
+        }
+        if (piece.frozen) {
+          setCardMsg('❄️ Cannot swap a frozen piece!');
+          return;
+        }
+        const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+        const p1 = nb[sq1.row]?.[sq1.col];
+        const p2 = nb[row]?.[col];
+        if (!p1 || !p2) {
+          setCardMsg('🔄 Pieces for swap not found');
+          return;
+        }
+        nb[sq1.row][sq1.col] = p2;
+        nb[row][col] = p1;
+        const kp  = findKing(nb, playerColor);
+        const okp = findKing(nb, opp);
+        if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+          setCardMsg('🔄 That swap would leave your king in check!');
+          return;
+        }
+        if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
+          setCardMsg('🔄 That swap would put enemy king in check!');
+          return;
+        }
+
+        triggerSwapAnim(sq1, { row, col }, '#4ade80', '#4ade80');
+        fireCardAnim('swap', `Swapped ${p1.type} ↔ ${p2.type}`);
+        playMoveSound('move');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`🔄 Swapped ${p1.type} and ${p2.type}!`);
+            setTimeout(() => setCardMsg(''), 2500);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Swap failed';
+            setCardMsg(message);
+            setTimeout(() => setCardMsg(''), 2500);
+          });
+        } else {
+          setBoard(nb);
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🔄 Swapped ${p1.type} and ${p2.type}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+    }
+
+    // ─── SWAP HIM (swap 2 enemy pieces) ───
+    if (mechanic === 'swaphim') {
+      if (step === 1) {
+        if (!piece || piece.color !== opp || piece.type === 'king') {
+          setCardMsg('🔁 Click FIRST enemy piece to swap (not king)');
+          return;
+        }
+        if (piece.frozen) {
+          setCardMsg('❄️ Cannot swap a frozen piece!');
+          return;
+        }
+        setCardMsg('🔁 Now click the SECOND enemy piece to swap with (not king)');
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, sq1: { row, col } } } : null);
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Step 1 selection failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+        return;
+      }
+      if (step === 2) {
+        const sq1 = (data.sq1 as Sq) || (data.sq as Sq) || (cardPending.data?.sq1 as Sq) || (cardPending.data?.sq as Sq);
+        if (!sq1) {
+          setCardMsg('🔁 Click FIRST enemy piece first');
+          return;
+        }
+        if (!piece || piece.color !== opp || piece.type === 'king') {
+          setCardMsg('🔁 Must pick an ENEMY piece (not king)!');
+          return;
+        }
+        if (row === sq1.row && col === sq1.col) {
+          setCardMsg('🔁 Pick a different piece!');
+          return;
+        }
+        if (piece.frozen) {
+          setCardMsg('❄️ Cannot swap a frozen piece!');
+          return;
+        }
+        const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+        const p1 = nb[sq1.row]?.[sq1.col];
+        const p2 = nb[row]?.[col];
+        if (!p1 || !p2) {
+          setCardMsg('🔁 Pieces for swap not found');
+          return;
+        }
+        nb[sq1.row][sq1.col] = p2;
+        nb[row][col] = p1;
+        const kp  = findKing(nb, playerColor);
+        const okp = findKing(nb, opp);
+        if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+          setCardMsg('🔁 That swap would leave your king in check!');
+          return;
+        }
+        if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
+          setCardMsg('🔁 That swap would put enemy king in check — not allowed!');
+          return;
+        }
+
+        triggerSwapAnim(sq1, { row, col }, '#f87171', '#f87171');
+        fireCardAnim('swap', `Swapped enemy ${p1.type} ↔ ${p2.type}`);
+        playMoveSound('move');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`🔁 Swapped enemy ${p1.type} and ${p2.type}!`);
+            setTimeout(() => setCardMsg(''), 2500);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Swap failed';
+            setCardMsg(message);
+            setTimeout(() => setCardMsg(''), 2500);
+          });
+        } else {
+          setBoard(nb);
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🔁 Swapped enemy ${p1.type} and ${p2.type}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+    }
+
+    // ─── TELEPORT ───
+    if (mechanic === 'teleport') {
+      if (step === 1) {
+        if (!piece || piece.color !== playerColor || piece.type === 'king') {
+          setCardMsg('🌀 Click YOUR piece to teleport (not king)');
+          return;
+        }
+        setCardMsg('🌀 Now click an empty destination square');
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, from: { row, col } } } : null);
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Step 1 selection failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+        return;
+      }
+      if (step === 2) {
+        const from = (data.from as Sq) || (cardPending.data.from as Sq);
+        if (!from) { setCardMsg('🌀 Click YOUR piece first'); return; }
+        if (piece) { setCardMsg('🌀 Destination square must be empty!'); return; }
+        const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+        const src = nb[from.row][from.col]!;
+        nb[row][col] = src;
+        nb[from.row][from.col] = null;
+        const kp  = findKing(nb, playerColor);
+        const okp = findKing(nb, opp);
+        if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+          setCardMsg('🌀 Teleport would leave your king in check!');
+          return;
+        }
+        if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
+          setCardMsg('🌀 Cannot teleport there — would put enemy king in check!');
+          return;
+        }
+
+        triggerTeleportAnim(from, { row, col }, src.type, playerColor);
+        fireCardAnim('teleport', `Teleported to ${FILES[col]}${RANKS[row]}`);
+        playMoveSound('move');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`🌀 Teleported to ${FILES[col]}${RANKS[row]}`);
+            setTimeout(() => setCardMsg(''), 2500);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Teleport failed';
+            setCardMsg(message);
+            setTimeout(() => setCardMsg(''), 2500);
+          });
+        } else {
+          setBoard(nb);
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🌀 Teleported to ${FILES[col]}${RANKS[row]}`);
+          setTimeout(() => setCardMsg(''), 2500);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+    }
+
+    // ─── JUMP ───
+    if (mechanic === 'jump') {
+      if (step === 1) {
+        if (!piece || piece.color !== playerColor || piece.type === 'king') {
+          setCardMsg('🦘 Click YOUR piece to jump (not king)');
+          return;
+        }
+        setCardMsg('🦘 Now click landing square');
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, from: { row, col } } } : null);
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Step 1 selection failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+        return;
+      }
+      if (step === 2) {
+        const from = (data.from as Sq) || (cardPending.data.from as Sq);
+        if (!from) { setCardMsg('🦘 Click YOUR piece first'); return; }
+        if (piece && piece.color === playerColor) { setCardMsg('🦘 Cannot land on your own piece!'); return; }
+        if (piece && piece.type === 'king') { setCardMsg('🦘 Cannot capture king!'); return; }
+        const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+        const src = nb[from.row][from.col]!;
+        nb[row][col] = src;
+        nb[from.row][from.col] = null;
+        const kp  = findKing(nb, playerColor);
+        const okp = findKing(nb, opp);
+        if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+          setCardMsg('🦘 Jump would leave your king in check!');
+          return;
+        }
+        if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
+          setCardMsg('🦘 Cannot jump there — would put enemy king in check!');
+          return;
+        }
+
+        triggerJumpAnim(from, { row, col }, src.type, playerColor, Boolean(piece));
+        fireCardAnim('teleport', `Jumped to ${FILES[col]}${RANKS[row]}`);
+        playMoveSound(piece ? 'capture' : 'move');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`🦘 Jumped to ${FILES[col]}${RANKS[row]}`);
+            setTimeout(() => setCardMsg(''), 2500);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Jump failed';
+            setCardMsg(message);
+            setTimeout(() => setCardMsg(''), 2500);
+          });
+        } else {
+          setBoard(nb);
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🦘 Jumped to ${FILES[col]}${RANKS[row]}`);
+          setTimeout(() => setCardMsg(''), 2500);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+    }
+
+    // ─── CLONE ───
+    if (mechanic === 'clone') {
+      if (step === 1) {
+        if (!piece || piece.color !== playerColor || piece.type === 'king') {
+          setCardMsg('🧬 Click YOUR piece to clone (not king)');
+          return;
+        }
+        setCardMsg('🧬 Now click an adjacent empty square to place the clone');
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, from: { row, col } } } : null);
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Step 1 selection failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+        return;
+      }
+      if (step === 2) {
+        const from = (data.from as Sq) || (cardPending.data.from as Sq);
+        if (!from) { setCardMsg('🧬 Click YOUR piece first'); return; }
+        if (piece) { setCardMsg('🧬 Target square must be EMPTY!'); return; }
+        if (Math.abs(row - from.row) > 1 || Math.abs(col - from.col) > 1) {
+          setCardMsg('🧬 Must be an ADJACENT square!');
+          return;
+        }
+        const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+        const src = nb[from.row][from.col]!;
+        nb[row][col] = { ...src };
+        const kp  = findKing(nb, playerColor);
+        const okp = findKing(nb, opp);
+        if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+          setCardMsg('🧬 Clone would leave your king in check!');
+          return;
+        }
+        if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
+          setCardMsg('🧬 Cannot clone there — would put enemy king in check!');
+          return;
+        }
+
+        triggerCloneAnim?.(from, { row, col }, src.type, playerColor);
+        playMoveSound('move');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`🧬 Cloned ${src.type} to ${FILES[col]}${RANKS[row]}!`);
+            setTimeout(() => setCardMsg(''), 2500);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Clone failed';
+            setCardMsg(message);
+            setTimeout(() => setCardMsg(''), 2500);
+          });
+        } else {
+          setBoard(nb);
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🧬 Cloned ${src.type} to ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+    }
+
+    // ─── MIND CONTROL ───
+    if (mechanic === 'mindcontrol') {
+      if (!piece || piece.color !== opp || piece.type === 'king') {
+        setCardMsg('🧠 Click an ENEMY piece to steal (not king)');
+        return;
+      }
+      const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+      nb[row][col] = { ...piece, color: playerColor };
+      const kp  = findKing(nb, playerColor);
+      const okp = findKing(nb, opp);
+      if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+        setCardMsg('🧠 Cannot steal — would leave your king in check!');
+        return;
+      }
+      if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
+        setCardMsg('🧠 Cannot steal — would put enemy king in check!');
+        return;
+      }
+
+      triggerMindControlAnim({ row, col }, playerColor, piece.type);
+      fireCardAnim('mindcontrol', `Controlled ${piece.type}`);
+      playCardSound('mindcontrol');
+
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🧠 Stole enemy ${piece.type}! It's yours now.`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Mind control failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+      } else {
+        setBoard(nb);
+        setCardPending(null);
+        setSelectedCard(null);
+        setCardMsg(`🧠 Stole enemy ${piece.type}! It's yours now.`);
+        setTimeout(() => setCardMsg(''), 2500);
+        finishCardUse(card, playerColor);
+      }
       return;
     }
 
-    // Local / Offline fallback logic for all cards
-    switch (mechanic) {
-      case 'freeze': {
-        if (!piece || piece.color !== opp || piece.type === 'king') return;
+    // ─── BORROW ───
+    if (mechanic === 'borrow') {
+      if (!piece || piece.color !== opp || piece.type === 'king') {
+        setCardMsg('🤏 Click an ENEMY piece to borrow for 1 turn (not king)');
+        return;
+      }
+      const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+      nb[row][col] = { ...piece, color: playerColor, borrowed: true };
+      const kp  = findKing(nb, playerColor);
+      const okp = findKing(nb, opp);
+      if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+        setCardMsg('🤏 Cannot borrow — would leave your king in check!');
+        return;
+      }
+      if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
+        setCardMsg('🤏 Cannot borrow — would put enemy king in check!');
+        return;
+      }
+
+      fireCardAnim('smallsacrifice', `Borrowed ${piece.type}`);
+      playCardSound('borrow');
+
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🤏 Borrowed enemy ${piece.type} for this turn!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Borrow failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+      } else {
+        setBoard(nb);
+        setCardPending(null);
+        setSelectedCard(null);
+        setCardMsg(`🤏 Borrowed enemy ${piece.type} for this turn!`);
+        setTimeout(() => setCardMsg(''), 2500);
+        finishCardUse(card, playerColor);
+      }
+      return;
+    }
+
+    // ─── PARASITE ───
+    if (mechanic === 'parasite') {
+      if (step === 1) {
+        if (!piece || piece.color !== playerColor || piece.type === 'king') {
+          setCardMsg('🦠 Click YOUR piece to be the host (not king)');
+          return;
+        }
+        if (piece.frozen) {
+          setCardMsg('❄️ Cannot parasitize with a frozen piece!');
+          return;
+        }
+        const val = PIECE_VALUE[piece.type];
+        setCardMsg(`🦠 Now click an ENEMY piece of SAME VALUE (${val} pts) to link`);
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, hostSq: { row, col }, hostValue: val } } : null);
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Step 1 selection failed';
+          setCardMsg(message);
+          setTimeout(() => setCardMsg(''), 2500);
+        });
+        return;
+      }
+      if (step === 2) {
+        const hostSq = (data.hostSq as Sq) || (data.sq as Sq) || (cardPending.data?.hostSq as Sq) || (cardPending.data?.sq as Sq);
+        if (!hostSq) {
+          setCardMsg('🦠 Click YOUR host piece first');
+          return;
+        }
+        if (!piece || piece.color !== opp || piece.type === 'king') {
+          setCardMsg('🦠 Must pick an ENEMY piece (not king)!');
+          return;
+        }
+        const hostVal = data.hostValue as number | undefined;
+        if (hostVal !== undefined && PIECE_VALUE[piece.type] !== hostVal) {
+          setCardMsg(`🦠 Must pick an enemy piece with SAME value (${hostVal} pts)!`);
+          return;
+        }
+        if (piece.frozen) {
+          setCardMsg('❄️ Cannot parasitize a frozen piece!');
+          return;
+        }
+        const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+        const hostPiece = nb[hostSq.row]?.[hostSq.col];
+        if (!hostPiece) {
+          setCardMsg('🦠 Host piece not found');
+          return;
+        }
+        hostPiece.parasiteTarget = `${row},${col}`;
+        playCardSound('card_play');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`🦠 Parasite linked! If your ${hostPiece.type} dies, their ${piece.type} dies too!`);
+            setTimeout(() => setCardMsg(''), 3000);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Parasite failed';
+            setCardMsg(message);
+            setTimeout(() => setCardMsg(''), 2500);
+          });
+        } else {
+          setBoard(nb);
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🦠 Parasite linked! If your ${hostPiece.type} dies, their ${piece.type} dies too!`);
+          setTimeout(() => setCardMsg(''), 3000);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+    }
+
+    // ─── DEMOTE HIM / PROMOTE HIM ───
+    if (mechanic === 'demotehim') {
+      if (!piece || piece.type === 'king') {
+        setCardMsg('📉 Click ANY piece to demote (not king)');
+        return;
+      }
+      const DOWNGRADE: Record<PieceType, PieceType[]> = {
+        queen: ['rook', 'bishop', 'knight'],
+        rook: ['bishop', 'knight', 'pawn'],
+        bishop: ['knight', 'pawn'],
+        knight: ['pawn'],
+        pawn: [],
+        king: [],
+      };
+      const downgrades = DOWNGRADE[piece.type];
+      if (!downgrades?.length) {
+        setCardMsg('📉 That piece is already a pawn — cannot demote further!');
+        return;
+      }
+      setPromoPicker({ sq: { row, col }, options: downgrades, mechanic: 'demotehim' });
+      setCardMsg('📉 Choose what to demote it to:');
+      setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, sq: { row, col } } } : null);
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Target selection failed';
+          setCardMsg(message);
+        });
+      }
+      return;
+    }
+
+    if (mechanic === 'promotehim') {
+      if (!piece || piece.color !== opp || piece.type === 'king') {
+        setCardMsg('📈 Click an ENEMY piece to promote (not king)');
+        return;
+      }
+      const UPGRADE: Record<PieceType, PieceType[]> = {
+        pawn: ['knight', 'bishop', 'rook', 'queen'],
+        knight: ['bishop', 'rook', 'queen'],
+        bishop: ['rook', 'queen'],
+        rook: ['queen'],
+        queen: [],
+        king: [],
+      };
+      const upgrades = UPGRADE[piece.type];
+      if (!upgrades?.length) {
+        setCardMsg('📈 That piece cannot be promoted further!');
+        return;
+      }
+      setPromoPicker({ sq: { row, col }, options: upgrades, mechanic: 'promotehim' });
+      setCardMsg('📈 Choose what to promote enemy piece to:');
+      setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, sq: { row, col } } } : null);
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Target selection failed';
+          setCardMsg(message);
+        });
+      }
+      return;
+    }
+
+    // ─── PROMOTE / DEMOTE ───
+    if (mechanic === 'promote') {
+      if (!piece || piece.color !== playerColor || piece.type === 'king') {
+        setCardMsg('⬆️ Click YOUR piece to promote (not king)');
+        return;
+      }
+      const UPGRADE: Record<PieceType, PieceType[]> = {
+        pawn: ['knight', 'bishop', 'rook', 'queen'],
+        knight: ['bishop', 'rook', 'queen'],
+        bishop: ['rook', 'queen'],
+        rook: ['queen'],
+        queen: [],
+        king: [],
+      };
+      const upgrades = UPGRADE[piece.type];
+      if (!upgrades?.length) {
+        setCardMsg('⬆️ That piece cannot be promoted further!');
+        return;
+      }
+      setPromoPicker({ sq: { row, col }, options: upgrades, mechanic: 'promote' });
+      setCardMsg('⬆️ Choose what to promote it to:');
+      setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, sq: { row, col } } } : null);
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Target selection failed';
+          setCardMsg(message);
+        });
+      }
+      return;
+    }
+
+    if (mechanic === 'demote') {
+      if (!piece || piece.color !== playerColor || piece.type === 'king') {
+        setCardMsg('⬇️ Click YOUR piece to demote (not king)');
+        return;
+      }
+      const DOWNGRADE: Record<PieceType, PieceType[]> = {
+        queen: ['rook', 'bishop', 'knight'],
+        rook: ['bishop', 'knight', 'pawn'],
+        bishop: ['knight', 'pawn'],
+        knight: ['pawn'],
+        pawn: [],
+        king: [],
+      };
+      const downgrades = DOWNGRADE[piece.type];
+      if (!downgrades?.length) {
+        setCardMsg('⬇️ That piece is already a pawn!');
+        return;
+      }
+      setPromoPicker({ sq: { row, col }, options: downgrades, mechanic: 'demote' });
+      setCardMsg('⬇️ Choose what to demote it to:');
+      setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, sq: { row, col } } } : null);
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Target selection failed';
+          setCardMsg(message);
+        });
+      }
+      return;
+    }
+
+    // ─── HALF FUSE & FULL FUSION ───
+    if (mechanic === 'halffuse' || mechanic === 'fullfusion') {
+      const isHalf = mechanic === 'halffuse';
+      const HALF_CAP = 6;
+      if (step === 1) {
+        if (!piece || piece.color !== playerColor || piece.type === 'king' || piece.fusedWith) {
+          setCardMsg(`⚗️ Click YOUR non-fused piece (not king)`);
+          return;
+        }
+        setCardMsg(isHalf ? '⚗️ Now click an ADJACENT own piece to fuse with (combined ≤6 pts)' : '🔮 Now click ANY own piece to fuse with');
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, sq1: { row, col }, type1: piece.type, val1: PIECE_VALUE[piece.type] } } : null);
+        void sendAuthoritativeTarget({ row, col }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Step 1 selection failed';
+          setCardMsg(message);
+        });
+        return;
+      }
+      if (step === 2) {
+        const sq1 = (data.sq1 as Sq) || (cardPending.data.sq1 as Sq);
+        const type1 = (data.type1 as PieceType) || (cardPending.data.type1 as PieceType);
+        if (!sq1 || !type1) { setCardMsg('⚗️ Click first piece first'); return; }
+        if (!piece || piece.color !== playerColor || piece.type === 'king' || piece.fusedWith) {
+          setCardMsg('⚗️ Must click YOUR non-fused piece (not king)!');
+          return;
+        }
+        if (row === sq1.row && col === sq1.col) {
+          setCardMsg('⚗️ Pick a different piece to fuse with!');
+          return;
+        }
+        if (isHalf) {
+          const adjacent = Math.abs(row - sq1.row) <= 1 && Math.abs(col - sq1.col) <= 1;
+          if (!adjacent) { setCardMsg('⚗️ Half Fuse requires ADJACENT pieces!'); return; }
+          const combined = (PIECE_VALUE[type1] ?? 0) + (PIECE_VALUE[piece.type] ?? 0);
+          if (combined > HALF_CAP) { setCardMsg(`⚗️ Combined value ${combined} exceeds max ${HALF_CAP} pts!`); return; }
+        }
+        const redundancyErr = checkFusionRedundancy(type1, piece.type);
+        if (redundancyErr) { setCardMsg(redundancyErr); return; }
+
+        triggerFuseAnim({ sq1, sq2: { row, col }, type1, type2: piece.type, color: playerColor });
+        playMoveSound('capture');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`${isHalf ? '⚗️ Half Fuse' : '🔮 Full Fusion'} completed at ${FILES[col]}${RANKS[row]}!`);
+            setTimeout(() => setCardMsg(''), 2500);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Fusion failed';
+            setCardMsg(message);
+          });
+        } else {
+          setBoard(prev => {
+            const nb: Board = prev.map(r => r.map(p => p ? { ...p } : null));
+            nb[sq1.row][sq1.col] = null;
+            nb[row][col] = { ...piece, fusedWith: type1 };
+            return nb;
+          });
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`${isHalf ? '⚗️ Half Fuse' : '🔮 Full Fusion'} completed at ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+    }
+
+    // ─── SMALL SACRIFICE & BIG SACRIFICE ───
+    if (mechanic === 'smallsacrifice' || mechanic === 'bigsacrifice') {
+      const isBig = mechanic === 'bigsacrifice';
+      const targetVal = isBig ? 14 : 6;
+      const selected = ((data.selected as Sq[] | undefined) ?? []).slice();
+      const currentVal = selected.reduce((sum, s) => sum + (PIECE_VALUE[b[s.row][s.col]?.type ?? 'pawn'] ?? 0), 0);
+
+      // Clicking empty square confirms sacrifice
+      if (!piece) {
+        if (currentVal < targetVal) {
+          setCardMsg(`🩸 Total value: ${currentVal}/${targetVal}. Keep clicking YOUR pieces to reach ${targetVal}+ pts!`);
+          return;
+        }
+        const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
+        for (const s of selected) nb[s.row][s.col] = null;
+        const kp = findKing(nb, playerColor);
+        if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
+          setCardMsg('🩸 Cannot sacrifice — would leave your king in check!');
+          return;
+        }
+        triggerSacrificeAnim(selected);
+        fireCardAnim('smallsacrifice', isBig ? 'Big Sacrifice' : 'Small Sacrifice');
+        playMoveSound('capture');
+
+        if (authoritativeMatchIdRef.current) {
+          void sendAuthoritativeTarget({ row, col }).then(() => {
+            setCardPending(null);
+            setSelectedCard(null);
+            setCardMsg(`🩸 Sacrificed ${selected.length} piece(s) (${currentVal} pts)!`);
+            setTimeout(() => setCardMsg(''), 3000);
+          }).catch(err => {
+            const message = err instanceof Error ? err.message : 'Sacrifice failed';
+            setCardMsg(message);
+          });
+        } else {
+          setBoard(nb);
+          const drawCount = isBig ? 3 : 2;
+          const drawnCards = Array.from({ length: drawCount }, () => CARD_POOL[Math.floor(Math.random() * CARD_POOL.length)]);
+          const addFn = (h: GameCard[]) => {
+            let nextH = [...h];
+            for (const c of drawnCards) {
+              if (nextH.length < 10) nextH.push(c);
+            }
+            return nextH;
+          };
+          if (playerColor === 'white') setWhiteHand(addFn);
+          else setBlackHand(addFn);
+
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🩸 Sacrificed ${selected.length} piece(s) (${currentVal} pts)! Drew ${drawnCards.map(c => c.name).join(' + ')}`);
+          setTimeout(() => setCardMsg(''), 3500);
+          finishCardUse(card, playerColor);
+        }
+        return;
+      }
+
+      if (piece.color !== playerColor || piece.type === 'king') {
+        setCardMsg(`🩸 Click YOUR pieces to sacrifice (not king). Click empty square when done.`);
+        return;
+      }
+
+      const existingIdx = selected.findIndex(s => s.row === row && s.col === col);
+      const nextSelected = existingIdx >= 0
+        ? selected.filter((_, i) => i !== existingIdx)
+        : [...selected, { row, col }];
+      const nextVal = nextSelected.reduce((sum, s) => sum + (PIECE_VALUE[b[s.row][s.col]?.type ?? 'pawn'] ?? 0), 0);
+
+      setCardPending(prev => prev ? { ...prev, data: { ...prev.data, selected: nextSelected } } : null);
+      setCardMsg(`🩸 Selected ${nextSelected.length} piece(s) = ${nextVal} pts (need ${targetVal}+). Click empty square to confirm.`);
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).catch(() => {});
+      }
+      return;
+    }
+
+    // ─── BLACK HOLE ───
+    if (mechanic === 'blackhole') {
+      triggerBlackHoleAnim?.({ row, col });
+      fireCardAnim('blackhole', 'Black Hole');
+      playMoveSound('bomb');
+
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🕳️ Black Hole consumed 3x3 at ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Black hole failed';
+          setCardMsg(message);
+        });
+      } else {
+        setBoard(prev => {
+          const nb: Board = prev.map(r => r.map(p => p ? { ...p } : null));
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const r = row + dr, c = col + dc;
+              if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+                if (nb[r][c]?.type !== 'king') nb[r][c] = null;
+              }
+            }
+          }
+          return nb;
+        });
+        setCardPending(null);
+        setSelectedCard(null);
+        setCardMsg(`🕳️ Black Hole consumed 3x3 at ${FILES[col]}${RANKS[row]}!`);
+        setTimeout(() => setCardMsg(''), 2500);
+        finishCardUse(card, playerColor);
+      }
+      return;
+    }
+
+    // ─── FAKE PIECE (DECOY) ───
+    if (mechanic === 'fakepiece') {
+      if (piece) { setCardMsg('🎭 Must click an EMPTY square to place fake piece!'); return; }
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🎭 Decoy placed at ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Decoy placement failed';
+          setCardMsg(message);
+        });
+      } else {
+        setBoard(prev => {
+          const nb: Board = prev.map(r => r.map(p => p ? { ...p } : null));
+          nb[row][col] = { type: 'pawn', color: playerColor, fake: true };
+          return nb;
+        });
+        setCardPending(null);
+        setSelectedCard(null);
+        setCardMsg(`🎭 Decoy placed at ${FILES[col]}${RANKS[row]}!`);
+        setTimeout(() => setCardMsg(''), 2500);
+        finishCardUse(card, playerColor);
+      }
+      return;
+    }
+
+    // ─── FREEZE ───
+    if (mechanic === 'freeze') {
+      if (!piece || piece.color !== opp || piece.type === 'king') return;
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`❄️ Frozen ${piece.type} at ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Freeze failed';
+          setCardMsg(message);
+        });
+      } else {
         setBoard(prev => {
           const nb: Board = prev.map(r => r.map(p => p ? { ...p } : null));
           nb[row][col] = { ...piece, frozen: true };
           return nb;
         });
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`❄️ Frozen ${piece.type} at ${FILES[col]}${RANKS[row]}!`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      case 'shield': {
-        if (!piece || piece.color !== playerColor || piece.type === 'king') return;
+      return;
+    }
+
+    // ─── SHIELD ───
+    if (mechanic === 'shield') {
+      if (!piece || piece.color !== playerColor || piece.type === 'king') return;
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🛡️ Shielded ${piece.type} at ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Shield failed';
+          setCardMsg(message);
+        });
+      } else {
         setBoard(prev => {
           const nb: Board = prev.map(r => r.map(p => p ? { ...p } : null));
           nb[row][col] = { ...piece, shielded: true, shieldTurn: 0 };
           return nb;
         });
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`🛡️ Shielded ${piece.type} at ${FILES[col]}${RANKS[row]}!`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      case 'sniper': {
-        if (!piece || piece.type === 'king') return;
-        triggerSniperAnim({ row, col }, piece.type, piece.color, 'sniper');
+      return;
+    }
+
+    // ─── SNIPER ───
+    if (mechanic === 'sniper') {
+      if (!piece || piece.type === 'king') return;
+      triggerSniperAnim({ row, col }, piece.type, piece.color, 'sniper');
+      fireCardAnim('sniper', `${piece.type} eliminated`);
+      playMoveSound('capture');
+
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🎯 Sniper eliminated ${piece.type} on ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Sniper failed';
+          setCardMsg(message);
+        });
+      } else {
         setTimeout(() => {
           setBoard(prev => {
             const nb: Board = prev.map(r => r.map(p => p ? { ...p } : null));
@@ -541,15 +1408,33 @@ export function useCardInteraction(props: UseCardInteractionProps) {
             return nb;
           });
         }, 1100);
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`🎯 Sniper eliminated ${piece.type} on ${FILES[col]}${RANKS[row]}!`);
-        fireCardAnim('sniper', `${piece.type} eliminated`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      case 'badsniper': {
-        if (!piece || piece.type === 'king' || piece.color !== playerColor) return;
-        triggerSniperAnim({ row, col }, piece.type, piece.color, 'badsniper');
+      return;
+    }
+
+    // ─── BAD SNIPER ───
+    if (mechanic === 'badsniper') {
+      if (!piece || piece.type === 'king' || piece.color !== playerColor) return;
+      triggerSniperAnim({ row, col }, piece.type, piece.color, 'badsniper');
+      fireCardAnim('sniper', `${piece.type} eliminated`);
+      playMoveSound('capture');
+
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🎯 Bad Sniper eliminated your own ${piece.type} on ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Bad sniper failed';
+          setCardMsg(message);
+        });
+      } else {
         setTimeout(() => {
           setBoard(prev => {
             const nb: Board = prev.map(r => r.map(p => p ? { ...p } : null));
@@ -557,42 +1442,104 @@ export function useCardInteraction(props: UseCardInteractionProps) {
             return nb;
           });
         }, 1100);
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`🎯 Bad Sniper eliminated your own ${piece.type} on ${FILES[col]}${RANKS[row]}!`);
-        fireCardAnim('sniper', `${piece.type} eliminated`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      case 'lavaground': {
-        if (piece) {
-          setCardMsg('🌋 Must click an EMPTY square to place lava!');
-          setTimeout(() => setCardMsg(''), 2000);
-          return;
-        }
+      return;
+    }
+
+    // ─── LAVA GROUND ───
+    if (mechanic === 'lavaground') {
+      if (piece) {
+        setCardMsg('🌋 Must click an EMPTY square to place lava!');
+        return;
+      }
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🌋 Lava trap placed on ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Lava placement failed';
+          setCardMsg(message);
+        });
+      } else {
         setLavaSquares(prev => [...prev, { row, col, movesLeft: 999 }]);
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`🌋 Lava trap placed on ${FILES[col]}${RANKS[row]}!`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      case 'fortress': {
-        const tr = Math.min(row, 6);
-        const tc = Math.min(col, 6);
+      return;
+    }
+
+    // ─── FORTRESS ───
+    if (mechanic === 'fortress') {
+      const tr = Math.min(row, 6);
+      const tc = Math.min(col, 6);
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🏰 Fortress zone placed with top-left at ${FILES[tc]}${RANKS[tr]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Fortress placement failed';
+          setCardMsg(message);
+        });
+      } else {
         setFortressZones(prev => [...prev, { topRow: tr, leftCol: tc, ownerColor: playerColor, turnsLeft: 4 }]);
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`🏰 Fortress zone placed with top-left at ${FILES[tc]}${RANKS[tr]}!`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      case 'fog_village': {
+      return;
+    }
+
+    // ─── FOG VILLAGE ───
+    if (mechanic === 'fog_village') {
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🌫️ Fog Village placed around ${FILES[col]}${RANKS[row]} for 3 turns!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Fog placement failed';
+          setCardMsg(message);
+        });
+      } else {
         setFogZones(prev => [...prev, { centerRow: row, centerCol: col, ownerColor: playerColor, turnsLeft: 3 }]);
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`🌫️ Fog Village placed around ${FILES[col]}${RANKS[row]} for 3 turns!`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      case 'invisible': {
-        if (!piece || piece.color !== playerColor || piece.type === 'king') return;
+      return;
+    }
+
+    // ─── INVISIBLE ───
+    if (mechanic === 'invisible') {
+      if (!piece || piece.color !== playerColor || piece.type === 'king') return;
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`👻 ${piece.type} turned invisible for 3 turns!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Invisible failed';
+          setCardMsg(message);
+        });
+      } else {
         setGhostPiece({ piece, row, col, ownerColor: playerColor, roundsLeft: 3 });
         if (ghostRef) ghostRef.current = { piece, row, col, ownerColor: playerColor, roundsLeft: 3 };
         setBoard(prev => {
@@ -600,27 +1547,51 @@ export function useCardInteraction(props: UseCardInteractionProps) {
           nb[row][col] = null;
           return nb;
         });
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`👻 ${piece.type} turned invisible for 3 turns!`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      case 'unabomber': {
-        if (!piece || piece.color !== playerColor || piece.type === 'king') return;
+      return;
+    }
+
+    // ─── UNABOMBER ───
+    if (mechanic === 'unabomber') {
+      if (!piece || piece.color !== playerColor || piece.type === 'king') return;
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`💣 Bomb attached to ${piece.type} on ${FILES[col]}${RANKS[row]}!`);
+          setTimeout(() => setCardMsg(''), 2500);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Bomb placement failed';
+          setCardMsg(message);
+        });
+      } else {
         setBombPieces(prev => [...prev, { row, col, ownerColor: playerColor, turnsLeft: 3 }]);
+        setCardPending(null);
+        setSelectedCard(null);
         setCardMsg(`💣 Bomb attached to ${piece.type} on ${FILES[col]}${RANKS[row]}!`);
         setTimeout(() => setCardMsg(''), 2500);
         finishCardUse(card, playerColor);
-        break;
       }
-      default: {
-        setCardMsg('Card processed');
-        setTimeout(() => setCardMsg(''), 2000);
-        finishCardUse(card, playerColor);
-        break;
-      }
+      return;
     }
-  }, [cardPending, board, authoritativeMatchIdRef, authoritativeActorForColor, applyAuthoritativeSnapshot, triggerSniperAnim, fireCardAnim, triggerFuseAnim, finishCardUse, setBoard, setCardMsg, setFortressZones, setFogZones, setGhostPiece, ghostRef, setLavaSquares, setBombPieces]);
+
+    // Default fallback
+    setCardMsg('Card processed');
+    setTimeout(() => setCardMsg(''), 2000);
+    finishCardUse(card, playerColor);
+  }, [
+    cardPending, board, authoritativeMatchIdRef, authoritativeActorForColor, applyAuthoritativeSnapshot,
+    triggerSniperAnim, triggerSwapAnim, triggerTeleportAnim, triggerJumpAnim, triggerMindControlAnim,
+    triggerSacrificeAnim, triggerCloneAnim, triggerBlackHoleAnim, triggerFuseAnim, checkFusionRedundancy,
+    finishCardUse, setBoard, setCardMsg, setPromoPicker, setFortressZones, setFogZones, setGhostPiece,
+    ghostRef, setLavaSquares, setBombPieces, setSelectedCard, setWhiteHand, setBlackHand,
+    isAttackedWithFusion, playMoveSound, playCardSound, fireCardAnim, setCardPending
+  ]);
 
   const applyCard = React.useCallback((card: GameCard, playerColor: PieceColor) => {
     if (!canUseCard(card, playerColor)) return;
