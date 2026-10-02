@@ -83,7 +83,7 @@ export function resolveSeatIdentity(input: SeatIdentityInput): SeatIdentity {
   if (seatName && !isPlaceholderSeatName(seatName)) {
     return { waiting: false, name: seatName, rating: null };
   }
-  return { waiting: false, name: 'Anonymous', rating: null };
+  return { waiting: false, name: 'Guest', rating: null };
 }
 
 const generatedSeatNamePattern = /^[A-Z][a-z]+ [A-Z][a-z]+ \d{1,4}$/;
