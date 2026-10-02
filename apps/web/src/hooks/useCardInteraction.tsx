@@ -1222,7 +1222,10 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         } else {
           setBoard(nb);
           const drawCount = isBig ? 3 : 2;
-          const drawnCards = Array.from({ length: drawCount }, () => CARD_POOL[Math.floor(Math.random() * CARD_POOL.length)]);
+          const drawnCards: GameCard[] = Array.from({ length: drawCount }, () => {
+            const tmpl = CARD_POOL[Math.floor(Math.random() * CARD_POOL.length)];
+            return { ...tmpl, id: `card_${tmpl.mechanic}_${incrementCardSeq()}` };
+          });
           const addFn = (h: GameCard[]) => {
             const nextH = [...h];
             for (const c of drawnCards) {

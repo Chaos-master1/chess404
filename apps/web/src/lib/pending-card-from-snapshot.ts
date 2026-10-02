@@ -20,9 +20,10 @@ export function buildPendingCardFromSnapshot(
 ): CardPendingState {
   if (!pending || pending.mechanic === 'joker') return null;
   const ownerCards = pending.ownerColor === 'white' ? whiteCards : blackCards;
-  const card = ownerCards.find(item => item.id === pending.cardId)
+  const poolTmpl = CARD_POOL.find(item => item.mechanic === pending.mechanic);
+  const card: GameCard | undefined = ownerCards.find(item => item.id === pending.cardId)
     || ownerCards.find(item => item.mechanic === pending.mechanic)
-    || (CARD_POOL.find(item => item.mechanic === pending.mechanic) as GameCard | undefined);
+    || (poolTmpl ? { ...poolTmpl, id: pending.cardId || `card_${poolTmpl.mechanic}` } : undefined);
   if (!card) return null;
   const mechanic = pending.mechanic;
   const target = pending.target ?? undefined;
