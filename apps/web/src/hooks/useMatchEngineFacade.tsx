@@ -30,6 +30,8 @@ import {
 } from '../chessEngine';
 import {
   OPP,
+  FILES,
+  RANKS,
 } from '../constants';
 import {
   applyIntent,
@@ -323,6 +325,10 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     triggerTeleportAnim, jumpAnim, setJumpAnim, triggerJumpAnim, sacrificeAnim,
     setSacrificeAnim, triggerSacrificeAnim, mindControlAnim, setMindControlAnim,
     triggerMindControlAnim, fuseAnim, setFuseAnim, triggerFuseAnim,
+    reverseAnim, setReverseAnim, triggerReverseAnim,
+    cloneAnim, setCloneAnim, triggerCloneAnim,
+    blackHoleAnim, setBlackHoleAnim, triggerBlackHoleAnim,
+    poofAnim, setPoofAnim, triggerPoofAnim,
     triggerSwapAnim,
   } = animations;
 
@@ -589,11 +595,36 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       const mySeat = viewerSeatRef.current;
       const myActor = mySeat ? authoritativeActorForColor(mySeat) : null;
       for (const ev of freshEvents) {
-        if (ev.type === 'card_played') {
+        if (ev.type === 'move_applied') {
+          if (ev.payload?.lavaTriggered && ev.payload?.to) {
+            const lavaSq = ev.payload.to as Sq;
+            setLavaExploding([lavaSq]);
+            setTimeout(() => setLavaExploding([]), 1400);
+            playSound('capture');
+            setCardMsg(`🌋 Lava trap consumed piece at ${FILES[lavaSq.col]}${RANKS[lavaSq.row]}!`);
+          }
+          if (Array.isArray(ev.payload?.bombExplodedSquares) && ev.payload.bombExplodedSquares.length > 0) {
+            const bSqs = ev.payload.bombExplodedSquares as Sq[];
+            setBombExploding(bSqs);
+            setTimeout(() => setBombExploding([]), 1600);
+            playSound('capture');
+            setCardMsg('💣 Bomb detonated!');
+          }
+          if (Array.isArray(ev.payload?.blackHoleExplodedSquares) && ev.payload.blackHoleExplodedSquares.length > 0) {
+            const bhSqs = ev.payload.blackHoleExplodedSquares as Sq[];
+            triggerSacrificeAnim(bhSqs);
+            playSound('capture');
+            setCardMsg('🕳️ Black Hole consumed the area!');
+          }
+        } else if (ev.type === 'card_played') {
           const cardPayload = ev.payload?.card as GameCard | undefined;
           const mechanic = (ev.payload?.mechanic || cardPayload?.mechanic || '') as CardMechanic;
           const cardName = cardPayload?.name || ev.payload?.name || mechanic;
           const isOpponent = !myActor?.playerId || (ev.actorId ? ev.actorId !== myActor.playerId : true);
+          if (mechanic === 'reverse') {
+            triggerReverseAnim();
+            playSound('move');
+          }
           if (isOpponent) {
             playCardSound();
             if (mechanic) {
@@ -611,16 +642,37 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
             if ((mechanic === 'sniper' || mechanic === 'badsniper') && piece) {
               triggerSniperAnim(target, piece.type, piece.color, mechanic as any);
               fireCardAnim('sniper', `${piece.type} eliminated`);
+              playSound('capture');
             } else if (mechanic === 'teleport' && fromSq) {
               triggerTeleportAnim(fromSq, target, piece?.type ?? 'queen', piece?.color ?? 'black');
+              playSound('move');
             } else if (mechanic === 'jump' && fromSq) {
               triggerJumpAnim(fromSq, target, piece?.type ?? 'knight', piece?.color ?? 'black', Boolean(piece));
+              playSound(piece ? 'capture' : 'move');
             } else if ((mechanic === 'swapme' || mechanic === 'swapus' || mechanic === 'swaphim') && fromSq) {
               triggerSwapAnim(fromSq, target);
+              playSound('move');
             } else if (mechanic === 'mindcontrol' && piece) {
               triggerMindControlAnim(target, piece.color, piece.type);
+              playSound('card_play');
             } else if ((mechanic === 'smallsacrifice' || mechanic === 'bigsacrifice') && fromSq) {
               triggerSacrificeAnim([fromSq, target]);
+              playSound('capture');
+            } else if ((mechanic === 'halffuse' || mechanic === 'fullfusion') && fromSq) {
+              triggerFuseAnim({
+                sq1: fromSq,
+                sq2: target,
+                type1: piece?.type ?? 'rook',
+                type2: 'knight',
+                color: piece?.color ?? 'black',
+              });
+              playSound('card_play');
+            } else if (mechanic === 'clone' && fromSq) {
+              triggerCloneAnim(fromSq, target, piece?.type ?? 'pawn', piece?.color ?? 'black');
+              playSound('move');
+            } else if (mechanic === 'blackhole') {
+              triggerBlackHoleAnim(target);
+              playSound('capture');
             }
           }
         } else if (ev.type === 'card_drawn') {
@@ -687,7 +739,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setClockActive(true);
       setTicking(match.turn);
     }
-  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setFogZones, setFortressZones, setBombPieces, setViewerSeat, setMatchSeatMeta, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, triggerTeleportAnim, triggerJumpAnim, triggerSwapAnim, triggerMindControlAnim, triggerSacrificeAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setLavaExploding, setFogZones, setFortressZones, setBombPieces, setBombExploding, setViewerSeat, setMatchSeatMeta, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, triggerTeleportAnim, triggerJumpAnim, triggerSwapAnim, triggerMindControlAnim, triggerSacrificeAnim, triggerFuseAnim, triggerReverseAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;
@@ -730,6 +782,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     setOver, setWinner, setMovHist, setPosHist, setSnapshots, triggerSniperAnim,
     triggerTransformAnim, triggerFuseAnim,
     triggerSwapAnim, triggerTeleportAnim, triggerJumpAnim, triggerMindControlAnim, triggerSacrificeAnim,
+    triggerCloneAnim, triggerBlackHoleAnim,
     over, hostedRuntime, viewerSeatRef
   });
 
@@ -1281,6 +1334,8 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     lavaSquares, lavaExploding, fogZones, fortressZones,
     triggerSniperAnim, triggerTransformAnim, triggerFuseAnim,
     transformAnim, sniperAnim, teleportAnim, jumpAnim, sacrificeAnim, mindControlAnim, fuseAnim,
+    reverseAnim, triggerReverseAnim,
+    cloneAnim, triggerCloneAnim, blackHoleAnim, triggerBlackHoleAnim, poofAnim, triggerPoofAnim,
     timeW, setTimeW, timeB, setTimeB, tickingState, setTicking,
     clockActive, setClockActive, resetTimer,
     authoritativeLive, authoritativeStatus,

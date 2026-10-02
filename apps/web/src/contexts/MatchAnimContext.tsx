@@ -16,6 +16,10 @@ export interface MatchAnimContextShape {
   sacrificeAnim: any | null;
   mindControlAnim: any | null;
   fuseAnim: any | null;
+  reverseAnim: any | null;
+  cloneAnim: any | null;
+  blackHoleAnim: any | null;
+  poofAnim: any | null;
 }
 
 const MatchAnimContext = createContext<MatchAnimContextShape | null>(null);

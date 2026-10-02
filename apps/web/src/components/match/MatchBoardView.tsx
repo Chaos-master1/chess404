@@ -4,7 +4,7 @@ import { GamePanel } from './GamePanel';
 import type { Board, PieceType, PieceColor, Sq, GameCard, CardPendingState, DoubleMove, BombPiece, LavaSquare, Rarity } from '../../types';
 import { RARITY_STYLE, RARITY_WEIGHTS, OPP, FILES, RANKS, SQ, MAX_HAND_SIZE, DRAW_FROM, DRAW_EVERY, INITIAL_DEAL_ROUND, PIECE_VALUE } from '../../constants';
 import { findKing, positionKey, toFEN, uciToSan } from '../../chessEngine';
-import { BoardCanvas, type TransformAnim, type SniperAnim, type TeleportAnim, type JumpAnim, type SacrificeAnim, type MindControlAnim, type FuseAnim, type BoardArrow } from '../../BoardCanvas';
+import { BoardCanvas, type TransformAnim, type SniperAnim, type TeleportAnim, type JumpAnim, type SacrificeAnim, type MindControlAnim, type FuseAnim, type ReverseAnim, type BoardArrow } from '../../BoardCanvas';
 import CardHand from './CardHand';
 import PlayerCardInfo from './PlayerCardInfo';
 import { useMatchEngineContext } from '../../contexts/MatchEngineProvider';
@@ -12,6 +12,44 @@ import { useSound } from '../../hooks/useSound';
 import { useAccessibility } from '../../hooks/useAccessibility';
 
 const DRAW_COOLDOWN_MS = 15000;
+
+function getRarityStars(rarity: string): string {
+  switch (rarity) {
+    case 'legendary': return '★★★★★★★★';
+    case 'epic': return '★★★★★★';
+    case 'rare': return '★★★★';
+    case 'common': return '★★';
+    default: return '★';
+  }
+}
+
+function getCardAttribute(card: GameCard): { symbol: string; label: string; bg: string; border: string; glow: string } {
+  if (card.type === 'trap') {
+    return {
+      symbol: '罠',
+      label: 'TRAP',
+      bg: 'radial-gradient(circle at 35% 35%, #f43f5e 0%, #881337 100%)',
+      border: 'rgba(244,63,94,0.9)',
+      glow: 'rgba(244,63,94,0.6)',
+    };
+  }
+  if (card.rarity === 'legendary') {
+    return {
+      symbol: '神',
+      label: 'DIVINE',
+      bg: 'radial-gradient(circle at 35% 35%, #fbbf24 0%, #b45309 100%)',
+      border: 'rgba(251,191,36,0.9)',
+      glow: 'rgba(251,191,36,0.7)',
+    };
+  }
+  return {
+    symbol: '魔',
+    label: 'SPELL',
+    bg: 'radial-gradient(circle at 35% 35%, #34d399 0%, #065f46 100%)',
+    border: 'rgba(52,211,153,0.9)',
+    glow: 'rgba(52,211,153,0.6)',
+  };
+}
 
 const useFocusTrap = (ref: React.RefObject<HTMLElement | null>, active: boolean) => {
   React.useEffect(() => {
@@ -105,7 +143,12 @@ export function MatchBoardView() {
     sacrificeAnim,
     mindControlAnim,
     fuseAnim,
+    reverseAnim,
+    cloneAnim,
+    blackHoleAnim,
+    poofAnim,
     fogZones,
+    fortressZones,
     ghostPiece,
     ghostRef,
     analysisArrows,
@@ -382,19 +425,98 @@ export function MatchBoardView() {
             else if (!isViewerOwner) blockReason = "Not your card to use";
             else if (usedThisTurn) blockReason = 'Already used a card this turn';
             else if (turn !== ownerColor) blockReason = `Only usable on ${ownerColor}'s turn`;
+
+            const attr = getCardAttribute(selectedCard);
+            const stars = getRarityStars(selectedCard.rarity);
+            const rarityStyle = RARITY_STYLE[selectedCard.rarity];
+            const dropRate = RARITY_WEIGHTS[selectedCard.rarity];
+
             return (
-              <div style={{ display:'flex', flexDirection:'column', background: selectedCard.color, animation:'cardReveal 0.22s cubic-bezier(0.34,1.56,0.64,1)', flex:1, overflow:'hidden' }}>
-                <div style={{ padding:'10px 14px 8px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:`1px solid ${selectedCard.accent}55` }}>
-                  <div>
-                    <div style={{ color:'#fff', fontWeight:800, fontSize:'14px', textShadow:'0 1px 6px rgba(0,0,0,0.9)' }}>{selectedCard.name}</div>
-                    <div style={{ marginTop:'3px', display:'inline-block', padding:'2px 8px', borderRadius:'4px', fontSize:'9px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.8px', color: RARITY_STYLE[selectedCard.rarity].accent, background:`${RARITY_STYLE[selectedCard.rarity].accent}33`, border:`1px solid ${RARITY_STYLE[selectedCard.rarity].accent}88` }}>
-                      {RARITY_STYLE[selectedCard.rarity].label} · {RARITY_WEIGHTS[selectedCard.rarity]}% drop
+              <div style={{
+                display: 'flex', flexDirection: 'column',
+                background: 'linear-gradient(175deg, #131b28 0%, #0c121d 40%, #070a10 100%)',
+                animation: 'cardReveal 0.24s cubic-bezier(0.34,1.56,0.64,1)',
+                flex: 1, overflow: 'hidden',
+                border: `2px solid ${selectedCard.rarity === 'legendary' ? '#f59e0b' : selectedCard.rarity === 'epic' ? '#c084fc' : 'rgba(212,175,55,0.7)'}`,
+                borderRadius: '12px',
+                boxShadow: `inset 0 0 24px rgba(0,0,0,0.85), 0 0 20px ${rarityStyle.glow}`,
+                position: 'relative',
+              }}>
+                {selectedCard.rarity === 'legendary' && (
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    background: 'linear-gradient(135deg, rgba(245,158,11,0.12) 0%, transparent 40%, rgba(251,191,36,0.08) 70%, transparent 100%)',
+                    pointerEvents: 'none', zIndex: 1,
+                  }} />
+                )}
+
+                {/* ── Top Header Bar ── */}
+                <div style={{
+                  padding: '9px 12px 6px',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.4) 100%)',
+                  borderBottom: `1.5px solid ${selectedCard.accent}55`,
+                  position: 'relative', zIndex: 2,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0, paddingRight: '8px' }}>
+                    <div style={{
+                      color: '#fff', fontWeight: 800, fontSize: '14px',
+                      textShadow: `0 2px 8px rgba(0,0,0,0.9), 0 0 10px ${selectedCard.accent}77`,
+                      letterSpacing: '0.4px',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {selectedCard.name}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                      <span style={{
+                        fontSize: '10px', color: '#fbbf24',
+                        letterSpacing: '1px',
+                        textShadow: '0 0 6px rgba(245,158,11,0.8), 0 0 12px rgba(217,119,6,0.5)',
+                      }}>
+                        {stars}
+                      </span>
+                      <span style={{
+                        padding: '1px 5px', borderRadius: '3px',
+                        fontSize: '8px', fontWeight: 800, textTransform: 'uppercase',
+                        color: rarityStyle.accent,
+                        background: `${rarityStyle.accent}22`,
+                        border: `1px solid ${rarityStyle.accent}66`,
+                        letterSpacing: '0.4px',
+                      }}>
+                        {rarityStyle.label} · {dropRate}%
+                      </span>
                     </div>
                   </div>
-                  <div style={{ width:'26px', height:'26px', borderRadius:'6px', background:`${selectedCard.accent}44`, border:`1px solid ${selectedCard.accent}88`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px' }}>地</div>
+
+                  <div style={{
+                    width: '30px', height: '30px', borderRadius: '50%',
+                    background: attr.bg,
+                    border: `1.5px solid ${attr.border}`,
+                    boxShadow: `0 0 10px ${attr.glow}, inset 0 1px 3px rgba(255,255,255,0.4)`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '13px', fontWeight: 900, color: '#fff',
+                    textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                    flexShrink: 0,
+                  }} title={attr.label}>
+                    {attr.symbol}
+                  </div>
                 </div>
-                <div style={{ height:'150px', margin:'10px 12px', borderRadius:'10px', background:`radial-gradient(ellipse at 50% 40%, ${selectedCard.accent}66 0%, rgba(0,0,0,0.8) 70%)`, border:`2px solid ${selectedCard.accent}55`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'68px', position:'relative', overflow:'hidden', boxShadow:`0 0 24px ${selectedCard.accent}33` }}>
-                  <div style={{ animation: selectedCard.mechanic === 'joker' ? 'jokerFloat 2s ease-in-out infinite' : 'none', filter:`drop-shadow(0 0 10px ${selectedCard.accent})` }}>
+
+                {/* ── Art Window Frame ── */}
+                <div style={{
+                  height: '140px', margin: '8px 10px 6px',
+                  borderRadius: '8px',
+                  background: `radial-gradient(circle at 50% 38%, ${selectedCard.accent}55 0%, rgba(5,8,16,0.95) 75%)`,
+                  border: '2px solid rgba(212,175,55,0.7)',
+                  boxShadow: `inset 0 2px 14px rgba(0,0,0,0.9), 0 0 20px ${selectedCard.accent}33`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '64px', position: 'relative', overflow: 'hidden',
+                  zIndex: 2,
+                }}>
+                  <div style={{
+                    animation: selectedCard.mechanic === 'joker' ? 'jokerFloat 2s ease-in-out infinite' : 'none',
+                    filter: `drop-shadow(0 0 14px ${selectedCard.accent}) drop-shadow(0 4px 8px rgba(0,0,0,0.8))`,
+                  }}>
                     {selectedCard.icon}
                   </div>
                   {selectedCard.mechanic === 'joker' && (
@@ -402,24 +524,115 @@ export function MatchBoardView() {
                       {[0,1,2,3,4].map(j => (
                         <div key={j} style={{
                           position:'absolute',
-                          top:`${10+j*18}%`, left:`${5+j*22}%`,
-                          fontSize:'10px',
+                          top:`${10+j*18}%`, left:`${6+j*21}%`,
+                          fontSize:'11px', color: '#f59e0b',
                           animation:`jokerGlitter ${1+j*0.3}s ease-in-out infinite`,
                           animationDelay:`${j*0.2}s`,
                           pointerEvents:'none',
+                          textShadow: '0 0 6px #f59e0b',
                         }}>✦</div>
                       ))}
                     </>
                   )}
+                  <div style={{ position: 'absolute', top: '3px', left: '3px', width: '8px', height: '8px', borderTop: '1.5px solid rgba(212,175,55,0.6)', borderLeft: '1.5px solid rgba(212,175,55,0.6)' }} />
+                  <div style={{ position: 'absolute', top: '3px', right: '3px', width: '8px', height: '8px', borderTop: '1.5px solid rgba(212,175,55,0.6)', borderRight: '1.5px solid rgba(212,175,55,0.6)' }} />
+                  <div style={{ position: 'absolute', bottom: '3px', left: '3px', width: '8px', height: '8px', borderBottom: '1.5px solid rgba(212,175,55,0.6)', borderLeft: '1.5px solid rgba(212,175,55,0.6)' }} />
+                  <div style={{ position: 'absolute', bottom: '3px', right: '3px', width: '8px', height: '8px', borderBottom: '1.5px solid rgba(212,175,55,0.6)', borderRight: '1.5px solid rgba(212,175,55,0.6)' }} />
                 </div>
-                <div style={{ margin:'0 14px 8px', padding:'4px 10px', background:`${selectedCard.accent}28`, border:`1px solid ${selectedCard.accent}55`, borderRadius:'5px', fontSize:'10px', color:selectedCard.accent, fontWeight:700, textTransform:'uppercase', letterSpacing:'1px', display:'inline-flex', alignSelf:'flex-start' }}>[{selectedCard.type === 'spell' ? 'Spell Card' : 'Trap Card'}]</div>
-                <div style={{ margin:'0 14px 12px', fontSize:'11px', color:'rgba(235,225,210,0.95)', lineHeight:'1.65', fontWeight:500 }}>{selectedCard.desc}</div>
-                {blockReason && <div style={{ margin:'0 14px 8px', padding:'7px 10px', background:'rgba(200,40,40,0.2)', border:'1px solid rgba(220,60,60,0.5)', borderRadius:'6px', fontSize:'10px', color:'#ff8080', fontWeight:600, textAlign:'center' }}>🔒 {blockReason}</div>}
-                <div style={{ flex:1 }} />
-                <div style={{ padding:'4px 14px 16px' }}>
-                  <button onClick={() => applyCard(selectedCard, ownerColor)} disabled={!canUse || intentInFlight}
-                    style={{ width:'100%', padding:'11px', borderRadius:'22px', border:'none', background: canUse ? (selectedCard.mechanic === 'joker' ? 'linear-gradient(135deg, #f59e0b, #b45309)' : 'linear-gradient(135deg, #3b9edd, #1a5fa8)') : 'rgba(40,40,60,0.8)', color: canUse ? '#fff' : 'rgba(255,255,255,0.25)', fontWeight:700, fontSize:'13px', cursor: (canUse && !intentInFlight) ? 'pointer' : 'not-allowed', boxShadow: canUse ? (selectedCard.mechanic === 'joker' ? '0 4px 16px rgba(245,158,11,0.55)' : '0 4px 16px rgba(26,111,196,0.55)') : 'none', letterSpacing:'0.3px', opacity: intentInFlight ? 0.6 : 1 }}>
-                    {intentInFlight ? 'Sending...' : canUse ? (selectedCard.mechanic === 'joker' ? '🃏 Choose Transformation' : 'use card') : '🔒 blocked'}
+
+                {/* ── Archetype & Category Banner ── */}
+                <div style={{
+                  margin: '0 10px 6px', padding: '3px 8px',
+                  background: 'linear-gradient(90deg, rgba(212,175,55,0.18) 0%, rgba(212,175,55,0.06) 100%)',
+                  border: '1px solid rgba(212,175,55,0.4)',
+                  borderRadius: '4px',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  zIndex: 2,
+                }}>
+                  <span style={{
+                    fontSize: '9.5px', fontWeight: 800,
+                    color: selectedCard.type === 'spell' ? '#4ade80' : '#f43f5e',
+                    textTransform: 'uppercase', letterSpacing: '1px',
+                  }}>
+                    {selectedCard.type === 'spell' ? '【 SPELL CARD  ✦ 】' : '【 TRAP CARD  ⛯ 】'}
+                  </span>
+                  <span style={{ fontSize: '8.5px', color: 'rgba(212,175,55,0.8)', fontWeight: 700, letterSpacing: '0.5px' }}>
+                    1st Edition
+                  </span>
+                </div>
+
+                {/* ── Lore / Rules Effect Box ── */}
+                <div style={{
+                  margin: '0 10px 8px', padding: '9px 11px',
+                  background: 'rgba(6, 10, 18, 0.94)',
+                  border: '1.5px solid rgba(212,175,55,0.3)',
+                  borderRadius: '6px',
+                  boxShadow: 'inset 0 1px 6px rgba(0,0,0,0.8)',
+                  display: 'flex', flexDirection: 'column', gap: '5px',
+                  zIndex: 2,
+                }}>
+                  <div style={{
+                    fontSize: '11px', color: '#e2e8f0',
+                    lineHeight: '1.6', fontWeight: 500,
+                  }}>
+                    {selectedCard.desc}
+                  </div>
+                  <div style={{
+                    fontSize: '8px', color: 'rgba(180,150,100,0.6)',
+                    letterSpacing: '0.8px', borderTop: '1px solid rgba(255,255,255,0.06)',
+                    paddingTop: '4px', display: 'flex', justifyContent: 'space-between',
+                  }}>
+                    <span>CH404-EN0{Math.abs(selectedCard.id.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0)) % 90 + 10}</span>
+                    <span>© 404 CHESS ENGINE</span>
+                  </div>
+                </div>
+
+                {blockReason && (
+                  <div style={{
+                    margin: '0 10px 8px', padding: '6px 10px',
+                    background: 'rgba(220,38,38,0.18)',
+                    border: '1px solid rgba(239,68,68,0.5)',
+                    borderRadius: '6px', fontSize: '10px', color: '#fca5a5',
+                    fontWeight: 700, textAlign: 'center', zIndex: 2,
+                  }}>
+                    🔒 {blockReason}
+                  </div>
+                )}
+
+                <div style={{ flex: 1 }} />
+
+                {/* ── Action Button ── */}
+                <div style={{ padding: '4px 10px 14px', zIndex: 2 }}>
+                  <button
+                    onClick={() => applyCard(selectedCard, ownerColor)}
+                    disabled={!canUse || intentInFlight}
+                    style={{
+                      width: '100%', padding: '12px 8px', borderRadius: '10px',
+                      border: canUse ? '1.5px solid rgba(255,255,255,0.3)' : '1px solid rgba(255,255,255,0.08)',
+                      background: canUse
+                        ? (selectedCard.mechanic === 'joker'
+                            ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%)'
+                            : selectedCard.type === 'trap'
+                            ? 'linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%)'
+                            : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%)')
+                        : 'rgba(24,28,40,0.85)',
+                      color: canUse ? '#ffffff' : 'rgba(255,255,255,0.3)',
+                      fontWeight: 800, fontSize: '13px',
+                      cursor: (canUse && !intentInFlight) ? 'pointer' : 'not-allowed',
+                      boxShadow: canUse
+                        ? (selectedCard.mechanic === 'joker'
+                            ? '0 4px 18px rgba(245,158,11,0.6), inset 0 1px 0 rgba(255,255,255,0.3)'
+                            : selectedCard.type === 'trap'
+                            ? '0 4px 18px rgba(225,29,72,0.6), inset 0 1px 0 rgba(255,255,255,0.3)'
+                            : '0 4px 18px rgba(37,99,235,0.6), inset 0 1px 0 rgba(255,255,255,0.3)')
+                        : 'none',
+                      letterSpacing: '0.6px',
+                      textTransform: 'uppercase',
+                      transition: 'transform 0.12s ease, filter 0.15s ease',
+                      opacity: intentInFlight ? 0.6 : 1,
+                    }}
+                  >
+                    {intentInFlight ? 'Sending...' : canUse ? (selectedCard.mechanic === 'joker' ? '🃏 Choose Transformation' : '✦ ACTIVATE CARD ✦') : '🔒 BLOCKED'}
                   </button>
                 </div>
               </div>
@@ -559,7 +772,10 @@ export function MatchBoardView() {
               </div>
             )}
             <BoardCanvas
-              reverseAnim={null}
+              reverseAnim={reverseAnim}
+              cloneAnim={cloneAnim}
+              blackHoleAnim={blackHoleAnim}
+              poofAnim={poofAnim}
               board={board}
               turn={turn}
               sel={sel}
@@ -646,7 +862,7 @@ export function MatchBoardView() {
                   : []
               }
               mindControlAnim={mindControlAnim}
-              mindControlTargetSquare={null}
+              mindControlTargetSquare={cardPending?.mechanic === 'mindcontrol' ? sel : null}
               fuseAnim={fuseAnim}
               fuseSelectedSq={
                 (cardPending?.mechanic === 'halffuse' || cardPending?.mechanic === 'fullfusion') && cardPending.step === 2
@@ -654,6 +870,7 @@ export function MatchBoardView() {
                   : null
               }
               fogZones={fogZones}
+              fortressZones={fortressZones}
               viewerColor={viewerSeat ?? ((hostedRuntime || authoritativeMatchId) ? 'white' : turn)}
               invisibleUnder={ghostPiece}
               analysisArrows={analysisArrows}

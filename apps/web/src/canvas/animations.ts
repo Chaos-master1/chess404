@@ -1900,6 +1900,471 @@ export function paintTransformAnim(
   ctx.restore();
 }
 
+
+// ─── Clone, Black Hole, and Poof Animations ─────────────────────────────────
+
+export interface CloneAnim {
+  fromSq: Sq;         // original piece (stays)
+  toSq: Sq;           // new cloned piece (appears)
+  pieceType: PieceType;
+  pieceColor: PieceColor;
+  startTime: number;
+}
+
+export interface BlackHolePull {
+  from: Sq;
+  to: Sq;
+  pieceType: PieceType;
+  pieceColor: PieceColor;
+}
+
+export interface BlackHoleAnim {
+  center: Sq;         // the hole square
+  pulls: BlackHolePull[];
+  blocked: Sq[];      // squares that shimmer (blockers / vetoed)
+  startTime: number;
+}
+
+export const CLONE_DURATION = 1200;
+
+export function paintCloneAnim(
+  ctx: CanvasRenderingContext2D,
+  anim: CloneAnim,
+  now: number,
+  viewerColor: PieceColor | boolean = 'white',
+) {
+  const elapsed = now - anim.startTime;
+  const t = Math.min(elapsed / CLONE_DURATION, 1);
+  if (t >= 1) return;
+
+  const isW = typeof viewerColor === 'boolean' ? !viewerColor : viewerColor === 'white';
+  const getX = (c: number) => (isW ? c : 7 - c) * SQ;
+  const getY = (r: number) => (isW ? 7 - r : r) * SQ;
+
+  const x1 = getX(anim.fromSq.col) + SQ / 2;
+  const y1 = getY(anim.fromSq.row) + SQ / 2;
+  const x2 = getX(anim.toSq.col) + SQ / 2;
+  const y2 = getY(anim.toSq.row) + SQ / 2;
+
+  const img = PIECE_IMAGES[`${anim.pieceColor}_${anim.pieceType}`];
+
+  // Mitosis palette: vivid violet + acid green on near-black
+  const VIO = 'rgba(167,139,250,';
+  const GRN = 'rgba(52,211,153,';
+  const WHT = 'rgba(255,255,255,';
+
+  const dx = x2 - x1, dy = y2 - y1;
+  const dist = Math.max(1, Math.hypot(dx, dy));
+  const nx = dx / dist, ny = dy / dist;       // travel direction
+  const px = -ny, py = nx;                    // perpendicular (split axis)
+
+  // ── Beat 1 (0–0.35): MITOSIS — original pinches into two ─────────────────
+  if (t < 0.38) {
+    const pt = t / 0.38;
+    const spread = easeOut(pt) * SQ * 0.22;   // separation of the two copies
+    const squash = 1 - Math.sin(pt * Math.PI) * 0.12; // pinch in travel axis
+
+    // Dark nest behind the split so colors pop
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x1, y1, SQ * 0.62, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(10,5,25,${0.55 * Math.sin(pt * Math.PI)})`;
+    ctx.fill();
+    ctx.restore();
+
+    if (img && img.complete) {
+      for (const s of [-1, 1]) {
+        ctx.save();
+        ctx.globalAlpha = 0.55 + pt * 0.45;
+        ctx.shadowColor = s < 0 ? `${VIO}0.95)` : `${GRN}0.95)`;
+        ctx.shadowBlur = 22;
+        ctx.translate(x1 + px * spread * s, y1 + py * spread * s);
+        ctx.scale(squash, 2 - squash); // stretch apart, pinch together
+        const sc = 0.82;
+        ctx.scale(sc, sc);
+        ctx.drawImage(img, -SQ / 2 + 3, -SQ / 2 + 3, SQ - 6, SQ - 6);
+        ctx.restore();
+      }
+    }
+
+    // 🧬 helix dots rising between the halves
+    const dots = 10;
+    for (let i = 0; i < dots; i++) {
+      const hp = (i / dots + pt * 0.8) % 1;           // rise loop
+      const hx = x1 + Math.sin(hp * Math.PI * 4 + pt * 6) * SQ * 0.22;
+      const hy = y1 - SQ * 0.45 + hp * SQ * 0.9;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(hx, hy, lerp(3.2, 0.8, hp), 0, Math.PI * 2);
+      ctx.fillStyle = i % 2 === 0
+        ? `${VIO}${(1 - hp) * 0.95})`
+        : `${GRN}${(1 - hp) * 0.95})`;
+      ctx.shadowColor = `${VIO}0.9)`;
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // ── Beat 2 (0.32–0.68): one copy travels with motion-blur trail ──────────
+  if (t >= 0.30 && t < 0.70) {
+    const pt = (t - 0.30) / 0.40;
+    const e = easeInOut(pt);
+    const cx = x1 + dx * e, cy = y1 + dy * e;
+
+    // Trail ghosts
+    for (let i = 4; i >= 1; i--) {
+      const tp = Math.max(0, e - i * 0.08);
+      const tx = x1 + dx * tp, ty = y1 + dy * tp;
+      if (img && img.complete) {
+        ctx.save();
+        ctx.globalAlpha = 0.10 + (1 - i / 5) * 0.22 * (1 - pt);
+        ctx.translate(tx, ty);
+        const sc = 0.9 - i * 0.06;
+        ctx.scale(sc, sc);
+        ctx.drawImage(img, -SQ / 2 + 3, -SQ / 2 + 3, SQ - 6, SQ - 6);
+        ctx.restore();
+      }
+    }
+
+    // Leading copy, stretched along travel
+    if (img && img.complete) {
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.shadowColor = `${GRN}0.95)`;
+      ctx.shadowBlur = 24;
+      ctx.translate(cx, cy);
+      const ang = Math.atan2(dy, dx);
+      ctx.rotate(ang);
+      ctx.scale(1.12, 0.9); // motion stretch
+      ctx.rotate(-ang);
+      ctx.drawImage(img, -SQ / 2 + 3, -SQ / 2 + 3, SQ - 6, SQ - 6);
+      ctx.restore();
+    }
+  }
+
+  // ── Beat 3 (0.62–1.0): double-ring bloom + pop ───────────────────────────
+  if (t >= 0.60) {
+    const pt = (t - 0.60) / 0.40;
+    const e = easeOut(pt);
+
+    for (const [rr, col, lw] of [
+      [SQ * 0.5 + e * SQ * 0.75, VIO, 3],
+      [SQ * 0.4 + e * SQ * 0.55, GRN, 2],
+    ] as const) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x2, y2, rr, 0, Math.PI * 2);
+      ctx.strokeStyle = `${col}${(1 - pt) * 0.85})`;
+      ctx.lineWidth = lw;
+      ctx.shadowColor = `${col}0.8)`;
+      ctx.shadowBlur = 16;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Flash
+    const flashA = Math.sin(Math.min(pt * 1.5, 1) * Math.PI) * 0.55;
+    if (flashA > 0.01) {
+      ctx.save();
+      const burst = ctx.createRadialGradient(x2, y2, 0, x2, y2, SQ * 1.1);
+      burst.addColorStop(0, `${WHT}${flashA})`);
+      burst.addColorStop(0.45, `${VIO}${flashA * 0.55})`);
+      burst.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = burst;
+      ctx.beginPath();
+      ctx.arc(x2, y2, SQ * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // New piece slams in big → settles
+    if (img && img.complete) {
+      const sc = 1.45 - e * 0.45;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, pt * 2.5);
+      ctx.shadowColor = `${GRN}1)`;
+      ctx.shadowBlur = 26 * (1 - pt) + 8;
+      ctx.translate(x2, y2);
+      ctx.scale(sc, sc);
+      ctx.drawImage(img, -SQ / 2 + 3, -SQ / 2 + 3, SQ - 6, SQ - 6);
+      ctx.restore();
+    }
+
+    // Label
+    const la = pt < 0.35 ? pt / 0.35 : 1;
+    ctx.save();
+    ctx.font = 'bold 15px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = `${VIO}1)`;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = `rgba(233,213,255,${la})`;
+    ctx.fillText('🧬 CLONED!', x2, y2 - SQ * 1.05 - e * SQ * 0.25);
+    ctx.restore();
+  }
+}
+
+
+// ─── Black Hole Animation ───────────────────────────────────────────────────
+export const BLACKHOLE_DURATION = 1600;
+
+export function paintBlackHoleAnim(
+  ctx: CanvasRenderingContext2D,
+  anim: BlackHoleAnim,
+  now: number,
+  viewerColor: PieceColor | boolean = 'white',
+) {
+  const elapsed = now - anim.startTime;
+  const t = Math.min(elapsed / BLACKHOLE_DURATION, 1);
+  if (t >= 1) return;
+
+  const isW = typeof viewerColor === 'boolean' ? !viewerColor : viewerColor === 'white';
+  const getX = (c: number) => (isW ? c : 7 - c) * SQ;
+  const getY = (r: number) => (isW ? 7 - r : r) * SQ;
+
+  const cx = getX(anim.center.col) + SQ / 2;
+  const cy = getY(anim.center.row) + SQ / 2;
+
+  const VIO = 'rgba(139,92,246,';
+  const DRK = 'rgba(5,2,15,';
+  const WHT = 'rgba(255,255,255,';
+
+  // ── Persistent vortex on the hole (whole duration) ───────────────────────
+  const spin = now / 180;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, SQ * 0.52, 0, Math.PI * 2);
+  ctx.fillStyle = `${DRK}0.85)`;
+  ctx.shadowColor = `${VIO}1)`;
+  ctx.shadowBlur = 26;
+  ctx.fill();
+  ctx.restore();
+  // Rotating arc arms
+  for (let a = 0; a < 3; a++) {
+    const a0 = spin + (a / 3) * Math.PI * 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, SQ * (0.34 + a * 0.07), a0, a0 + Math.PI * 1.1);
+    ctx.strokeStyle = `${VIO}${0.85 - a * 0.2})`;
+    ctx.lineWidth = 3 - a * 0.5;
+    ctx.shadowColor = `${VIO}0.9)`;
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Beat 1 (0–0.4): blocked squares shimmer + pull preview arrows ───────
+  if (t < 0.42) {
+    const pt = t / 0.42;
+    for (const s of anim.blocked) {
+      const bx = getX(s.col) + SQ / 2, by = getY(s.row) + SQ / 2;
+      ctx.save();
+      ctx.globalAlpha = 0.5 * Math.sin(pt * Math.PI);
+      ctx.strokeStyle = `${VIO}0.9)`;
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(bx - SQ / 2 + 2, by - SQ / 2 + 2, SQ - 4, SQ - 4);
+      ctx.restore();
+    }
+    // Preview: arrow from each piece about to be pulled toward the hole.
+    // Fades out as the slide (beat 2) takes over.
+    const arrowA = pt < 0.7 ? 1 : 1 - (pt - 0.7) / 0.3;
+    for (const pull of anim.pulls) {
+      const fx = getX(pull.from.col) + SQ / 2, fy = getY(pull.from.row) + SQ / 2;
+      const tx = getX(pull.to.col) + SQ / 2,   ty = getY(pull.to.row) + SQ / 2;
+      const ang = Math.atan2(ty - fy, tx - fx);
+      const len = Math.hypot(tx - fx, ty - fy);
+      const sx = fx + Math.cos(ang) * SQ * 0.18;
+      const sy = fy + Math.sin(ang) * SQ * 0.18;
+      const ex = fx + Math.cos(ang) * Math.min(len - 6, SQ * 0.55);
+      const ey = fy + Math.sin(ang) * Math.min(len - 6, SQ * 0.55);
+      ctx.save();
+      ctx.globalAlpha = arrowA;
+      // source ring
+      ctx.beginPath();
+      ctx.arc(fx, fy, SQ * 0.42 + Math.sin(now / 150) * 3, 0, Math.PI * 2);
+      ctx.strokeStyle = `${VIO}0.95)`;
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = `${VIO}0.9)`;
+      ctx.shadowBlur = 12;
+      ctx.stroke();
+      // shaft
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
+      ctx.strokeStyle = `rgba(233,213,255,${0.9 * arrowA})`;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 10;
+      ctx.stroke();
+      // head
+      const hs = 9;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - hs * Math.cos(ang - 0.42), ey - hs * Math.sin(ang - 0.42));
+      ctx.lineTo(ex - hs * Math.cos(ang + 0.42), ey - hs * Math.sin(ang + 0.42));
+      ctx.closePath();
+      ctx.fillStyle = `rgba(233,213,255,${0.95 * arrowA})`;
+      ctx.shadowBlur = 12;
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // ── Beat 2 (0.2–0.7): pulls slide inward with trails ─────────────────────
+  if (t >= 0.18 && t < 0.72) {
+    const pt = (t - 0.18) / 0.54;
+    const e = easeInOut(pt);
+    for (const pull of anim.pulls) {
+      const fx = getX(pull.from.col) + SQ / 2, fy = getY(pull.from.row) + SQ / 2;
+      const tx = getX(pull.to.col) + SQ / 2,   ty = getY(pull.to.row) + SQ / 2;
+      const mx = fx + (tx - fx) * e, my = fy + (ty - fy) * e;
+      const img = PIECE_IMAGES[`${pull.pieceColor}_${pull.pieceType}`];
+      // Trail ghosts
+      for (let i = 3; i >= 1; i--) {
+        const tp = Math.max(0, e - i * 0.09);
+        if (img && img.complete) {
+          ctx.save();
+          ctx.globalAlpha = 0.12 + (1 - i / 4) * 0.22 * (1 - pt);
+          ctx.translate(fx + (tx - fx) * tp, fy + (ty - fy) * tp);
+          const sc = 0.9 - i * 0.05;
+          ctx.scale(sc, sc);
+          ctx.drawImage(img, -SQ / 2 + 3, -SQ / 2 + 3, SQ - 6, SQ - 6);
+          ctx.restore();
+        }
+      }
+      if (img && img.complete) {
+        ctx.save();
+        ctx.shadowColor = `${VIO}0.95)`;
+        ctx.shadowBlur = 20;
+        ctx.translate(mx, my);
+        ctx.drawImage(img, -SQ / 2 + 3, -SQ / 2 + 3, SQ - 6, SQ - 6);
+        ctx.restore();
+      }
+    }
+  }
+
+  // ── Beat 3 (0.68–1.0): collapse flash + label ────────────────────────────
+  if (t >= 0.66) {
+    const pt = (t - 0.66) / 0.34;
+    const e = easeOut(pt);
+    const ringR = SQ * 0.5 + e * SQ * 1.1;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+    ctx.strokeStyle = `${VIO}${(1 - pt) * 0.8})`;
+    ctx.lineWidth = 3 - pt * 2;
+    ctx.shadowColor = `${VIO}0.8)`;
+    ctx.shadowBlur = 18;
+    ctx.stroke();
+    ctx.restore();
+
+    const flashA = Math.sin(Math.min(pt * 1.5, 1) * Math.PI) * 0.5;
+    if (flashA > 0.01) {
+      ctx.save();
+      const burst = ctx.createRadialGradient(cx, cy, 0, cx, cy, SQ * 1.4);
+      burst.addColorStop(0, `${WHT}${flashA})`);
+      burst.addColorStop(0.4, `${VIO}${flashA * 0.55})`);
+      burst.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = burst;
+      ctx.beginPath();
+      ctx.arc(cx, cy, SQ * 1.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const la = pt < 0.35 ? pt / 0.35 : 1;
+    ctx.save();
+    ctx.font = 'bold 15px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = `${VIO}1)`;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = `rgba(233,213,255,${la})`;
+    ctx.fillText(`🕳️ ${anim.pulls.length} PULLED!`, cx, cy - SQ * 1.05 - e * SQ * 0.25);
+    ctx.restore();
+  }
+}
+
+
+// ─── Fake Reveal Poof ─────────────────────────────────────────────────────────
+// Short violet puff when an illusion breaks (captured or faded). Board-only.
+export const POOF_DURATION = 1100;
+
+export interface PoofAnim {
+  sq: Sq;
+  startTime: number;
+}
+
+export function paintPoofAnim(
+  ctx: CanvasRenderingContext2D,
+  anim: PoofAnim,
+  now: number,
+  viewerColor: PieceColor | boolean = 'white',
+) {
+  const elapsed = now - anim.startTime;
+  const t = Math.min(elapsed / POOF_DURATION, 1);
+  if (t >= 1) return;
+
+  const isW = typeof viewerColor === 'boolean' ? !viewerColor : viewerColor === 'white';
+  const px = (isW ? anim.sq.col : 7 - anim.sq.col) * SQ + SQ / 2;
+  const py = (isW ? 7 - anim.sq.row : anim.sq.row) * SQ + SQ / 2;
+
+  const VIO = 'rgba(192,132,252,';
+  const WHT = 'rgba(255,255,255,';
+
+  // expanding ring + rising 👻 wisps
+  const e = easeOut(t);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(px, py, SQ * 0.3 + e * SQ * 0.6, 0, Math.PI * 2);
+  ctx.strokeStyle = `${VIO}${(1 - t) * 0.9})`;
+  ctx.lineWidth = 3 - t * 2;
+  ctx.shadowColor = `${VIO}0.9)`;
+  ctx.shadowBlur = 16;
+  ctx.stroke();
+  ctx.restore();
+
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + t * 3;
+    const rr = e * SQ * 0.55;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(px + Math.cos(angle) * rr, py + Math.sin(angle) * rr - e * 10, lerp(4, 1, t), 0, Math.PI * 2);
+    ctx.fillStyle = `${VIO}${(1 - t) * 0.85})`;
+    ctx.shadowColor = `${VIO}0.8)`;
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  const flashA = Math.sin(Math.min(t * 1.6, 1) * Math.PI) * 0.6;
+  if (flashA > 0.01) {
+    ctx.save();
+    const burst = ctx.createRadialGradient(px, py, 0, px, py, SQ);
+    burst.addColorStop(0, `${WHT}${flashA})`);
+    burst.addColorStop(0.5, `${VIO}${flashA * 0.5})`);
+    burst.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = burst;
+    ctx.beginPath();
+    ctx.arc(px, py, SQ, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.font = 'bold 22px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = `${VIO}1)`;
+  ctx.shadowBlur = 14;
+  ctx.globalAlpha = 1 - t * 0.6;
+  ctx.fillText('👻', px, py - e * 18);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+
+
 export interface Particle {
   x: number; y: number;
   vx: number; vy: number;

@@ -123,6 +123,8 @@ export interface UseCardInteractionProps {
   triggerJumpAnim: (fromSq: Sq, toSq: Sq, type: PieceType, color: PieceColor, captured: boolean) => void;
   triggerMindControlAnim: (targetSq: Sq, playerColor: PieceColor, pieceType: PieceType) => void;
   triggerSacrificeAnim: (squares: Sq[]) => void;
+  triggerCloneAnim?: (fromSq: Sq, toSq: Sq, type: PieceType, color: PieceColor) => void;
+  triggerBlackHoleAnim?: (center: Sq) => void;
   over: boolean;
   hostedRuntime: boolean | null;
   viewerSeatRef: React.MutableRefObject<PieceColor | null>;
@@ -143,6 +145,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     setRadarActive, finalPositionRef, setOver, setWinner, setMovHist, setPosHist, setSnapshots,
     triggerSniperAnim, triggerTransformAnim, triggerFuseAnim,
     triggerSwapAnim, triggerTeleportAnim, triggerJumpAnim, triggerMindControlAnim, triggerSacrificeAnim,
+    triggerCloneAnim, triggerBlackHoleAnim,
     over, hostedRuntime, viewerSeatRef
   } = props;
 
@@ -473,6 +476,10 @@ export function useCardInteraction(props: UseCardInteractionProps) {
             setCardMsg('Now click matching enemy piece to infect');
           }
         } else if (mechanic === 'clone') {
+          const sq1 = step === 2 ? (data.sq1 as Sq | undefined) : undefined;
+          if (sq1 && piece) {
+            triggerCloneAnim?.(sq1, { row, col }, piece.type, playerColor);
+          }
           setCardMsg(`Cloned ${FILES[col]}${RANKS[row]}`);
         } else if (mechanic === 'fakepiece') {
           setCardMsg(`Decoy placed at ${FILES[col]}${RANKS[row]}`);
@@ -485,6 +492,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
           playMoveSound('capture');
           setCardMsg(`Sacrifice completed on ${FILES[col]}${RANKS[row]}`);
         } else if (mechanic === 'blackhole') {
+          triggerBlackHoleAnim?.({ row, col });
           setCardMsg(`Black hole consumed 3x3 at ${FILES[col]}${RANKS[row]}`);
           fireCardAnim('blackhole', 'Black Hole');
           playMoveSound('bomb');
@@ -524,7 +532,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         break;
       }
       case 'sniper': {
-        if (!piece || piece.type === 'king' || piece.color === playerColor) return;
+        if (!piece || piece.type === 'king') return;
         triggerSniperAnim({ row, col }, piece.type, piece.color, 'sniper');
         setTimeout(() => {
           setBoard(prev => {
@@ -765,46 +773,20 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     switch (mechanic) {
       case 'freeze':     return piece?.color === opp && piece.type !== 'king' ? 'rgba(96,165,250,0.55)' : null;
       case 'shield':     return piece?.color === playerColor && piece.type !== 'king' ? 'rgba(74,222,128,0.55)' : null;
-      case 'sniper':     return piece && piece.type !== 'king' && piece.color !== playerColor ? 'rgba(192,132,252,0.55)' : null;
+      case 'sniper':     return piece && piece.type !== 'king' ? 'rgba(192,132,252,0.55)' : null;
       case 'badsniper':  return piece?.color === playerColor && piece.type !== 'king' ? 'rgba(107,114,128,0.55)' : null;
       case 'mindcontrol':
       case 'borrow':     return piece?.color === opp && piece.type !== 'king' ? 'rgba(168,85,247,0.5)' : null;
       case 'promote':
       case 'demote':     return step === 1 && piece?.color === playerColor && piece.type !== 'king' ? 'rgba(245,158,11,0.55)' : null;
       case 'jump': {
-        if (step === 1 && piece?.color === playerColor && piece.type !== 'king' && piece.type !== 'knight') return 'rgba(74,222,128,0.55)';
+        const halfStart = playerColor === 'white' ? 0 : 4;
+        const halfEnd   = playerColor === 'white' ? 3 : 7;
+        if (step === 1 && piece?.color === playerColor && piece.type !== 'king') return 'rgba(74,222,128,0.55)';
         if (step === 2) {
           const from = data.from as Sq | undefined;
-          const pt = data.pieceType as PieceType | undefined;
-          const pc = data.pieceColor as PieceColor | undefined;
           if (from && row === from.row && col === from.col) return 'rgba(245,158,11,0.6)';
-          if (from && pt && pc && piece?.color !== playerColor) {
-            const dr = row - from.row, dc = col - from.col;
-            if (dr === 0 && dc === 0) return null;
-            const diag = Math.abs(dr) === Math.abs(dc), straight = dr === 0 || dc === 0;
-            let dirOk = false;
-            if (pt === 'bishop') dirOk = diag;
-            else if (pt === 'rook') dirOk = straight;
-            else if (pt === 'queen') dirOk = diag || straight;
-            else if (pt === 'pawn') {
-              const fwd = pc === 'white' ? 1 : -1;
-              dirOk = (dc === 0 && (dr === fwd || dr === fwd * 2)) || (Math.abs(dc) === 2 && dr === fwd * 2);
-            }
-            if (!dirOk) return null;
-            const sr = Math.sign(dr), sc = Math.sign(dc);
-            let count = 0;
-            let r = from.row + sr, c = from.col + sc;
-            while (r !== row || c !== col) {
-              if (board[r][c]) count++;
-              r += sr; c += sc;
-            }
-            if (count === 1) {
-              if (pt === 'pawn' && dc === 0) return !piece ? 'rgba(74,222,128,0.45)' : null;
-              if (pt === 'pawn' && Math.abs(dc) === 2) return piece?.type === 'king' ? null : (piece ? 'rgba(248,113,113,0.6)' : 'rgba(74,222,128,0.45)');
-              if (piece?.type === 'king') return null;
-              return piece ? 'rgba(248,113,113,0.6)' : 'rgba(74,222,128,0.45)';
-            }
-          }
+          if (!piece && row >= halfStart && row <= halfEnd) return 'rgba(74,222,128,0.35)';
         }
         return null;
       }

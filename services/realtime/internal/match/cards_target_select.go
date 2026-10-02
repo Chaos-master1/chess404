@@ -64,8 +64,8 @@ func applySelectTarget(state *contracts.MatchState, intent contracts.PlayerInten
 		if targetPiece == nil {
 			return nil, errors.New("target square has no piece")
 		}
-		if targetPiece.Color == pending.OwnerColor || targetPiece.Type == "king" {
-			return nil, errors.New("sniper requires an enemy non-king target")
+		if targetPiece.Type == "king" {
+			return nil, errors.New("sniper cannot target king")
 		}
 		if err := ensureRemovalDoesNotCreateCheck(state.Board, *intent.Target, pending.OwnerColor, state.FortressZones); err != nil {
 			return nil, err

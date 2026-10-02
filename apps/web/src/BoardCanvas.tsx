@@ -9,13 +9,14 @@ import {
   easeOut, easeIn, easeInOut, clamp, lerp,
   ANALYSIS_ARROW_COLOR, TRANSFORM_DURATION, SNIPER_DURATION,
   TELEPORT_DURATION, JUMP_DURATION, REVERSE_DURATION, SACRIFICE_DURATION, MINDCONTROL_DURATION, FUSE_DURATION,
+  CLONE_DURATION, BLACKHOLE_DURATION, POOF_DURATION,
   paintTeleportAnim, paintJumpAnim, paintMindControlAnim,
   paintFuseAnim, paintSacrificeAnim, paintReverseAnim,
-  paintSniperAnim, paintTransformAnim, pushParticle,
+  paintSniperAnim, paintTransformAnim, paintCloneAnim, paintBlackHoleAnim, paintPoofAnim, pushParticle,
 } from './canvas/animations';
 import { isUsableImage, getFusedImage, PIECE_IMAGES } from './canvas/images';
-import type { Particle, TransformAnim, SniperAnim, TeleportAnim, JumpAnim, SacrificeAnim, MindControlAnim, FuseAnim, ReverseAnim, BoardArrow } from './canvas/animations';
-export type { TransformAnim, SniperAnim, TeleportAnim, JumpAnim, SacrificeAnim, MindControlAnim, FuseAnim, ReverseAnim, BoardArrow };
+import type { Particle, TransformAnim, SniperAnim, TeleportAnim, JumpAnim, SacrificeAnim, MindControlAnim, FuseAnim, ReverseAnim, CloneAnim, BlackHoleAnim, PoofAnim, BoardArrow } from './canvas/animations';
+export type { TransformAnim, SniperAnim, TeleportAnim, JumpAnim, SacrificeAnim, MindControlAnim, FuseAnim, ReverseAnim, CloneAnim, BlackHoleAnim, PoofAnim, BoardArrow };
 
 // ─── BoardCanvas ─────────────────────────────────────────────────────────────
 export interface BoardCanvasProps {
@@ -54,6 +55,10 @@ export interface BoardCanvasProps {
   fuseAnim: FuseAnim | null;
   fuseSelectedSq: { row: number; col: number } | null; // step-1 selected square highlight
   fogZones: { centerRow: number; centerCol: number; ownerColor: PieceColor }[];
+  fortressZones?: { centerRow: number; centerCol: number; ownerColor: PieceColor }[];
+  cloneAnim?: CloneAnim | null;
+  blackHoleAnim?: BlackHoleAnim | null;
+  poofAnim?: PoofAnim | null;
   viewerColor: PieceColor | null;
   invisibleUnder?: { row: number; col: number; piece: Piece; ownerColor: PieceColor } | null;
   analysisArrows: BoardArrow[];
@@ -70,7 +75,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     cardHighlight, doubleMoveHighlight, bombPieces, bombExploding,
     lavaSquares, lavaExploding, swapAnim, isReviewing, reviewBoard,
     cardPending, onClick, onDragStart, onDrop, doubleMove, transformAnim,
-    sniperAnim, teleportAnim, jumpAnim, reverseAnim, sacrificeAnim, sacrificeSelectedSquares, mindControlAnim, mindControlTargetSquare, fuseAnim, fuseSelectedSq,     fogZones, viewerColor, invisibleUnder, analysisArrows, onToggleAnalysisArrow, onClearAnalysisArrows, colorBlindMode, premove, onPremove,
+    sniperAnim, teleportAnim, jumpAnim, reverseAnim, sacrificeAnim, sacrificeSelectedSquares, mindControlAnim, mindControlTargetSquare, fuseAnim, fuseSelectedSq,     fogZones, fortressZones, cloneAnim, blackHoleAnim, poofAnim, viewerColor, invisibleUnder, analysisArrows, onToggleAnalysisArrow, onClearAnalysisArrows, colorBlindMode, premove, onPremove,
   } = props;
 
   const canvasRef  = React.useRef<HTMLCanvasElement>(null);
@@ -89,6 +94,9 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
   const sacrificeRef     = React.useRef<SacrificeAnim | null>(null);
   const mindControlRef   = React.useRef<MindControlAnim | null>(null);
   const fuseRef          = React.useRef<FuseAnim | null>(null);
+  const cloneRef         = React.useRef<CloneAnim | null>(null);
+  const blackHoleRef     = React.useRef<BlackHoleAnim | null>(null);
+  const poofRef          = React.useRef<PoofAnim | null>(null);
   const justDroppedRef   = React.useRef(false);
 
   React.useEffect(() => {
@@ -102,6 +110,18 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
   React.useEffect(() => {
     fuseRef.current = fuseAnim ?? null;
   }, [fuseAnim]);
+
+  React.useEffect(() => {
+    cloneRef.current = cloneAnim ?? null;
+  }, [cloneAnim]);
+
+  React.useEffect(() => {
+    blackHoleRef.current = blackHoleAnim ?? null;
+  }, [blackHoleAnim]);
+
+  React.useEffect(() => {
+    poofRef.current = poofAnim ?? null;
+  }, [poofAnim]);
 
   React.useEffect(() => {
     if (transformAnim && transformAnim !== transformRef.current) {
@@ -1384,6 +1404,62 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
           ctx.restore();
         }
       }
+
+      // ── Fortress zones: sealed 3×3 stone walls ─────────────────────────────
+      for (const zone of fortressZones ?? []) {
+        const isW = !isFlipped;
+        const cr0 = Math.max(0, zone.centerRow - 1);
+        const cr1 = Math.min(7, zone.centerRow + 1);
+        const cc0 = Math.max(0, zone.centerCol - 1);
+        const cc1 = Math.min(7, zone.centerCol + 1);
+        const zx  = (isW ? cc0 : 7 - cc1) * SQ;
+        const zy  = (isW ? 7 - cr1 : cr0) * SQ;
+        const zw  = (cc1 - cc0 + 1) * SQ;
+        const zh  = (cr1 - cr0 + 1) * SQ;
+        const own = viewerColor === zone.ownerColor;
+        const wall = own ? 'rgba(251,191,36,' : 'rgba(180,120,40,';
+        const glow = 0.65 + Math.sin(now / 900) * 0.2;
+
+        // faint stone tint inside so pieces still show
+        ctx.save();
+        ctx.fillStyle = 'rgba(120,90,40,0.14)';
+        ctx.fillRect(zx, zy, zw, zh);
+        ctx.restore();
+
+        // crenellated wall: outer + inner border with merlon ticks
+        ctx.save();
+        ctx.strokeStyle = `${wall}${glow})`;
+        ctx.lineWidth = 5;
+        ctx.shadowColor = `${wall}0.7)`;
+        ctx.shadowBlur = 14;
+        ctx.strokeRect(zx + 2.5, zy + 2.5, zw - 5, zh - 5);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(zx + 8.5, zy + 8.5, zw - 17, zh - 17);
+        ctx.shadowBlur = 0;
+        // merlons along the outer edge
+        ctx.fillStyle = `${wall}${glow})`;
+        const step = 22;
+        for (let mx = zx + 8; mx < zx + zw - 6; mx += step) {
+          ctx.fillRect(mx, zy - 1, 12, 7);
+          ctx.fillRect(mx, zy + zh - 6, 12, 7);
+        }
+        for (let my = zy + 8; my < zy + zh - 6; my += step) {
+          ctx.fillRect(zx - 1, my, 7, 12);
+          ctx.fillRect(zx + zw - 6, my, 7, 12);
+        }
+        // corner towers
+        for (const [tx, ty] of [[zx, zy], [zx + zw, zy], [zx, zy + zh], [zx + zw, zy + zh]]) {
+          ctx.beginPath();
+          ctx.arc(tx, ty, 9, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(60,40,15,0.95)';
+          ctx.fill();
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = `${wall}${glow})`;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
       const swapArc = swapRef.current;
       if (swapArc) {
         const sa = swapArc;
@@ -1573,6 +1649,39 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
         }
       }
 
+      // ── Clone animation ───────────────────────────────────────────────────
+      const cloA = cloneRef.current;
+      if (cloA) {
+        const elapsed = now - cloA.startTime;
+        if (elapsed < CLONE_DURATION) {
+          paintCloneAnim(ctx, cloA, now, isFlipped);
+        } else {
+          cloneRef.current = null;
+        }
+      }
+
+      // ── Black hole animation ──────────────────────────────────────────────
+      const bhA = blackHoleRef.current;
+      if (bhA) {
+        const elapsed = now - bhA.startTime;
+        if (elapsed < BLACKHOLE_DURATION) {
+          paintBlackHoleAnim(ctx, bhA, now, isFlipped);
+        } else {
+          blackHoleRef.current = null;
+        }
+      }
+
+      // ── Fake reveal poof ──────────────────────────────────────────────────
+      const pfA = poofRef.current;
+      if (pfA) {
+        const elapsed = now - pfA.startTime;
+        if (elapsed < POOF_DURATION) {
+          paintPoofAnim(ctx, pfA, now, isFlipped);
+        } else {
+          poofRef.current = null;
+        }
+      }
+
       // ── Particles ─────────────────────────────────────────────────────────
       particles.current = particles.current.filter(p => p.life > 0);
       for (const p of particles.current) {
@@ -1611,7 +1720,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
     displayBoard, sel, hints, lm, check, kingPos,
     cardHighlight, doubleMoveHighlight, bombPieces, bombExploding,
     lavaSquares, lavaExploding, isReviewing, doubleMove, transformAnim, sniperAnim, reverseAnim, sacrificeAnim, sacrificeSelectedSquares, mindControlAnim, mindControlTargetSquare, fuseAnim, fuseSelectedSq,
-    fogZones, viewerColor, analysisArrows, colorBlindMode, premove,
+    fogZones, fortressZones, cloneAnim, blackHoleAnim, poofAnim, viewerColor, analysisArrows, colorBlindMode, premove,
     boardPx,
   ]);
 

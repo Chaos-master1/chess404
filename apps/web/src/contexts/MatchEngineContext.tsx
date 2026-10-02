@@ -81,7 +81,12 @@ export interface MatchEngineContextShape {
   sacrificeAnim: any | null;
   mindControlAnim: any | null;
   fuseAnim: any | null;
+  reverseAnim: any | null;
+  cloneAnim: any | null;
+  blackHoleAnim: any | null;
+  poofAnim: any | null;
   fogZones: any[];
+  fortressZones: any[];
   ghostPiece: { piece: Piece; square: Sq } | null;
   ghostRef: React.RefObject<HTMLDivElement | null>;
   analysisArrows: any[];

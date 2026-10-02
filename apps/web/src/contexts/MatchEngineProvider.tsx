@@ -79,6 +79,7 @@ export default function MatchEngineProvider(props: MatchEngineProviderProps) {
     lavaSqs: engine.lavaSquares,
     lavaExploding: engine.lavaExploding,
     fogZones: engine.fogZones,
+    fortressZones: engine.fortressZones,
     ghostPiece: engine.ghostPiece,
     ghostRef: engine.ghostRef,
     analysisArrows: engine.analysisArrows,
@@ -186,6 +187,10 @@ export default function MatchEngineProvider(props: MatchEngineProviderProps) {
     sacrificeAnim: engine.sacrificeAnim,
     mindControlAnim: engine.mindControlAnim,
     fuseAnim: engine.fuseAnim,
+    reverseAnim: engine.reverseAnim,
+    cloneAnim: engine.cloneAnim,
+    blackHoleAnim: engine.blackHoleAnim,
+    poofAnim: engine.poofAnim,
   }), [engine]);
 
   const cardValue = React.useMemo(() => ({

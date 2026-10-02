@@ -16,6 +16,10 @@ import type {
   SacrificeAnim,
   MindControlAnim,
   FuseAnim,
+  ReverseAnim,
+  CloneAnim,
+  BlackHoleAnim,
+  PoofAnim,
 } from '../BoardCanvas';
 
 export function useMatchAnimations() {
@@ -124,6 +128,50 @@ export function useMatchAnimations() {
     teleportAnimTimerRef.current = setTimeout(() => setTeleportAnim(null), 1400);
   }, []);
 
+  const [reverseAnim, setReverseAnim] = React.useState<ReverseAnim | null>(null);
+  const reverseAnimTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerReverseAnim = React.useCallback(() => {
+    if (reverseAnimTimerRef.current) clearTimeout(reverseAnimTimerRef.current);
+      if (cloneAnimTimerRef.current) clearTimeout(cloneAnimTimerRef.current);
+      if (blackHoleAnimTimerRef.current) clearTimeout(blackHoleAnimTimerRef.current);
+      if (poofAnimTimerRef.current) clearTimeout(poofAnimTimerRef.current);
+    setReverseAnim({ startTime: performance.now() });
+    reverseAnimTimerRef.current = setTimeout(() => setReverseAnim(null), 1300);
+  }, []);
+
+  const [cloneAnim, setCloneAnim] = React.useState<CloneAnim | null>(null);
+  const cloneAnimTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerCloneAnim = React.useCallback((
+    fromSq: Sq,
+    toSq: Sq,
+    pieceType: PieceType,
+    pieceColor: PieceColor,
+  ) => {
+    if (cloneAnimTimerRef.current) clearTimeout(cloneAnimTimerRef.current);
+    setCloneAnim({ fromSq, toSq, pieceType, pieceColor, startTime: performance.now() });
+    cloneAnimTimerRef.current = setTimeout(() => setCloneAnim(null), 1400);
+  }, []);
+
+  const [blackHoleAnim, setBlackHoleAnim] = React.useState<BlackHoleAnim | null>(null);
+  const blackHoleAnimTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerBlackHoleAnim = React.useCallback((
+    center: Sq,
+    pulls: { from: Sq; to: Sq; pieceType: PieceType; pieceColor: PieceColor }[] = [],
+    blocked: Sq[] = [],
+  ) => {
+    if (blackHoleAnimTimerRef.current) clearTimeout(blackHoleAnimTimerRef.current);
+    setBlackHoleAnim({ center, pulls, blocked, startTime: performance.now() });
+    blackHoleAnimTimerRef.current = setTimeout(() => setBlackHoleAnim(null), 1600);
+  }, []);
+
+  const [poofAnim, setPoofAnim] = React.useState<PoofAnim | null>(null);
+  const poofAnimTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerPoofAnim = React.useCallback((sq: Sq) => {
+    if (poofAnimTimerRef.current) clearTimeout(poofAnimTimerRef.current);
+    setPoofAnim({ sq, startTime: performance.now() });
+    poofAnimTimerRef.current = setTimeout(() => setPoofAnim(null), 1100);
+  }, []);
+
   React.useEffect(() => {
     return () => {
       if (swapAnimTimerRef.current) clearTimeout(swapAnimTimerRef.current);
@@ -134,6 +182,7 @@ export function useMatchAnimations() {
       if (sacrificeAnimTimerRef.current) clearTimeout(sacrificeAnimTimerRef.current);
       if (mindControlAnimTimerRef.current) clearTimeout(mindControlAnimTimerRef.current);
       if (fuseAnimTimerRef.current) clearTimeout(fuseAnimTimerRef.current);
+      if (reverseAnimTimerRef.current) clearTimeout(reverseAnimTimerRef.current);
     };
   }, []);
 
@@ -165,6 +214,14 @@ export function useMatchAnimations() {
     fuseAnim, setFuseAnim,
     fuseAnimTimerRef,
     triggerFuseAnim,
+    reverseAnim, setReverseAnim,
+    triggerReverseAnim,
+    cloneAnim, setCloneAnim,
+    triggerCloneAnim,
+    blackHoleAnim, setBlackHoleAnim,
+    triggerBlackHoleAnim,
+    poofAnim, setPoofAnim,
+    triggerPoofAnim,
     triggerJumpAnim,
     triggerSniperAnim,
     triggerTeleportAnim,
