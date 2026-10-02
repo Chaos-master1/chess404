@@ -27,7 +27,7 @@ import type {
 import {
   makeBoard,
   findKing,
-  isAttackedWithFusion,
+  isAttackedWithFusion as isAttackedWithFusionFn,
 } from '../chessEngine';
 import {
   OPP,
@@ -779,7 +779,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     bombPieces, setBombPieces, setBombExploding, setSwapAnim, fogZones, setFogZones,
     fortressZones, setFortressZones, authoritativeMatchIdRef, authoritativeActorForColor,
     applyAuthoritativeSnapshot, fireCardAnim, playMoveSound, playCardSound, analyse,
-    isAttackedWithFusion,
+    isAttackedWithFusion: isAttackedWithFusionFn,
     checkEndGame: () => {},
     finishCardUse, removeCardFromHand, radarActive, setRadarActive, finalPositionRef,
     setOver, setWinner, setMovHist, setPosHist, setSnapshots, triggerSniperAnim,
