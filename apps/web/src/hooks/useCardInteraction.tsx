@@ -970,7 +970,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
           return;
         }
         hostPiece.parasiteTarget = `${row},${col}`;
-        playCardSound('card_play');
+        playCardSound('parasite');
 
         if (authoritativeMatchIdRef.current) {
           void sendAuthoritativeTarget({ row, col }).then(() => {
