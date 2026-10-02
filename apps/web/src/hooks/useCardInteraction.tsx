@@ -1224,7 +1224,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
           const drawCount = isBig ? 3 : 2;
           const drawnCards = Array.from({ length: drawCount }, () => CARD_POOL[Math.floor(Math.random() * CARD_POOL.length)]);
           const addFn = (h: GameCard[]) => {
-            let nextH = [...h];
+            const nextH = [...h];
             for (const c of drawnCards) {
               if (nextH.length < 10) nextH.push(c);
             }
