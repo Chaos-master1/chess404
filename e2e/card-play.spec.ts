@@ -90,7 +90,7 @@ test.describe('card play', () => {
         const card = viewerHand.nth(i);
         if ((await card.getAttribute('data-testid'))?.includes('joker')) continue;
         await card.click();
-        const use = page.getByRole('button', { name: /^use card$/i });
+        const use = page.getByTestId('btn-use-card').or(page.getByRole('button', { name: /(use card|activate card)/i }));
         if (!(await use.isVisible({ timeout: 1_200 }).catch(() => false))) {
           await cancelPendingCard();
           continue;

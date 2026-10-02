@@ -604,6 +604,8 @@ export function MatchBoardView() {
                 {/* ── Action Button ── */}
                 <div style={{ padding: '4px 10px 14px', zIndex: 2 }}>
                   <button
+                    data-testid="btn-use-card"
+                    aria-label={canUse ? (selectedCard.mechanic === 'joker' ? 'Choose Transformation' : 'Use Card') : 'Blocked'}
                     onClick={() => applyCard(selectedCard, ownerColor)}
                     disabled={!canUse || intentInFlight}
                     style={{
@@ -632,7 +634,7 @@ export function MatchBoardView() {
                       opacity: intentInFlight ? 0.6 : 1,
                     }}
                   >
-                    {intentInFlight ? 'Sending...' : canUse ? (selectedCard.mechanic === 'joker' ? '🃏 Choose Transformation' : '✦ ACTIVATE CARD ✦') : '🔒 BLOCKED'}
+                    {intentInFlight ? 'Sending...' : canUse ? (selectedCard.mechanic === 'joker' ? '🃏 Choose Transformation' : '✦ USE CARD ✦') : '🔒 BLOCKED'}
                   </button>
                 </div>
               </div>
