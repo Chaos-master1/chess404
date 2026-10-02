@@ -1,9 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// Production topology per CLAUDE.md: web-production-1caefb is the live
-// host; the older 5adfa/ddc27 hosts are dead. Override with E2E_BASE_URL
-// for local/staging runs.
-const BASE_URL = process.env.E2E_BASE_URL ?? 'https://web-production-1caefb.up.railway.app';
+// Live Railway production host
+const BASE_URL = process.env.E2E_BASE_URL ?? 'https://web-production-5adfa.up.railway.app';
 
 export default defineConfig({
   testDir: './e2e',

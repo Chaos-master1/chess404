@@ -238,7 +238,7 @@ export default function PlayHubPage({
 
         <button
           data-testid="btn-play-computer"
-          onClick={handlePlayComputer}
+          onClick={() => handlePlayComputer(false)}
           disabled={!identityReady || computerStarting}
           aria-busy={computerStarting}
           style={{
