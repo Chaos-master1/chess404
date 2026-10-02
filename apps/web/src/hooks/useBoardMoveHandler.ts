@@ -230,7 +230,7 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     const matchId = authoritativeMatchIdRef.current;
     if (!matchId) return false;
     if (cardPending || promo || promoPicker || cardPromo || jokerPicker) return false;
-    if (ghostRef.current) return false;
+    if (ghostRef.current && ghostRef.current.row === fr && ghostRef.current.col === fc) return false;
 
     const piece = boardRef.current[fr]?.[fc];
     const target = boardRef.current[tr]?.[tc];
@@ -595,6 +595,15 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     const wasDoubleMoveFinal = dm !== null && dm.movesLeft === 1;
     const next: PieceColor = OPP[t];
     resetCardUsed(next);
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = nb[r][c];
+        if (p?.borrowed && p.color === t) {
+          nb[r][c] = { ...p, color: next, borrowed: false };
+        }
+      }
+    }
 
     const posKey = positionKey(nb, next, newMv, newLm);
     const newPh  = [...ph, posKey];

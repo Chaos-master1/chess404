@@ -8,6 +8,7 @@ import type { QueueName, QueueTicket } from './lib/matchmaking-service';
 import { createPrivateMatch } from './lib/private-match-service';
 import type { PrivateMatchIdentity } from './lib/private-match-service';
 import { writeStoredRoomMeta } from './lib/match-service';
+import { readStoredActiveMatchId } from './lib/session-storage';
 import { modeLabel, queueLabel } from './lib/match-labels';
 import QueuePage from './QueuePage';
 import LobbiesPage from './LobbiesPage';
@@ -80,11 +81,20 @@ export default function PlayHubPage({
   const identityReady = Boolean(identity?.guestId);
   const [computerMatchState, setComputerMatchState] = React.useState<'idle' | 'starting' | 'error'>('idle');
   const [computerMatchNotice, setComputerMatchNotice] = React.useState('');
+  const [conflictMatchId, setConflictMatchId] = React.useState<string | null>(null);
+  const [storedMatchId, setStoredMatchId] = React.useState<string | null>(null);
   const computerStarting = computerMatchState === 'starting';
 
-  const handlePlayComputer = useCallback(() => {
+  React.useEffect(() => {
+    setStoredMatchId(readStoredActiveMatchId());
+  }, []);
+
+  const effectiveActiveMatchId = activeMatchId || conflictMatchId || storedMatchId;
+
+  const handlePlayComputer = useCallback((force = false) => {
     if (!identity?.guestId || computerMatchState === 'starting') return;
     setComputerMatchState('starting');
+    setComputerMatchNotice('');
     const difficulty = 'medium';
     createPrivateMatch({
       identity,
@@ -93,7 +103,9 @@ export default function PlayHubPage({
       difficulty,
       clockSeconds: 600,
       preferredSeat: 'white',
+      force,
     }).then((result) => {
+      setConflictMatchId(null);
       writeStoredRoomMeta(result.matchId, {
         queue: 'direct',
         modeId: 'computer' as MatchModeId,
@@ -121,7 +133,13 @@ export default function PlayHubPage({
       // pointing the player at their live game beats a generic "error".
       const raw = err instanceof Error ? err.message : '';
       if (/already has an active computer match/i.test(raw)) {
-        setComputerMatchNotice('You already have a computer game in progress — finish or resign it first. It is available from your active match link.');
+        const matchIdMatch = raw.match(/active computer match:?\s*([a-zA-Z0-9_\-]+)/i);
+        if (matchIdMatch && matchIdMatch[1]) {
+          setConflictMatchId(matchIdMatch[1]);
+        }
+        setComputerMatchNotice('You already have a computer game in progress — finish or resign it first. It is available below or from your active match link.');
+      } else {
+        setComputerMatchNotice(raw || 'Failed to start computer match.');
       }
     });
   }, [identity, router, computerMatchState]);
@@ -141,7 +159,78 @@ export default function PlayHubPage({
           </div>
         </div>
 
-        {computerMatchNotice && (
+        {effectiveActiveMatchId && (
+          <div style={{
+            padding: '16px 20px',
+            borderRadius: '16px',
+            border: '1px solid rgba(255, 180, 60, 0.45)',
+            background: 'linear-gradient(135deg, rgba(200, 134, 10, 0.22) 0%, rgba(30, 20, 10, 0.85) 100%)',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '14px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+          }}>
+            <div>
+              <div style={{ color: '#ffd28a', fontSize: '11px', fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase' }}>
+                ⚔️ Game In Progress
+              </div>
+              <div style={{ color: '#fff4d6', fontSize: '16px', fontWeight: 800, marginTop: '2px' }}>
+                You have an active match ({activeMatchModeId ?? 'in progress'})
+              </div>
+              <div style={{ color: 'rgba(255,210,135,0.7)', fontSize: '12px', marginTop: '2px' }}>
+                Match ID: <span style={{ fontFamily: 'monospace' }}>{effectiveActiveMatchId}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button
+                type="button"
+                data-testid="btn-return-to-match"
+                onClick={() => {
+                  if (onReturnToMatch) {
+                    onReturnToMatch();
+                  } else {
+                    router.push(`/match/${encodeURIComponent(effectiveActiveMatchId)}`);
+                  }
+                }}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(180deg, #f59e0b 0%, #b45309 100%)',
+                  border: '1px solid rgba(255, 230, 150, 0.5)',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                }}
+              >
+                ⚔️ Return to Match
+              </button>
+              <button
+                type="button"
+                data-testid="btn-abandon-computer-match"
+                onClick={() => handlePlayComputer(true)}
+                disabled={computerStarting}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  background: 'rgba(239, 68, 68, 0.18)',
+                  border: '1px solid rgba(239, 68, 68, 0.45)',
+                  color: '#fca5a5',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                ✕ Abandon & Start New
+              </button>
+            </div>
+          </div>
+        )}
+
+        {computerMatchNotice && !effectiveActiveMatchId && (
           <div style={{ color: '#ffd28a', fontSize: '13px', fontWeight: 700, padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(255,180,60,0.35)', background: 'rgba(200,134,10,0.14)' }}>
             {computerMatchNotice}
           </div>

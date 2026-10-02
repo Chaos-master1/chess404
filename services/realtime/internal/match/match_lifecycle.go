@@ -34,21 +34,32 @@ func (s *Service) CreateComputerMatch(req contracts.CreateMatchRequest, now time
 	}
 	if ownerID != "" {
 		duplicate := false
+		var activeMatchID string
+		var activeContainer *matchContainer
 		s.matches.Range(func(_ string, c *matchContainer) bool {
 			c.mu.Lock()
 			sameOwner := c.state.ModeID == contracts.MatchModeComputer &&
 				c.state.Status == "active" &&
 				(c.state.WhiteGuestID == ownerID || c.state.BlackGuestID == ownerID)
-			c.mu.Unlock()
 			if sameOwner {
+				activeMatchID = c.state.MatchID
+				activeContainer = c
 				duplicate = true
-				return false
 			}
-			return true
+			c.mu.Unlock()
+			return !duplicate
 		})
 		if duplicate {
-			s.Log.Info("match:create: blocked duplicate computer match", "ownerID", ownerID)
-			return contracts.MatchSnapshotResponse{}, ErrActiveComputerMatch
+			if req.Force && activeContainer != nil {
+				activeContainer.mu.Lock()
+				activeContainer.state.Status = "finished"
+				activeContainer.state.FinishReason = "resigned"
+				activeContainer.mu.Unlock()
+				s.Log.Info("match:create: forced resign of existing computer match", "ownerID", ownerID, "matchID", activeMatchID)
+			} else {
+				s.Log.Info("match:create: blocked duplicate computer match", "ownerID", ownerID, "matchID", activeMatchID)
+				return contracts.MatchSnapshotResponse{}, fmt.Errorf("%w: %s", ErrActiveComputerMatch, activeMatchID)
+			}
 		}
 	}
 	return s.CreateMatch(req, now), nil
@@ -645,6 +656,7 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
 		return
 	}
+	now = time.Now().UTC()
 	c.state.PendingCard = nil
 
 	from, to, ok := firstLegalMoveForColorConstrained(c.state)

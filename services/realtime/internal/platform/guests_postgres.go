@@ -480,6 +480,7 @@ func scanPostgresGuestSession(scanner postgresGuestScanner) (GuestSession, bool,
 	}
 	entry.CreatedAt = createdAt.UTC()
 	entry.LastSeenAt = lastSeenAt.UTC()
+	entry.DisplayName = sanitizeGuestDisplayName(entry.DisplayName)
 	session := GuestSession{
 		Guest:         entry,
 		SessionSecret: strings.TrimSpace(sessionSecret.String),
@@ -575,6 +576,7 @@ func queryPostgresGuests(db *sql.DB, baseQuery string, limit int) []GuestProfile
 		}
 		entry.CreatedAt = createdAt.UTC()
 		entry.LastSeenAt = lastSeenAt.UTC()
+		entry.DisplayName = sanitizeGuestDisplayName(entry.DisplayName)
 		items = append(items, entry)
 	}
 	if err := rows.Err(); err != nil {

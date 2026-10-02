@@ -112,6 +112,50 @@ func TestCreateComputerMatchDoesNotTouchOtherModes(t *testing.T) {
 	}, now.Add(2*time.Second))
 }
 
+func TestCreateComputerMatchForceResignsExistingGame(t *testing.T) {
+	service := NewService()
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+
+	createTestMatch(service, contracts.CreateMatchRequest{
+		MatchID:      "guard_first_force",
+		ModeID:       contracts.MatchModeComputer,
+		WhiteGuestID: "guard_owner_force",
+	}, now)
+
+	// Attempting without Force fails
+	_, err := service.CreateComputerMatch(contracts.CreateMatchRequest{
+		MatchID:      "guard_second_noforce",
+		ModeID:       contracts.MatchModeComputer,
+		WhiteGuestID: "guard_owner_force",
+	}, now.Add(time.Second))
+	if !errors.Is(err, ErrActiveComputerMatch) {
+		t.Fatalf("expected ErrActiveComputerMatch without Force, got %v", err)
+	}
+
+	// Attempting with Force = true succeeds and resigns the old game
+	snap, err := service.CreateComputerMatch(contracts.CreateMatchRequest{
+		MatchID:      "guard_second_forced",
+		ModeID:       contracts.MatchModeComputer,
+		WhiteGuestID: "guard_owner_force",
+		Force:        true,
+	}, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("expected force create to succeed, got %v", err)
+	}
+	if snap.Match.MatchID != "guard_second_forced" {
+		t.Fatalf("expected new match ID guard_second_forced, got %s", snap.Match.MatchID)
+	}
+
+	// Old game must now be finished
+	oldSnap, err := service.GetMatch("guard_first_force")
+	if err != nil {
+		t.Fatalf("expected old match to exist, got %v", err)
+	}
+	if oldSnap.Match.Status != "finished" {
+		t.Fatalf("expected old match to be finished after force create, got %s", oldSnap.Match.Status)
+	}
+}
+
 // The zombie GC: an ACTIVE match idle past the abandon TTL must be finalized
 // as a draw-abandon and flushed to the archive before the container is
 // evicted, instead of lingering "active" in the public feed forever. The

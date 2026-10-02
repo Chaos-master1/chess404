@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { type MatchModeId, type PieceColor } from '@chess404/contracts';
 import { createPrivateMatch, type PrivateMatchIdentity } from './lib/private-match-service';
 import { writeStoredRoomMeta } from './lib/match-service';
+import { readStoredActiveMatchId } from './lib/session-storage';
 
 interface ComputerPageProps {
   identity: PrivateMatchIdentity | null;
@@ -46,9 +47,12 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
   const [inflightDifficulty, setInflightDifficulty] = React.useState<DifficultyValue | null>(null);
   const [inflightColor, setInflightColor] = React.useState<PieceColor | null>(null);
   const [error, setError] = React.useState('');
+  const [conflictMatchId, setConflictMatchId] = React.useState<string | null>(null);
   const [created, setCreated] = React.useState<{ matchId: string; seatColor: PieceColor } | null>(null);
 
-  const createMatch = React.useCallback(async (difficulty: DifficultyValue, colorChoice: PlayerColorChoice): Promise<boolean> => {
+  const effectiveActiveMatchId = conflictMatchId || (typeof window !== 'undefined' ? readStoredActiveMatchId() : null);
+
+  const createMatch = React.useCallback(async (difficulty: DifficultyValue, colorChoice: PlayerColorChoice, force = false): Promise<boolean> => {
     if (!identity?.guestId) {
       setError('Your hosted player session is still loading — try again in a moment.');
       return false;
@@ -72,7 +76,9 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
         difficulty,
         clockSeconds: 600,
         preferredSeat: resolvedSeat,
+        force,
       });
+      setConflictMatchId(null);
       writeStoredRoomMeta(result.matchId, {
         queue: 'direct',
         modeId: 'computer' as MatchModeId,
@@ -101,10 +107,11 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
       if (lower.includes('unauthorized guest') || lower.includes('unknown guest') || lower.includes('unauthorized')) {
         setError('Your hosted player session expired. Please refresh the page to start a new game.');
       } else if (lower.includes('already has an active computer match')) {
-        // Server-side one-active-game guard (409): a stacked computer game
-        // would never be joined by anyone. Point the player at their live
-        // game instead of surfacing the raw rejection.
-        setError('You already have a computer game in progress — finish or resign it first. Your active match is available from the play hub.');
+        const matchIdMatch = raw.match(/active computer match:?\s*([a-zA-Z0-9_\-]+)/i);
+        if (matchIdMatch && matchIdMatch[1]) {
+          setConflictMatchId(matchIdMatch[1]);
+        }
+        setError('You already have a computer game in progress — finish or resign it first.');
       } else if (lower.includes('rate limit') || lower.includes('retry after')) {
         setError('Too many recent requests — wait a few seconds and try again.');
       } else if (lower.includes('context deadline') || lower.includes('match-service unreachable')) {
@@ -361,17 +368,61 @@ export default function ComputerPage({ identity, embedded = false }: ComputerPag
 
       {error && (
         <div style={{
-          padding: '10px 12px',
-          borderRadius: '8px',
-          background: 'rgba(255,80,80,0.1)',
-          border: '1px solid rgba(255,80,80,0.2)',
+          padding: '12px 14px',
+          borderRadius: '10px',
+          background: 'rgba(255,80,80,0.12)',
+          border: '1px solid rgba(255,80,80,0.3)',
           color: '#ff8888',
           fontSize: '12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
         }}>
-          {error}
-          <div style={{ marginTop: '6px', opacity: 0.7, fontSize: '11px' }}>
-            Click Play to try again.
-          </div>
+          <div>{error}</div>
+          {effectiveActiveMatchId && (
+            <div style={{ display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                data-testid="btn-computer-return-match"
+                onClick={() => router.push(`/match/${encodeURIComponent(effectiveActiveMatchId)}`)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(180deg, #f59e0b 0%, #b45309 100%)',
+                  border: '1px solid rgba(255, 230, 150, 0.5)',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                ⚔️ Return to Match
+              </button>
+              <button
+                type="button"
+                data-testid="btn-computer-abandon-match"
+                onClick={() => void createMatch(selectedDifficulty, selectedColor, true)}
+                disabled={creating}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  background: 'rgba(239, 68, 68, 0.25)',
+                  border: '1px solid rgba(239, 68, 68, 0.5)',
+                  color: '#fca5a5',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                ✕ Abandon & Start New
+              </button>
+            </div>
+          )}
+          {!effectiveActiveMatchId && (
+            <div style={{ marginTop: '2px', opacity: 0.7, fontSize: '11px' }}>
+              Click Play to try again.
+            </div>
+          )}
         </div>
       )}
 

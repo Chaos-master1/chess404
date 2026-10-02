@@ -27,6 +27,7 @@ import type {
 import {
   makeBoard,
   findKing,
+  isAttackedWithFusion,
 } from '../chessEngine';
 import {
   OPP,
@@ -723,14 +724,16 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       (match.whiteHand as GameCard[] | undefined) ?? [],
       (match.blackHand as GameCard[] | undefined) ?? [],
     ));
-    if (match.lavaSquares) setLavaSquares(match.lavaSquares as any);
-    if (match.fogZones) setFogZones(match.fogZones as any);
+    setLavaSquares((match.lavaSquares as any) ?? []);
+    setFogZones((match.fogZones as any) ?? []);
     // Radar is now delivered server-side (the snapshot's opposing hand is
     // replaced with real cards while radarRevealFor names this viewer), so
     // mirror the flag into the UI each snapshot.
     setRadarActive(Boolean(match.radarRevealFor));
-    if (match.fortressZones) setFortressZones(match.fortressZones as any);
-    if (match.bombPieces) setBombPieces(match.bombPieces as any);
+    setFortressZones((match.fortressZones as any) ?? []);
+    setBombPieces((match.bombPieces as any) ?? []);
+    setGhostPiece((match.invisiblePiece as any) ?? null);
+    setDoubleMove((match.doubleMove as any) ?? null);
 
     if (isGameOver) {
       setClockActive(false);
@@ -739,7 +742,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       setClockActive(true);
       setTicking(match.turn);
     }
-  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setLavaExploding, setFogZones, setFortressZones, setBombPieces, setBombExploding, setViewerSeat, setMatchSeatMeta, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, triggerTeleportAnim, triggerJumpAnim, triggerSwapAnim, triggerMindControlAnim, triggerSacrificeAnim, triggerFuseAnim, triggerReverseAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setLavaExploding, setFogZones, setFortressZones, setBombPieces, setBombExploding, setGhostPiece, setDoubleMove, setViewerSeat, setMatchSeatMeta, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, triggerTeleportAnim, triggerJumpAnim, triggerSwapAnim, triggerMindControlAnim, triggerSacrificeAnim, triggerFuseAnim, triggerReverseAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;
@@ -776,7 +779,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     bombPieces, setBombPieces, setBombExploding, setSwapAnim, fogZones, setFogZones,
     fortressZones, setFortressZones, authoritativeMatchIdRef, authoritativeActorForColor,
     applyAuthoritativeSnapshot, fireCardAnim, playMoveSound, playCardSound, analyse,
-    isAttackedWithFusion: (b, r, c, by) => findKing(b, by) !== null,
+    isAttackedWithFusion,
     checkEndGame: () => {},
     finishCardUse, removeCardFromHand, radarActive, setRadarActive, finalPositionRef,
     setOver, setWinner, setMovHist, setPosHist, setSnapshots, triggerSniperAnim,

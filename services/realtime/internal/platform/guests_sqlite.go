@@ -511,6 +511,7 @@ func lookupGuestSessionScanner(scanner guestScanner) (GuestSession, bool, error)
 	if err != nil {
 		return GuestSession{}, false, err
 	}
+	entry.DisplayName = sanitizeGuestDisplayName(entry.DisplayName)
 	session := GuestSession{
 		Guest:         entry,
 		SessionSecret: strings.TrimSpace(sessionSecret.String),
@@ -605,6 +606,7 @@ func scanGuestRows(rows *sql.Rows) ([]GuestProfile, error) {
 		}
 		entry.CreatedAt = parsedCreatedAt
 		entry.LastSeenAt = parsedLastSeenAt
+		entry.DisplayName = sanitizeGuestDisplayName(entry.DisplayName)
 		items = append(items, entry)
 	}
 	if err := rows.Err(); err != nil {

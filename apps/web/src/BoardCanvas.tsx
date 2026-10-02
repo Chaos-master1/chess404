@@ -1021,6 +1021,30 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
             ctx.textBaseline = 'alphabetic';
           }
 
+          // ── BORROWED overlay: psychic violet ring and glow ──
+          if (p.borrowed) {
+            const cxB = x + SQ / 2, cyB = y + SQ / 2;
+            const RB = SQ * 0.44;
+            const glowB = 0.22 + Math.sin(now / 400) * 0.10;
+            const gradB = ctx.createRadialGradient(cxB, cyB, RB * 0.4, cxB, cyB, RB * 1.15);
+            gradB.addColorStop(0, 'rgba(168,85,247,0)');
+            gradB.addColorStop(0.6, `rgba(168,85,247,${glowB})`);
+            gradB.addColorStop(1, 'rgba(168,85,247,0)');
+            ctx.fillStyle = gradB;
+            ctx.beginPath();
+            ctx.arc(cxB, cyB, RB * 1.15, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.save();
+            ctx.strokeStyle = `rgba(192,132,252,${0.65 + Math.sin(now / 350) * 0.25})`;
+            ctx.lineWidth = 2.5;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.arc(cxB, cyB, RB, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+
           if (p.bomb) {
             const wobble = Math.sin(now / 250) * 2;
             ctx.font = '14px serif';

@@ -20,7 +20,7 @@ import {
   WatchIcon,
 } from '../components/layout/icons';
 import { modeLabel, queueLabel, finishReasonLabel } from '../lib/match-labels';
-import { buildLiveMatchUrl, buildReplayPageUrl } from '../lib/session-storage';
+import { buildLiveMatchUrl, buildReplayPageUrl, readStoredActiveMatchId } from '../lib/session-storage';
 import { readStoredRoomMeta } from '../lib/match-service';
 import { accountRatingForMode, resolveSeatIdentity, type MatchSeatMeta } from '../lib/seat-identity';
 import { useOpponentAccountProfile } from './useOpponentAccountProfile';
@@ -161,14 +161,9 @@ export function useMatchNav(props: UseMatchNavProps) {
     }))
   );
   const activeSecondaryNav = secondaryNavItems.some((item) => item.key === activePage);
-  const showReturnToMatch = !!hostedRuntime && Boolean(authoritativeMatchId);
-  // The URL updates synchronously on router.push, but activePage only
-  // follows it a render later (App.tsx syncs pathname -> activePage in a
-  // useEffect). Without this check, the one frame where pathname is already
-  // "/match/<id>" but activePage is still the previous page (e.g. "Play")
-  // rendered the play hub -- including the difficulty picker -- at the match
-  // URL for that single frame, a visible flash on every match launch.
   const isMatchRoute = pathname?.startsWith('/match/') ?? false;
+  const storedActiveMatchId = typeof window !== 'undefined' ? readStoredActiveMatchId() : null;
+  const showReturnToMatch = !isMatchRoute && (Boolean(authoritativeMatchId) || Boolean(storedActiveMatchId));
   const showPlayHub = !isMatchRoute && (hostedRuntime
     ? (activePage === 'Play' || activePage === 'Queue')
     : (activePage === 'Queue'));

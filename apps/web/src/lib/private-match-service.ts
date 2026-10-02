@@ -69,6 +69,7 @@ export async function createPrivateMatch(input: {
   clockSeconds?: number;
   preferredSeat?: PieceColor;
   difficulty?: string;
+  force?: boolean;
 }): Promise<PrivateMatchAccessResponse> {
   const response = await fetchPrivateMatchAccess('/api/gateway/private-matches', {
     queue: input.queue ?? 'direct',
@@ -76,6 +77,7 @@ export async function createPrivateMatch(input: {
     difficulty: input.difficulty ?? '',
     clockSeconds: input.clockSeconds ?? 600,
     preferredSeat: input.preferredSeat ?? 'white',
+    force: input.force ?? false,
   }, input.identity);
 
   return persistResolvedGuestSession(await unwrapResponse<PrivateMatchAccessResponse>(response));

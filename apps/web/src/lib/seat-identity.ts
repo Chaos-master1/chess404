@@ -65,11 +65,11 @@ export function resolveSeatIdentity(input: SeatIdentityInput): SeatIdentity {
   if (input.isViewer) {
     // Same placeholder rule as the opponent seat: a stale generated name
     // burned into the snapshot must not override the viewer's real profile.
-    const profileName = input.viewerProfileName?.trim();
-    const seatName = input.seatName?.trim();
-    const name = profileName
-      || (seatName && !isPlaceholderSeatName(seatName) ? seatName : null)
-      || 'Anonymous';
+    const rawProfile = input.viewerProfileName?.trim();
+    const profileName = rawProfile && !isPlaceholderSeatName(rawProfile) ? rawProfile : null;
+    const rawSeat = input.seatName?.trim();
+    const seatName = rawSeat && !isPlaceholderSeatName(rawSeat) ? rawSeat : null;
+    const name = profileName || seatName || 'Anonymous';
     return { waiting: false, name, rating: input.viewerRating ?? null };
   }
   const handle = input.accountHandle?.trim();
@@ -83,7 +83,7 @@ export function resolveSeatIdentity(input: SeatIdentityInput): SeatIdentity {
   if (seatName && !isPlaceholderSeatName(seatName)) {
     return { waiting: false, name: seatName, rating: null };
   }
-  return { waiting: false, name: 'Guest', rating: null };
+  return { waiting: false, name: 'Anonymous', rating: null };
 }
 
 const generatedSeatNamePattern = /^[A-Z][a-z]+ [A-Z][a-z]+ \d{1,4}$/;

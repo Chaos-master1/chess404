@@ -506,16 +506,29 @@ func maxInt(a, b int) int {
 	return b
 }
 
-func generateGuestName(index int) string {
-	prefixes := []string{
-		"Aurora", "Blitz", "Cipher", "Crimson", "Echo", "Ember", "Fable", "Glint",
-		"Hollow", "Ivory", "Jade", "Nova", "Onyx", "Rune", "Solar", "Velvet",
+func isGeneratedGuestName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" || trimmed == "Anonymous" {
+		return true
 	}
-	suffixes := []string{
-		"Bishop", "Rook", "Knight", "Queen", "Pawn", "Mirror", "Comet", "Phantom",
-		"Vortex", "Fox", "Oracle", "Spark", "Signal", "Drift", "Halo", "Cipher",
+	parts := strings.Split(trimmed, " ")
+	if len(parts) == 3 {
+		if _, err := strconv.Atoi(parts[2]); err == nil {
+			return true
+		}
 	}
-	return prefixes[index%len(prefixes)] + " " + suffixes[(index/len(prefixes))%len(suffixes)] + " " + strconv.Itoa(100+(index%900))
+	return false
+}
+
+func sanitizeGuestDisplayName(name string) string {
+	if isGeneratedGuestName(name) {
+		return "Anonymous"
+	}
+	return name
+}
+
+func generateGuestName(_ int) string {
+	return "Anonymous"
 }
 
 func randomToken(bytesCount int) string {
@@ -547,6 +560,7 @@ func renewGuestPrivateState(state GuestPrivateState, now time.Time) GuestPrivate
 }
 
 func buildGuestSession(entry GuestProfile, privateState GuestPrivateState) GuestSession {
+	entry.DisplayName = sanitizeGuestDisplayName(entry.DisplayName)
 	return GuestSession{
 		Guest:         entry,
 		SessionSecret: strings.TrimSpace(privateState.SessionSecret),

@@ -190,7 +190,9 @@ export function useMatchBoardEffects({
     setFogZones([]);
     setGhostPiece(null);
     ghostRef.current = null;
-  }, []);
+    setBombPieces([]);
+    setBombExploding([]);
+  }, [setBombPieces, setBombExploding]);
 
   return {
     lavaSquares, setLavaSquares,

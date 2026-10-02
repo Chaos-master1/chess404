@@ -64,7 +64,7 @@ func TestPostgresGuestStoreEnsureGuestTouchesExistingGuest(t *testing.T) {
 		WithArgs("guest_existing").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"guest_id", "display_name", "rating", "rating_open", "rating_hidden", "matches_played", "wins", "losses", "draws", "created_at", "last_seen_at", "session_secret", "session_token", "session_expires_at",
-		}).AddRow("guest_existing", "Aurora Bishop 101", 1200, 0, 0, 0, 0, 0, 0, now, now, "secret_existing", "guesttok_existing", now.Add(6*time.Hour)))
+		}).AddRow("guest_existing", "Anonymous", 1200, 0, 0, 0, 0, 0, 0, now, now, "secret_existing", "guesttok_existing", now.Add(6*time.Hour)))
 	mock.ExpectExec(`update guests set last_seen_at = \$1, session_secret = \$2, session_token = \$3, session_expires_at = \$4 where guest_id = \$5`).
 		WithArgs(sqlmock.AnyArg(), "secret_existing", "guesttok_existing", sqlmock.AnyArg(), "guest_existing").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -74,7 +74,7 @@ func TestPostgresGuestStoreEnsureGuestTouchesExistingGuest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected postgres guest ensure to succeed, got %v", err)
 	}
-	if guest.Guest.GuestID != "guest_existing" || guest.Guest.DisplayName != "Aurora Bishop 101" || guest.SessionSecret != "secret_existing" || guest.SessionToken != "guesttok_existing" || guest.ExpiresAt.IsZero() {
+	if guest.Guest.GuestID != "guest_existing" || guest.Guest.DisplayName != "Anonymous" || guest.SessionSecret != "secret_existing" || guest.SessionToken != "guesttok_existing" || guest.ExpiresAt.IsZero() {
 		t.Fatalf("unexpected postgres guest %#v", guest)
 	}
 

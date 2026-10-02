@@ -147,6 +147,7 @@ type GatewayPrivateMatchRequest struct {
 	ClockSeconds   int64                   `json:"clockSeconds,omitempty"`
 	ClockIncrement int64                   `json:"clockIncrement,omitempty"`
 	PreferredSeat  string                  `json:"preferredSeat,omitempty"`
+	Force          bool                    `json:"force,omitempty"`
 }
 
 type GatewayPrivateMatchResponse struct {

@@ -298,6 +298,7 @@ type CreateMatchRequest struct {
 	BlackName         string      `json:"blackName,omitempty"`
 	WhitePlayerSecret string      `json:"whitePlayerSecret,omitempty"`
 	BlackPlayerSecret string      `json:"blackPlayerSecret,omitempty"`
+	Force             bool        `json:"force,omitempty"`
 }
 
 type JoinMatchSeatRequest struct {

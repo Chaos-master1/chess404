@@ -319,6 +319,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     if (!cardPending || !promoPicker) return;
     const { card, playerColor, mechanic } = cardPending;
     const sq = promoPicker.sq;
+    setPromoPicker(null);
     const oldType = board[sq.row][sq.col]?.type ?? 'pawn';
     const pieceColor = board[sq.row][sq.col]?.color ?? playerColor;
     if (authoritativeMatchIdRef.current && (mechanic === 'promote' || mechanic === 'demote' || mechanic === 'promotehim' || mechanic === 'demotehim')) {
@@ -342,7 +343,6 @@ export function useCardInteraction(props: UseCardInteractionProps) {
       });
       return;
     }
-    setPromoPicker(null);
     const isPromotion = mechanic === 'promote' || mechanic === 'promotehim';
     triggerTransformAnim(sq, isPromotion ? 'up' : 'down', oldType, type, pieceColor);
     setTimeout(() => {
@@ -649,10 +649,10 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     if (mechanic === 'teleport') {
       if (step === 1) {
         if (!piece || piece.color !== playerColor || piece.type === 'king') {
-          setCardMsg('🌀 Click YOUR piece to teleport (not king)');
+          setCardMsg('✨ Click YOUR piece to teleport (not king)');
           return;
         }
-        setCardMsg('🌀 Now click an empty destination square');
+        setCardMsg('✨ Now click any empty square on the board');
         setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, from: { row, col } } } : null);
         void sendAuthoritativeTarget({ row, col }).catch(err => {
           const message = err instanceof Error ? err.message : 'Step 1 selection failed';
@@ -663,8 +663,8 @@ export function useCardInteraction(props: UseCardInteractionProps) {
       }
       if (step === 2) {
         const from = (data.from as Sq) || (cardPending.data.from as Sq);
-        if (!from) { setCardMsg('🌀 Click YOUR piece first'); return; }
-        if (piece) { setCardMsg('🌀 Destination square must be empty!'); return; }
+        if (!from) { setCardMsg('✨ Click YOUR piece first'); return; }
+        if (piece) { setCardMsg('✨ Target square must be EMPTY!'); return; }
         const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
         const src = nb[from.row][from.col]!;
         nb[row][col] = src;
@@ -672,23 +672,22 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         const kp  = findKing(nb, playerColor);
         const okp = findKing(nb, opp);
         if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
-          setCardMsg('🌀 Teleport would leave your king in check!');
+          setCardMsg('✨ That teleport would leave your king in check!');
           return;
         }
         if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
-          setCardMsg('🌀 Cannot teleport there — would put enemy king in check!');
+          setCardMsg('✨ Cannot teleport there — would put the enemy king in check!');
           return;
         }
 
         triggerTeleportAnim(from, { row, col }, src.type, playerColor);
-        fireCardAnim('teleport', `Teleported to ${FILES[col]}${RANKS[row]}`);
         playMoveSound('move');
 
         if (authoritativeMatchIdRef.current) {
           void sendAuthoritativeTarget({ row, col }).then(() => {
             setCardPending(null);
             setSelectedCard(null);
-            setCardMsg(`🌀 Teleported to ${FILES[col]}${RANKS[row]}`);
+            setCardMsg(`✨ Teleported ${src.type} to ${FILES[col]}${RANKS[row]}`);
             setTimeout(() => setCardMsg(''), 2500);
           }).catch(err => {
             const message = err instanceof Error ? err.message : 'Teleport failed';
@@ -699,7 +698,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
           setBoard(nb);
           setCardPending(null);
           setSelectedCard(null);
-          setCardMsg(`🌀 Teleported to ${FILES[col]}${RANKS[row]}`);
+          setCardMsg(`✨ Teleported ${src.type} to ${FILES[col]}${RANKS[row]}`);
           setTimeout(() => setCardMsg(''), 2500);
           finishCardUse(card, playerColor);
         }
@@ -709,12 +708,14 @@ export function useCardInteraction(props: UseCardInteractionProps) {
 
     // ─── JUMP ───
     if (mechanic === 'jump') {
+      const halfStart = playerColor === 'white' ? 0 : 4;
+      const halfEnd   = playerColor === 'white' ? 3 : 7;
       if (step === 1) {
         if (!piece || piece.color !== playerColor || piece.type === 'king') {
           setCardMsg('🦘 Click YOUR piece to jump (not king)');
           return;
         }
-        setCardMsg('🦘 Now click landing square');
+        setCardMsg('🦘 Now click an empty square in YOUR half of the board');
         setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, from: { row, col } } } : null);
         void sendAuthoritativeTarget({ row, col }).catch(err => {
           const message = err instanceof Error ? err.message : 'Step 1 selection failed';
@@ -726,8 +727,11 @@ export function useCardInteraction(props: UseCardInteractionProps) {
       if (step === 2) {
         const from = (data.from as Sq) || (cardPending.data.from as Sq);
         if (!from) { setCardMsg('🦘 Click YOUR piece first'); return; }
-        if (piece && piece.color === playerColor) { setCardMsg('🦘 Cannot land on your own piece!'); return; }
-        if (piece && piece.type === 'king') { setCardMsg('🦘 Cannot capture king!'); return; }
+        if (piece) { setCardMsg('🦘 Target square must be EMPTY!'); return; }
+        if (row < halfStart || row > halfEnd) {
+          setCardMsg('🦘 Must jump to YOUR half of the board!');
+          return;
+        }
         const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
         const src = nb[from.row][from.col]!;
         nb[row][col] = src;
@@ -743,9 +747,8 @@ export function useCardInteraction(props: UseCardInteractionProps) {
           return;
         }
 
-        triggerJumpAnim(from, { row, col }, src.type, playerColor, Boolean(piece));
-        fireCardAnim('teleport', `Jumped to ${FILES[col]}${RANKS[row]}`);
-        playMoveSound(piece ? 'capture' : 'move');
+        triggerJumpAnim(from, { row, col }, src.type, playerColor, false);
+        playMoveSound('move');
 
         if (authoritativeMatchIdRef.current) {
           void sendAuthoritativeTarget({ row, col }).then(() => {
@@ -898,7 +901,6 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         return;
       }
 
-      fireCardAnim('smallsacrifice', `Borrowed ${piece.type}`);
       playCardSound('borrow');
 
       if (authoritativeMatchIdRef.current) {
@@ -1002,7 +1004,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         return;
       }
       const DOWNGRADE: Record<PieceType, PieceType[]> = {
-        queen: ['rook', 'bishop', 'knight'],
+        queen: ['rook', 'bishop', 'knight', 'pawn'],
         rook: ['bishop', 'knight', 'pawn'],
         bishop: ['knight', 'pawn'],
         knight: ['pawn'],
@@ -1093,7 +1095,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         return;
       }
       const DOWNGRADE: Record<PieceType, PieceType[]> = {
-        queen: ['rook', 'bishop', 'knight'],
+        queen: ['rook', 'bishop', 'knight', 'pawn'],
         rook: ['bishop', 'knight', 'pawn'],
         bishop: ['knight', 'pawn'],
         knight: ['pawn'],
@@ -1753,6 +1755,8 @@ export function useCardInteraction(props: UseCardInteractionProps) {
       case 'borrow':     return piece?.color === opp && piece.type !== 'king' ? 'rgba(168,85,247,0.5)' : null;
       case 'promote':
       case 'demote':     return step === 1 && piece?.color === playerColor && piece.type !== 'king' ? 'rgba(245,158,11,0.55)' : null;
+      case 'promotehim':
+      case 'demotehim':  return step === 1 && piece && piece.type !== 'king' ? 'rgba(245,158,11,0.55)' : null;
       case 'jump': {
         const halfStart = playerColor === 'white' ? 0 : 4;
         const halfEnd   = playerColor === 'white' ? 3 : 7;

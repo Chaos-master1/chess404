@@ -33,6 +33,7 @@ import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { GLOBAL_STYLES } from './styles';
 import {
   readStoredGuestIdentity,
+  readStoredActiveMatchId,
   writeStoredActiveMatchId,
   clearRequestedMatchQuery,
 } from './lib/session-storage';
@@ -307,8 +308,9 @@ export default function AppShellLayout({ children }: { children?: React.ReactNod
         onOpenAccount={() => router.push('/account')}
         showReturnToMatch={showReturnToMatch}
         onReturnToMatch={() => {
-          if (authoritativeMatchId) {
-            router.push(`/match/${authoritativeMatchId}`);
+          const targetMatchId = authoritativeMatchId || (typeof window !== 'undefined' ? readStoredActiveMatchId() : null);
+          if (targetMatchId) {
+            router.push(`/match/${targetMatchId}`);
           } else {
             setActivePage('Match');
           }
