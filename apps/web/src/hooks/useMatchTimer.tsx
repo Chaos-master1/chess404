@@ -17,41 +17,121 @@ export function useMatchTimer({
   authoritativeLive = false,
   onTimeout = () => {},
 }: UseMatchTimerProps = {}) {
-  // timeW/timeB are milliseconds, matching the server's clock.whiteMs/blackMs.
-  // initialClockStart (CLOCK_START) is in seconds.
-  const [timeW, setTimeW] = React.useState(initialClockStart * 1000);
-  const [timeB, setTimeB] = React.useState(initialClockStart * 1000);
-  const [clockActive, setClockActive] = React.useState(false);
+  const initialMs = initialClockStart * 1000;
+  const [timeW, setTimeWState] = React.useState(initialMs);
+  const [timeB, setTimeBState] = React.useState(initialMs);
+  const [clockActive, setClockActiveState] = React.useState(false);
 
   const tickingRef = React.useRef<PieceColor | null>(null);
   const [tickingState, setTickingState] = React.useState<PieceColor | null>(null);
 
-  // Use refs for callbacks to avoid stale closures in intervals
+  // Authoritative base times and timestamp when the base was synchronized
+  const baseWRef = React.useRef(initialMs);
+  const baseBRef = React.useRef(initialMs);
+  const lastSyncRef = React.useRef(typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const clockActiveRef = React.useRef(false);
+
   const onTimeoutRef = React.useRef(onTimeout);
   onTimeoutRef.current = onTimeout;
 
+  // setTimeW: used when receiving authoritative snapshot values or manual sets
+  const setTimeW = React.useCallback((valueOrFn: number | ((prev: number) => number)) => {
+    setTimeWState(prev => {
+      const next = typeof valueOrFn === 'function' ? valueOrFn(prev) : valueOrFn;
+      baseWRef.current = next;
+      lastSyncRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      return next;
+    });
+  }, []);
+
+  // setTimeB: used when receiving authoritative snapshot values or manual sets
+  const setTimeB = React.useCallback((valueOrFn: number | ((prev: number) => number)) => {
+    setTimeBState(prev => {
+      const next = typeof valueOrFn === 'function' ? valueOrFn(prev) : valueOrFn;
+      baseBRef.current = next;
+      lastSyncRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      return next;
+    });
+  }, []);
+
+  const setClockActive = React.useCallback((active: boolean) => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    // If stopping the clock, freeze the active color at current elapsed time
+    if (!active && clockActiveRef.current && tickingRef.current) {
+      const elapsed = Math.max(0, now - lastSyncRef.current);
+      if (tickingRef.current === 'white') {
+        baseWRef.current = Math.max(0, baseWRef.current - elapsed);
+        setTimeWState(baseWRef.current);
+      } else if (tickingRef.current === 'black') {
+        baseBRef.current = Math.max(0, baseBRef.current - elapsed);
+        setTimeBState(baseBRef.current);
+      }
+    }
+    lastSyncRef.current = now;
+    clockActiveRef.current = active;
+    setClockActiveState(active);
+  }, []);
+
   const setTicking = React.useCallback((v: PieceColor | null) => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    // When switching active turns, freeze the outgoing color's base time
+    if (clockActiveRef.current && tickingRef.current && tickingRef.current !== v) {
+      const elapsed = Math.max(0, now - lastSyncRef.current);
+      if (tickingRef.current === 'white') {
+        baseWRef.current = Math.max(0, baseWRef.current - elapsed);
+        setTimeWState(baseWRef.current);
+      } else if (tickingRef.current === 'black') {
+        baseBRef.current = Math.max(0, baseBRef.current - elapsed);
+        setTimeBState(baseBRef.current);
+      }
+    }
+    lastSyncRef.current = now;
     tickingRef.current = v;
     setTickingState(v);
   }, []);
 
   const resetTimer = React.useCallback(() => {
-    setTimeW(initialClockStart * 1000);
-    setTimeB(initialClockStart * 1000);
-    setTicking(null);
-    setClockActive(false);
-  }, [initialClockStart, setTicking]);
+    const init = initialClockStart * 1000;
+    baseWRef.current = init;
+    baseBRef.current = init;
+    lastSyncRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    clockActiveRef.current = false;
+    setTimeWState(init);
+    setTimeBState(init);
+    setTickingState(null);
+    tickingRef.current = null;
+    setClockActiveState(false);
+  }, [initialClockStart]);
 
-  // The abort countdown was removed: aborts are server-decided (aborts are
-  // legal before Black's first reply), and the old local 10-second timer was
-  // pure theater -- it ticked down to nothing in hosted matches, flashed a
-  // fake "must move" banner before the first snapshot, and could even fire a
-  // self-abort callback that no longer matches server rules. Clock display is
-  // server-driven only; timeW/timeB are updated exclusively from
-  // authoritative snapshots or local game ticks.
-  void over;
-  void authoritativeLive;
-  void onTimeoutRef;
+  // Smooth local ticking interval: interpolates countdown between server snapshots
+  React.useEffect(() => {
+    if (!clockActive || over || !tickingState) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const elapsed = Math.max(0, now - lastSyncRef.current);
+
+      if (tickingRef.current === 'white') {
+        const remaining = Math.max(0, baseWRef.current - elapsed);
+        setTimeWState(remaining);
+        if (remaining === 0 && !authoritativeLive) {
+          onTimeoutRef.current?.('white');
+        }
+      } else if (tickingRef.current === 'black') {
+        const remaining = Math.max(0, baseBRef.current - elapsed);
+        setTimeBState(remaining);
+        if (remaining === 0 && !authoritativeLive) {
+          onTimeoutRef.current?.('black');
+        }
+      }
+    }, 100);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [clockActive, over, tickingState, authoritativeLive]);
 
   return {
     timeW, setTimeW,

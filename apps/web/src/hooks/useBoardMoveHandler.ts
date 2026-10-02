@@ -345,7 +345,10 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
           applyAuthoritativeSnapshot(snapshot);
         }).catch(err => {
           const message = err instanceof Error ? err.message : 'Backend rejected move';
-          setCardMsg(`Backend move failed: ${message}`);
+          const displayMsg = message.toLowerCase().includes('not active')
+            ? 'Game is no longer active'
+            : `Backend move failed: ${message}`;
+          setCardMsg(`⚠️ ${displayMsg}`);
           setTimeout(() => setCardMsg(''), 2500);
           void fetchMatch(matchId).then(snapshot => {
             applyAuthoritativeSnapshot(snapshot);

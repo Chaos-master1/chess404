@@ -524,7 +524,11 @@ func (s *Service) Subscribe(matchID string, playerID string, playerSecret string
 	c.subs[ch] = playerColor
 
 	now := time.Now().UTC()
-	baseInitial := buildSnapshotWithPresence(c.state, s.ensurePresenceStateLocked(c, now), len(c.events), c.events, now)
+	presence := s.ensurePresenceStateLocked(c, now)
+	if playerColor != "" {
+		presenceHeartbeat(presence, playerColor, now)
+	}
+	baseInitial := buildSnapshotWithPresence(c.state, presence, len(c.events), c.events, now)
 	initial := contracts.MatchSnapshotResponse{
 		Match:      filterStateForColor(baseInitial.Match, playerColor),
 		ReplayHead: baseInitial.ReplayHead,
@@ -1082,7 +1086,12 @@ func (s *Service) collectAndBroadcast(now time.Time) {
 }
 
 func (s *Service) processMatchBroadcast(c *matchContainer, now time.Time) {
-	c.mu.Lock()
+	if !c.mu.TryLock() {
+		// Another mutation or worker currently holds the match lock.
+		// That mutation will broadcast its own snapshot when finished;
+		// do not block the global broadcaster pool.
+		return
+	}
 	defer c.mu.Unlock()
 
 	if c.state.Status == "finished" {
@@ -1090,6 +1099,14 @@ func (s *Service) processMatchBroadcast(c *matchContainer, now time.Time) {
 	}
 
 	presence := s.ensurePresenceStateLocked(c, now)
+
+	runtimeEvents := evaluatePresenceRuntime(c.state, presence, now)
+	if len(runtimeEvents) > 0 {
+		c.events = append(c.events, runtimeEvents...)
+		s.persistSnapshot(buildSnapshot(c.state, len(c.events), c.events, now))
+		s.broadcastLocked(c, buildSnapshotWithPresence(c.state, presence, len(c.events), runtimeEvents, now))
+		return
+	}
 
 	recentCutoff := now.Add(-presenceHeartbeatTimeout)
 	hasRecentActivity := (!presence.WhiteLastSeenAt.IsZero() && presence.WhiteLastSeenAt.After(recentCutoff)) ||
@@ -1104,14 +1121,6 @@ func (s *Service) processMatchBroadcast(c *matchContainer, now time.Time) {
 		if len(timeoutEvents) > 0 {
 			return
 		}
-	}
-
-	runtimeEvents := evaluatePresenceRuntime(c.state, presence, now)
-	if len(runtimeEvents) > 0 {
-		c.events = append(c.events, runtimeEvents...)
-		s.persistSnapshot(buildSnapshot(c.state, len(c.events), c.events, now))
-		s.broadcastLocked(c, buildSnapshotWithPresence(c.state, presence, len(c.events), runtimeEvents, now))
-		return
 	}
 	if len(c.subs) == 0 {
 		return

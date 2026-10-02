@@ -157,3 +157,39 @@ func TestComputerMatchAsBlack(t *testing.T) {
 	}
 	t.Fatal("computer as white never made the opening move within 5s")
 }
+
+func TestComputerMatchNeverAbandonedByDisconnectGrace(t *testing.T) {
+	service := NewService()
+	now := time.Now().UTC()
+
+	service.CreateMatch(contracts.CreateMatchRequest{
+		MatchID:           "comp_disconnect_test",
+		ModeID:            contracts.MatchModeComputer,
+		Difficulty:        "medium",
+		WhiteGuestID:      "guest_white",
+		WhitePlayerSecret: "white-secret",
+	}, now)
+
+	c := service.getMatchContainer("comp_disconnect_test")
+	if c == nil {
+		t.Fatal("expected match container")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Simulate human disconnected long past presenceHeartbeatTimeout + disconnectGracePeriod
+	c.presence.WhiteConnected = false
+	c.presence.WhiteLastSeenAt = now.Add(-10 * time.Minute)
+	c.presence.BlackConnected = true
+	c.presence.BlackLastSeenAt = now
+
+	future := now.Add(5 * time.Minute)
+	events := evaluatePresenceRuntime(c.state, c.presence, future)
+	if len(events) > 0 {
+		t.Fatalf("expected no disconnect events for computer match, got %v", events)
+	}
+	if c.state.Status != "active" {
+		t.Fatalf("expected match to remain active, got status=%q", c.state.Status)
+	}
+}

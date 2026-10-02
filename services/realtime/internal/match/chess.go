@@ -185,6 +185,9 @@ func firstLegalMoveForColorConstrained(state *contracts.MatchState) (contracts.S
 			}
 			moves := legalMovesWithFusion(board, from, state.LastMove, movedSet, state.FortressZones)
 			for _, move := range moves {
+				if fortressEntryBlocked(state.FortressZones, color, move) {
+					continue
+				}
 				testBoard := cloneBoard(board)
 				moving := testBoard[from.Row][from.Col]
 				if moving == nil {

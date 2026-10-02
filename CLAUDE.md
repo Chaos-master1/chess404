@@ -90,7 +90,18 @@ node packages/game-core/scripts/sync-cards-json.mjs
 
 **Dual dev environments.** The repo was developed Windows-first; the primary working machine is now Linux (Fedora, Go at `~/sdk/go1.25.6/bin`). Ops scripts are PowerShell under `scripts/windows/`; the Linux equivalent of the local stack is manual startup (see README / RUNBOOK.md). Match whichever environment you are actually on rather than assuming one.
 
-## Current status (2026-08-24)
+## Current status (2026-10-02)
+
+### Realtime & Vs-Computer Hardening Pass — 2026-10-02
+
+All realtime packages green (`go test ./...`), Playwright E2E solo test green:
+
+- **Vs-Computer disconnect grace immunity:** Matches against the computer (`MatchModeComputer` or seats assigned to `"computer"`) are exempted from disconnect abandonment in `evaluatePresenceRuntime`. Previously, if a human player's browser presence lapsed for 45s, the game was forfeited with `"abandon"`, causing any subsequent move attempt to fail with `"Backend move failed: match is not active"`.
+- **Engine lock contention resolved:** In `autoPlayComputerDepthLimited`, the match lock `c.mu` is now unlocked during `c.computer.MakeMove` (operating on `cloneMatchStateForEngine`). The engine's multi-second alpha-beta/PIMC search no longer locks `c.mu` or stalls the global 1s broadcaster tick loop.
+- **Non-blocking broadcaster ticks:** In `processMatchBroadcast`, `c.mu.Lock()` was replaced with `if !c.mu.TryLock() { return }`, ensuring active engine searches or intent execution never cause head-of-line blocking for the match broadcasting pool.
+- **Resilient fallback moves & clock accounting:** In `ensureComputerMadeProgressLocked`, added `syncClockForMutation` before fallback moves so elapsed engine think time is properly charged to the computer, and replaced single candidate fallback with `tryFallbackLegalMove` candidate iteration.
+- **WebSocket heartbeat & single-writer safety:** Added application-level `{"type": "ping"}` / `{"type": "pong"}` handshake. Client pings every 15s to keep connections alive through edge proxies (Railway/Cloudflare) and automatically refresh presence via `service.HeartbeatPresence`. All socket writes in `match-service` are routed through the single-writer goroutine via `pongCh`, preventing concurrent write panics/socket closures. `Subscribe` also immediately heartbeats presence on connect.
+- **Smooth client-side clock interpolation:** Implemented 100ms local clock interpolation in `useMatchTimer.tsx` using `performance.now()`, eliminating UI timer freezing and sudden multi-second time drops.
 
 ### Hardening pass — 2026-09-28 (full-codebase review follow-up, verified locally)
 

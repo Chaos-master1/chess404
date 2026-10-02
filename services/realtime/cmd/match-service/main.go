@@ -724,6 +724,7 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 
 	readDone := make(chan struct{})
 	intentCh := make(chan intentResult, 32)
+	pongCh := make(chan struct{}, 4)
 
 	go func() {
 		defer close(readDone)
@@ -736,8 +737,20 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 			if err != nil {
 				return
 			}
+			_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			var env contracts.Envelope
 			if err := json.Unmarshal(msgBytes, &env); err != nil {
+				continue
+			}
+			if env.Type == "ping" {
+				_ = service.HeartbeatPresence(matchID, contracts.MatchPresenceRequest{
+					PlayerID:     playerID,
+					PlayerSecret: playerSecret,
+				}, httputil.NowUTC())
+				select {
+				case pongCh <- struct{}{}:
+				default:
+				}
 				continue
 			}
 			if env.Type != "apply_intent" {
@@ -824,6 +837,10 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 			}
 		case <-pingTicker.C:
 			if err := conn.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(5*time.Second)); err != nil {
+				return
+			}
+		case <-pongCh:
+			if err := writeEnvelope(conn, "pong", nil); err != nil {
 				return
 			}
 		case <-readDone:

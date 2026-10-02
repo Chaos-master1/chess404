@@ -555,6 +555,25 @@ export function connectToMatchStream(
       socket = nextSocket;
 
       let authReceived = false;
+      let pingTimer: number | null = null;
+      const startPing = () => {
+        stopPing();
+        pingTimer = window.setInterval(() => {
+          if (nextSocket.readyState === WebSocket.OPEN) {
+            try {
+              nextSocket.send(JSON.stringify({ type: 'ping' }));
+            } catch {
+              // ignore send error
+            }
+          }
+        }, 15_000);
+      };
+      const stopPing = () => {
+        if (pingTimer !== null) {
+          window.clearInterval(pingTimer);
+          pingTimer = null;
+        }
+      };
 
       nextSocket.addEventListener('open', () => {
         wsConnections.set(matchId, nextSocket);
@@ -571,12 +590,18 @@ export function connectToMatchStream(
             isWsConnected = true;
             lastStreamMessageAt = Date.now();
             startWatchdog();
+            startPing();
             handlers.onStatusChange?.('connected');
             return;
           }
           if (msg.type === 'auth.error') {
+            stopPing();
             nextSocket.close();
             handlers.onStatusChange?.('disconnected');
+            return;
+          }
+          if (msg.type === 'pong') {
+            lastStreamMessageAt = Date.now();
             return;
           }
           if (!authReceived) return;
@@ -602,6 +627,7 @@ export function connectToMatchStream(
               // matches.
               finished = true;
               stopWatchdog();
+              stopPing();
               clearPollTimer();
               clearReconnectTimer();
               try { nextSocket.close(); } catch { /* already closing */ }
@@ -616,6 +642,7 @@ export function connectToMatchStream(
       nextSocket.addEventListener('error', event => {
         handlers.onError?.(event);
         isWsConnected = false;
+        stopPing();
         if (!disposed) nextSocket.close();
       });
 
@@ -624,6 +651,7 @@ export function connectToMatchStream(
         if (wsConnections.get(matchId) === nextSocket) wsConnections.delete(matchId);
         isWsConnected = false;
         stopWatchdog();
+        stopPing();
         if (!disposed && !finished) scheduleReconnect();
       });
     }).catch(() => {

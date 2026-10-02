@@ -310,7 +310,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const {
     timeW, setTimeW, timeB, setTimeB, tickingState, setTicking, clockActive, setClockActive,
     resetTimer,
-  } = useMatchTimer();
+  } = useMatchTimer({ over, authoritativeLive: hostedRuntime });
 
   const {
     reviewIdx, setReviewIdx, reviewBoard, setReviewBoard, isReviewing,
@@ -440,6 +440,11 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       if (match.status === 'finished') {
         setOver(true);
         setWinner(match.winner ?? null);
+        setClockActive(false);
+        setTicking(null);
+      } else if (match.status === 'active') {
+        setClockActive(true);
+        setTicking(match.turn);
       }
       return;
     }
@@ -738,7 +743,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     if (isGameOver) {
       setClockActive(false);
       setTicking(null);
-    } else if (match.whiteConnected && match.blackConnected) {
+    } else if (match.status === 'active') {
       setClockActive(true);
       setTicking(match.turn);
     }
@@ -760,7 +765,12 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       // nothing at all. applyIntent already reconciles seq state in the
       // background on failure; this only makes the reason visible.
       const msg = err instanceof Error ? err.message : String(err);
-      setCardMsg(`⚠️ ${msg.slice(0, 140)}`);
+      if (msg.toLowerCase().includes('not active')) {
+        setCardMsg('⚠️ Game is no longer active.');
+        void fetchMatch(authoritativeMatchIdRef.current).then(applyAuthoritativeSnapshot).catch(() => {});
+      } else {
+        setCardMsg(`⚠️ ${msg.slice(0, 140)}`);
+      }
       window.setTimeout(() => setCardMsg(''), 3500);
     }
   }, [authoritativeMatchIdRef, applyAuthoritativeSnapshot, hostedRuntime, setCardMsg]);

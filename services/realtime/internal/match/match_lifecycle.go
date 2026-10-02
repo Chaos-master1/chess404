@@ -507,6 +507,29 @@ func computerSeatCreds(state *contracts.MatchState) (guestID string, secret stri
 	return state.BlackGuestID, state.BlackPlayerSecret
 }
 
+func cloneMatchStateForEngine(state *contracts.MatchState) *contracts.MatchState {
+	if state == nil {
+		return nil
+	}
+	cp := *state
+	pos := capturePositionState(state)
+	cp.Board = pos.Board
+	cp.LavaSquares = pos.LavaSquares
+	cp.BombPieces = pos.BombPieces
+	cp.BlackHoles = pos.BlackHoles
+	cp.FogZones = pos.FogZones
+	cp.FortressZones = pos.FortressZones
+	cp.Turn = pos.Turn
+	cp.Moved = pos.Moved
+	cp.WhiteHand = pos.WhiteHand
+	cp.BlackHand = pos.BlackHand
+	cp.InvisiblePiece = pos.InvisiblePiece
+	cp.LastMove = pos.LastMove
+	cp.PendingCard = pos.PendingCard
+	cp.DoubleMove = pos.DoubleMove
+	return &cp
+}
+
 func (s *Service) autoPlayComputer(c *matchContainer, now time.Time) {
 	compColor := computerColor(c.state)
 	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
@@ -515,7 +538,9 @@ func (s *Service) autoPlayComputer(c *matchContainer, now time.Time) {
 	select {
 	case s.computerCh <- computerMoveTask{c: c, now: now}:
 	default:
-		s.Log.Warn("computer move worker pool full, skipping computer move", "matchID", c.state.MatchID)
+		go func() {
+			s.computerCh <- computerMoveTask{c: c, now: now}
+		}()
 	}
 }
 
@@ -529,7 +554,17 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 		return
 	}
 
-	computerIntent := c.computer.MakeMove(c.state)
+	stateCopy := cloneMatchStateForEngine(c.state)
+	computer := c.computer
+
+	c.mu.Unlock()
+	computerIntent := computer.MakeMove(stateCopy)
+	c.mu.Lock()
+
+	compColor = computerColor(c.state)
+	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
+		return
+	}
 	if computerIntent == nil {
 		s.Log.Info("match:autoPlay: computer returned NIL intent", "matchID", c.state.MatchID, "turn", c.state.Turn, "status", c.state.Status)
 		return
@@ -659,7 +694,23 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 	now = time.Now().UTC()
 	c.state.PendingCard = nil
 
-	from, to, ok := firstLegalMoveForColorConstrained(c.state)
+	// Charge the engine for time spent thinking before making a fallback move
+	if timeoutEvents := syncClockForMutation(c.state, now); len(timeoutEvents) > 0 {
+		c.events = append(c.events, timeoutEvents...)
+		snapshot := buildSnapshotWithPresence(c.state, c.presence, len(c.events), timeoutEvents, now)
+		persistSnap := buildSnapshot(c.state, len(c.events), c.events, now)
+		if c.state.Status == "finished" {
+			s.flushCommit(persistSnap, c.presence)
+		} else {
+			s.persistSnapshot(persistSnap)
+			s.saveToRedis(persistSnap, c.presence)
+		}
+		s.broadcastLocked(c, snapshot)
+		return
+	}
+
+	compGuestID, compPlayerSecret := computerSeatCreds(c.state)
+	events, intent, ok := tryFallbackLegalMove(c.state, compGuestID, compPlayerSecret, now)
 	if !ok {
 		inCheck, isMate, isStale := gameStatusWithFusion(c.state.Board, c.state.Turn, c.state.LastMove, sliceToSet(c.state.Moved), c.state.FortressZones)
 		finishReason := "stalemate"
@@ -693,21 +744,6 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 		return
 	}
 
-	compGuestID, compPlayerSecret := computerSeatCreds(c.state)
-	intent := contracts.PlayerIntent{
-		Type:         "make_move",
-		MatchID:      c.state.MatchID,
-		PlayerID:     compGuestID,
-		PlayerSecret: compPlayerSecret,
-		From:         &from,
-		To:           &to,
-	}
-	events, err := applyIntent(c.state, intent, now)
-	if err != nil {
-		s.Log.Warn("match:autoPlay: fallback legal move rejected", "matchID", c.state.MatchID, "err", err.Error())
-		return
-	}
-
 	if shouldEvaluateAutomaticMatchFinish(c.state, intent) {
 		events = finalizeAutomaticMatchFinish(c.state, events, now, "computer")
 	}
@@ -725,6 +761,73 @@ func (s *Service) ensureComputerMadeProgressLocked(c *matchContainer, now time.T
 		s.saveToRedis(persistSnap, c.presence)
 	}
 	s.broadcastLocked(c, snapshot)
+}
+
+func tryFallbackLegalMove(state *contracts.MatchState, compGuestID, compPlayerSecret string, now time.Time) ([]contracts.ResolvedEvent, contracts.PlayerIntent, bool) {
+	movedSet := sliceToSet(state.Moved)
+	board := state.Board
+	color := state.Turn
+	opponent := opposite(color)
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := board[r][c]
+			if piece == nil || piece.Color != color {
+				continue
+			}
+			from := contracts.Square{Row: r, Col: c}
+			if state.DoubleMove != nil && state.DoubleMove.MovesLeft == 1 && state.DoubleMove.TrackedSq != nil {
+				tracked := *state.DoubleMove.TrackedSq
+				same := from.Row == tracked.Row && from.Col == tracked.Col
+				if state.DoubleMove.Type == "same" && !same {
+					continue
+				}
+				if state.DoubleMove.Type == "diff" && same {
+					continue
+				}
+			}
+			if piece.Frozen {
+				continue
+			}
+			moves := legalMovesWithFusion(board, from, state.LastMove, movedSet, state.FortressZones)
+			for _, move := range moves {
+				if fortressEntryBlocked(state.FortressZones, color, move) {
+					continue
+				}
+				testBoard := cloneBoard(board)
+				moving := testBoard[from.Row][from.Col]
+				if moving == nil {
+					continue
+				}
+				captureEmptyDiagonal := moving.Type == "pawn" && move.Col != from.Col && pieceAt(board, move) == nil
+				movePiece(testBoard, from, move, moving, captureEmptyDiagonal)
+				king := findKing(testBoard, color)
+				if king == nil || isAttackedWithFusion(testBoard, *king, opponent, state.FortressZones) {
+					continue
+				}
+				intent := contracts.PlayerIntent{
+					Type:         "make_move",
+					MatchID:      state.MatchID,
+					PlayerID:     compGuestID,
+					PlayerSecret: compPlayerSecret,
+					From:         &from,
+					To:           &move,
+				}
+				savedClock := state.Clock
+				savedStatus := state.Status
+				savedWinner := state.Winner
+				savedFinishReason := state.FinishReason
+				events, err := applyIntent(state, intent, now)
+				if err == nil {
+					return events, intent, true
+				}
+				state.Clock = savedClock
+				state.Status = savedStatus
+				state.Winner = savedWinner
+				state.FinishReason = savedFinishReason
+			}
+		}
+	}
+	return nil, contracts.PlayerIntent{}, false
 }
 
 func applyIntent(state *contracts.MatchState, intent contracts.PlayerIntent, now time.Time) ([]contracts.ResolvedEvent, error) {
@@ -1199,6 +1302,13 @@ func evaluatePresenceRuntime(state *contracts.MatchState, presence *matchPresenc
 	}
 
 	if state.Status != "active" || !whiteOccupied || !blackOccupied {
+		presence.DisconnectGraceFor = ""
+		presence.DisconnectGraceDeadline = nil
+		return nil
+	}
+
+	// Computer matches are solo games against a server bot: never forfeit the human player for disconnect.
+	if state.ModeID == contracts.MatchModeComputer || state.WhiteGuestID == "computer" || state.BlackGuestID == "computer" {
 		presence.DisconnectGraceFor = ""
 		presence.DisconnectGraceDeadline = nil
 		return nil
