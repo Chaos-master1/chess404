@@ -1,8 +1,9 @@
 import { test, expect, request as pwRequest } from '@playwright/test';
 
 // The public watch feed and the anonymous snapshot endpoint are the two places
-// a stranger can read match data. Neither may expose seat secrets or hands, and
-// the feed must not advertise private or vs-computer games.
+// a stranger can read match data. Neither may expose seat secrets; hand
+// visibility is mode-scoped (hidden mode hides, open-cards mode is open by
+// design), and the feed must not advertise private or vs-computer games.
 // The web proxy refuses direct match creation in production, so the anonymous
 // read is exercised against match-service's own public origin -- which is the
 // surface a stranger can actually reach.
@@ -10,27 +11,50 @@ const MATCH_SERVICE =
   process.env.E2E_MATCH_SERVICE_URL ?? 'https://match-service-production-c56b.up.railway.app';
 
 test.describe('spectator privacy', () => {
-  test('anonymous match reads leak neither secrets nor hands', async ({ baseURL }) => {
+  test('anonymous match reads strip secrets and keep hands mode-scoped', async ({ baseURL }) => {
     const api = await pwRequest.newContext({ baseURL: MATCH_SERVICE });
 
-    const created = await api.post('/api/matches', {
-      data: { modeId: 'open_cards', queue: 'casual' },
-      headers: { 'content-type': 'application/json', origin: baseURL ?? '' },
-    });
-    expect(created.ok(), `match creation failed: ${created.status()}`).toBeTruthy();
-    const matchId = (await created.json())?.match?.matchId as string;
-    expect(matchId).toBeTruthy();
+    const createMatch = async (modeId: string) => {
+      const created = await api.post('/api/matches', {
+        data: { modeId, queue: 'casual' },
+        headers: { 'content-type': 'application/json', origin: baseURL ?? '' },
+      });
+      expect(created.ok(), `match creation failed: ${created.status()}`).toBeTruthy();
+      const matchId = (await created.json())?.match?.matchId as string;
+      expect(matchId).toBeTruthy();
+      return matchId;
+    };
+    const secretDump = /"(white|black)PlayerSecret":"[^"]+"/;
 
-    const anon = await api.get(`/api/matches/${matchId}`);
-    expect(anon.ok()).toBeTruthy();
-    const raw = await anon.text();
-    const snapshot = JSON.parse(raw);
+    // Hidden mode: a stranger must not learn card identities or seat secrets.
+    const hiddenId = await createMatch('hidden_cards');
+    const hiddenResponse = await api.get(`/api/matches/${hiddenId}`);
+    expect(hiddenResponse.ok()).toBeTruthy();
+    const hiddenRaw = await hiddenResponse.text();
+    const hidden = JSON.parse(hiddenRaw);
+    expect(hidden.match?.whitePlayerSecret ?? '', 'white seat secret exposed').toBe('');
+    expect(hidden.match?.blackPlayerSecret ?? '', 'black seat secret exposed').toBe('');
+    expect((hidden.match?.whiteHand ?? []).length, 'white hand exposed to anonymous reader').toBe(0);
+    expect((hidden.match?.blackHand ?? []).length, 'black hand exposed to anonymous reader').toBe(0);
+    expect(hiddenRaw, 'a secret-shaped field survived redaction').not.toMatch(secretDump);
 
-    expect(snapshot.match?.whitePlayerSecret ?? '', 'white seat secret exposed').toBe('');
-    expect(snapshot.match?.blackPlayerSecret ?? '', 'black seat secret exposed').toBe('');
-    expect((snapshot.match?.whiteHand ?? []).length, 'white hand exposed to anonymous reader').toBe(0);
-    expect((snapshot.match?.blackHand ?? []).length, 'black hand exposed to anonymous reader').toBe(0);
-    expect(raw, 'a secret-shaped field survived redaction').not.toMatch(/"(white|black)PlayerSecret":"[^"]+"/);
+    // Open-cards mode is the inverse BY DESIGN (see filterStateForColor: "
+    // Spectators see both hands in open-cards mode"): hands are public, seat
+    // secrets never are. Pinning both directions stops a future blanket
+    // tightening from breaking open mode, and a future blanket opening from
+    // leaking hidden hands.
+    const openId = await createMatch('open_cards');
+    const openResponse = await api.get(`/api/matches/${openId}`);
+    expect(openResponse.ok()).toBeTruthy();
+    const openRaw = await openResponse.text();
+    const open = JSON.parse(openRaw);
+    expect(open.match?.whitePlayerSecret ?? '', 'white seat secret exposed in open mode').toBe('');
+    expect(open.match?.blackPlayerSecret ?? '', 'black seat secret exposed in open mode').toBe('');
+    expect(openRaw, 'a secret-shaped field survived redaction in open mode').not.toMatch(secretDump);
+    expect(
+      (open.match?.whiteHand ?? []).length,
+      'open-cards hands are public to spectators by design',
+    ).toBeGreaterThan(0);
 
     await api.dispose();
   });

@@ -18,9 +18,9 @@ test.describe('history and replay', () => {
 
     await page.goto('/play');
     await dismissOnboarding(page, 'btn-play-computer');
+    // One entry point only: the hub's difficulty grid would start a second,
+    // conflicting match instead of opening this one.
     await page.getByTestId('btn-play-computer').click();
-    const beginner = page.getByRole('button', { name: /beginner/i }).first();
-    if (await beginner.isVisible({ timeout: 20_000 }).catch(() => false)) await beginner.click();
     await expect(page.getByTestId('board-root')).toBeVisible({ timeout: 90_000 });
 
     // Play a couple of moves so the archive has real content, then resign.

@@ -45,11 +45,19 @@ test.describe('private invite', () => {
     await host.goto(`/match/${matchId}`);
     await expect(host.getByTestId('board-root')).toBeVisible({ timeout: 90_000 });
 
-    // Identity policy: before the second seat is claimed the room must show
-    // an honest waiting state — no junk default name/rating on the seat card.
-    await expect(host.getByText(/waiting for opponent/i).first()).toBeVisible({ timeout: 30_000 });
-    await expect(host.getByText(/rating: 1200/i)).toHaveCount(0);
-    await expect(host.getByText(/anonymous/i)).toHaveCount(0);
+    // Identity policy: before the second seat is claimed the room must show an
+    // honest waiting state — no junk default name/rating on the placeholder
+    // opponent seat. The host's own seat is not the subject: it legitimately
+    // shows the viewer's local profile, and a fresh guest is "Anonymous" at
+    // 1200 until it names itself or claims an account.
+    const waitingSeat = host.getByText(/waiting for opponent/i).first();
+    await expect(waitingSeat).toBeVisible({ timeout: 30_000 });
+    // One level up is the seat card's name/rating column: a rating line would
+    // be a sibling of the waiting label if the placeholder ever regained a
+    // fabricated default.
+    const waitingCard = waitingSeat.locator('xpath=..');
+    await expect(waitingCard.getByText(/rating:/i), 'placeholder seat shows a junk rating').toHaveCount(0);
+    await expect(waitingCard.getByText(/anonymous/i), 'placeholder seat shows a junk name').toHaveCount(0);
 
     // Second browser opens the shared link cold: no local storage, no claim.
     await guest.goto(`/match/${matchId}`);
