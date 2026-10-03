@@ -29,8 +29,10 @@
 package xgauntlet
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
@@ -166,7 +168,6 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 		if state.Turn == "black" {
 			movingEngine, playerID, playerSecret, moverColor = blackEngine, blackGuest, blackSecret, "black"
 		}
-
 		madeProgress := false
 		for sub := 0; sub < cfg.MaxSubDecisionsPerTurn; sub++ {
 			refreshed, err := svc.GetMatch(matchID)
@@ -179,6 +180,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 			}
 
 			var intent *contracts.PlayerIntent
+			intentSource := "engine-make-move"
 			if pendingCardIsStale || state.PendingCard != nil {
 				// A PendingCard is already set at the top of a fresh
 				// decision -- either a stale one abandoned earlier this
@@ -199,6 +201,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 					pendingCardIsStale = true
 				}
 				intent, _ = fallbackMove(state)
+				intentSource = "fallback-pending-card"
 			} else {
 				intent = movingEngine.MakeMove(state)
 			}
@@ -220,6 +223,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 					return v1.OutcomeDraw, nil
 				}
 				intent = fallback
+				intentSource = "fallback-engine-gave-up"
 			}
 			intent.PlayerID = playerID
 			intent.PlayerSecret = playerSecret
@@ -230,7 +234,11 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 				// exist to find and fix exactly this class of problem for the
 				// new engine) -- surfaced to the caller rather than silently
 				// skipped, so a gauntlet run's error rate is itself a signal.
-				return v1.OutcomeDraw, fmt.Errorf("xgauntlet: engine %s submitted an invalid intent (type=%s): %w", state.Turn, intent.Type, err)
+				// The state dump matters: without it an intermittent CI
+				// rejection (e.g. the first-double-move check guard) is a
+				// one-line error with no position, impossible to replay.
+				dump := rejectedIntentDump(state, intent, intentSource, err)
+				return v1.OutcomeDraw, fmt.Errorf("xgauntlet: engine %s submitted an invalid intent (type=%s, source=%s): %w [state dump follows]\n%s", state.Turn, intent.Type, intentSource, err, dump)
 			}
 			madeProgress = true
 			stuckPendingCard := false
@@ -323,7 +331,7 @@ func PlayOneGame(svc *match.Service, white, black EngineFactory, cfg GameConfig,
 				fallback.PlayerSecret = playerSecret
 				fallback.MatchID = matchID
 				if _, err := svc.ApplyIntent(*fallback, nextNow()); err != nil {
-					return v1.OutcomeDraw, fmt.Errorf("xgauntlet: fallback move rejected after a stuck pending card: %w", err)
+					return v1.OutcomeDraw, fmt.Errorf("xgauntlet: fallback move rejected after a stuck pending card: %w [state dump follows]\n%s", err, rejectedIntentDump(&live.Match, fallback, "fallback-stuck-pending-card", err))
 				}
 				break
 			}
@@ -406,6 +414,27 @@ func playRandomOpening(svc *match.Service, matchID, whiteGuest, whiteSecret, bla
 	return nil
 }
 
+// rejectedIntentDump serializes the exact state + intent a rejection came
+// from. The rejections this harness exists to catch are intermittent (they
+// depend on time-budgeted search and time-seeded card draws), so a one-line
+// error with no position is undiagnosable -- embedding the snapshot in the
+// error itself makes every CI failure replayable, and a best-effort copy is
+// written to a temp file for local runs.
+func rejectedIntentDump(state *contracts.MatchState, intent *contracts.PlayerIntent, source string, cause error) string {
+	payload, err := json.MarshalIndent(struct {
+		Source string                  `json:"source"`
+		Cause  string                  `json:"cause"`
+		Intent *contracts.PlayerIntent `json:"intent"`
+		State  *contracts.MatchState   `json:"state"`
+	}{Source: source, Cause: cause.Error(), Intent: intent, State: state}, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("(state dump unavailable: %v)", err)
+	}
+	path := fmt.Sprintf("%s/xgauntlet-rejected-%d.json", os.TempDir(), time.Now().UnixNano())
+	_ = os.WriteFile(path, payload, 0o644)
+	return string(payload)
+}
+
 // fallbackMove picks the first legal chess move for the side to move,
 // converted from engine/core's own generator (never internal/match's private
 // generateAllMoves, which this package deliberately never imports -- see the
@@ -442,6 +471,17 @@ func fallbackMove(state *contracts.MatchState) (*contracts.PlayerIntent, error) 
 			checksEnemy := core.InCheckWithFusion(p, ov, p.SideToMove())
 			p.UnmakeMove(u)
 			if checksEnemy {
+				continue
+			}
+			// core's overlay model carries no card mechanics either: a
+			// capture whose parasite side effect destroys the mover's own
+			// linked blocker discovers a check core never sees. Vet the
+			// same candidate through v1's server-faithful predicate
+			// (applyMoveCopy + resolveParasiteEffects replay) -- union of
+			// the two checks, so neither model's blind spot can leak a
+			// rejected intent past this filter.
+			from, to, promotion := conform.MoveToIntentFields(m)
+			if v1.FirstDoubleMoveRejected(state, &v1.Move{From: from, To: to, Promotion: promotion}) {
 				continue
 			}
 			filtered = append(filtered, m)
