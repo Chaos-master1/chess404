@@ -117,5 +117,32 @@ test.describe('solo vs computer', () => {
 
     // Board still rendered post-game (terminal state), no crash
     await expect(page.getByTestId('board-root')).toBeVisible();
+
+    // Terminal state is honest: the post-game screen must not keep claiming a
+    // stream is reconnecting, and must not declare the room unreadable to the
+    // player who just played it.
+    await page.waitForTimeout(3_000);
+    await expect(page.getByText(/Reconnecting to live match stream/)).toHaveCount(0);
+    await expect(page.getByText(/This game could not be loaded/)).toHaveCount(0);
+
+    // The live P0: web answered 404 for a finished match to BOTH of its
+    // players while match-service served it with 200. The seat owner must
+    // still get a readable snapshot of the room they just played, and the
+    // anonymous read must stay refused (private/computer games are not
+    // public spectator material).
+    const matchId = new URL(page.url()).pathname.match(/^\/match\/([^/?]+)/)?.[1];
+    expect(matchId, 'could not read the finished match id from the URL').toBeTruthy();
+    const readStatuses = await page.evaluate(async (id) => {
+      const headers: Record<string, string> = {
+        'x-chess404-white-guest-id': window.localStorage.getItem('chess404.guest.white') ?? '',
+        'x-chess404-white-session-secret': window.localStorage.getItem('chess404.guest.white.secret') ?? '',
+        'x-chess404-white-session-token': window.localStorage.getItem('chess404.guest.white.token') ?? '',
+      };
+      const asOwner = await fetch(`/api/realtime/matches/${id}`, { headers });
+      const asStranger = await fetch(`/api/realtime/matches/${id}`);
+      return { asOwner: asOwner.status, asStranger: asStranger.status };
+    }, matchId);
+    expect(readStatuses.asOwner, 'the finished room must still be readable by its seat owner').toBe(200);
+    expect(readStatuses.asStranger, 'a finished vs-computer room must not become public').toBe(404);
   });
 });
