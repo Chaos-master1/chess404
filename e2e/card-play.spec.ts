@@ -14,7 +14,10 @@ import { clickSquare, collectErrors, dismissOnboarding, move } from './_helpers'
 // hand-card element to scope every probe to the viewer's own cards.
 test.describe('card play', () => {
   test('playing a card is applied server-side, not just in the UI', async ({ page }) => {
-    test.setTimeout(600_000);
+    // Worst case is bounded below at roughly 12 quiet turns x 40s of probing
+    // plus setup and the reload check; on production that is closer to 9
+    // minutes than the 600s this used to allow.
+    test.setTimeout(900_000);
     const errors = collectErrors(page);
 
     await page.goto('/play');
@@ -116,8 +119,13 @@ test.describe('card play', () => {
     outer: for (const [from, to] of quietMoves) {
       await failIfStreamZombie();
       await move(page, from, to);
-      // Poll up to ~40s for the engine reply (turn flips back to white).
-      for (let attempt = 0; attempt < 26 && !played; attempt++) {
+      // Poll up to ~40s for the engine reply (turn flips back to white). The
+      // window is bounded in WALL-CLOCK time, not just attempts: each probe
+      // costs real round trips on a deployed stack, so an attempt-only bound
+      // once burned the entire test budget on production without reaching the
+      // assertion below.
+      const turnDeadline = Date.now() + 40_000;
+      for (let attempt = 0; attempt < 26 && !played && Date.now() < turnDeadline; attempt++) {
         await page.waitForTimeout(1_200);
         await failIfStreamZombie();
         played = await tryUseOneCard();
