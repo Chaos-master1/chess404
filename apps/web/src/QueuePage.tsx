@@ -562,7 +562,13 @@ export default function QueuePage({
   }, [claimRecovery, whiteProfile, claimBusy, buildHostedAssignedRoomMeta, router]);
 
   React.useEffect(() => {
-    if (!hostedRuntime || restoringTickets || claimBusy) {
+    // claimBusy is deliberately NOT a guard here. It is only cleared when the
+    // claim promise settles, so a stalled claim used to block this effect
+    // forever and parked players on "Matched - opening game..." with no way
+    // out (production, 2026-10-03). The per-room ref below still guarantees at
+    // most one claim attempt per assignment, and the claim fetch itself is now
+    // timeout-bounded so this path always reaches a navigation.
+    if (!hostedRuntime || restoringTickets) {
       return;
     }
     const ticket = whiteTicket;

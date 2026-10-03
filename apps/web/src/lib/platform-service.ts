@@ -636,27 +636,41 @@ export async function fetchArchivedMatch(matchId: string, viewerGuestId?: string
   return unwrapResponse<MatchArchiveEntry>(response);
 }
 
-export async function createGuestSession(input: { guestId?: string; sessionSecret?: string; sessionToken?: string } = {}): Promise<GuestSession> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-  try {
-    const response = await fetch(`${httpBaseUrl}/guest-sessions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        guestId: input.guestId,
-        sessionSecret: input.sessionSecret,
-        sessionToken: input.sessionToken,
-      }),
-    });
+// Interactive critical-path calls need a ceiling. The queue -> match handoff
+// awaits these before it will navigate, and a connection that stalls without
+// erroring (no response, no close) otherwise parks the player on
+// "Matched - opening game..." forever, because the caller holds its busy flag
+// until the promise settles. 10s is the guest-session timeout this replaced.
+const interactiveFetchTimeoutMS = 10_000;
 
-    return unwrapResponse<GuestSession>(response);
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMS: number = interactiveFetchTimeoutMS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function createGuestSession(input: { guestId?: string; sessionSecret?: string; sessionToken?: string } = {}): Promise<GuestSession> {
+  const response = await fetchWithTimeout(`${httpBaseUrl}/guest-sessions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      guestId: input.guestId,
+      sessionSecret: input.sessionSecret,
+      sessionToken: input.sessionToken,
+    }),
+  });
+
+  return unwrapResponse<GuestSession>(response);
 }
 
 export async function claimMatchSeat(input: {
@@ -665,7 +679,8 @@ export async function claimMatchSeat(input: {
   sessionSecret?: string;
   sessionToken?: string;
 }): Promise<MatchSeatClaim> {
-  const response = await fetch(`${httpBaseUrl}/match-claims`, {
+  // Bounded on purpose: this call sits on the queue -> match handoff path.
+  const response = await fetchWithTimeout(`${httpBaseUrl}/match-claims`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -684,7 +699,8 @@ export async function fetchActiveMatchClaim(input: {
   sessionSecret?: string;
   sessionToken?: string;
 }): Promise<MatchSeatClaim> {
-  const response = await fetch(`${httpBaseUrl}/match-claims/active`, {
+  // Bounded for the same reason as claimMatchSeat: recovery must never wedge.
+  const response = await fetchWithTimeout(`${httpBaseUrl}/match-claims/active`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
