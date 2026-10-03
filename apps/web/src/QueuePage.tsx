@@ -12,6 +12,7 @@ import { claimMatchSeat, fetchActiveMatchClaim, type MatchSeatClaim } from './li
 import { readStoredGuestIdentity } from './lib/session-storage';
 import { formatDateTime, normalizeModeId } from './lib/display';
 import { modeLabel } from './lib/match-labels';
+import { displayTicketStatus, isSeekingStatus } from './lib/queue-ticket-status';
 
 interface QueuePageProps {
   whiteProfile: GuestProfile | null;
@@ -377,8 +378,8 @@ export default function QueuePage({
       return;
     }
 
-    const nextWhite = recoveredWhiteTicket && recoveredWhiteTicket.status === 'queued' ? recoveredWhiteTicket : null;
-    const nextBlack = recoveredBlackTicket && recoveredBlackTicket.status === 'queued' ? recoveredBlackTicket : null;
+    const nextWhite = recoveredWhiteTicket && isSeekingStatus(recoveredWhiteTicket.status) ? recoveredWhiteTicket : null;
+    const nextBlack = recoveredBlackTicket && isSeekingStatus(recoveredBlackTicket.status) ? recoveredBlackTicket : null;
 
     setWhiteTicket(current => {
       if (nextWhite) {
@@ -685,7 +686,7 @@ export default function QueuePage({
       const tasks: Promise<void>[] = [];
       const currentWhite = whiteTicketRef.current;
       const currentBlack = blackTicketRef.current;
-      if (currentWhite?.status === 'queued') {
+      if (currentWhite && isSeekingStatus(currentWhite.status)) {
         tasks.push(
           fetchTicket(currentWhite.ticketId).then(({ ticket, snapshot }) => {
             pollingBackoffRef.current = 0;
@@ -694,7 +695,7 @@ export default function QueuePage({
           })
         );
       }
-      if (currentBlack?.status === 'queued') {
+      if (currentBlack && isSeekingStatus(currentBlack.status)) {
         tasks.push(
           fetchTicket(currentBlack.ticketId).then(({ ticket, snapshot }) => {
             pollingBackoffRef.current = 0;
@@ -879,6 +880,12 @@ export default function QueuePage({
       : side === 'white'
         ? '1px solid rgba(60,220,110,0.24)'
         : '1px solid rgba(180,110,255,0.24)';
+    // Present the wire status normalized: the matchmaking service's internal
+    // pairing reservation must read as a plain queued ticket. The server
+    // projects it away (PublicView); this is the client-side backstop for
+    // deploy skew, where a raw 'pairing' used to strand this card in the
+    // "Matched - opening game..." branch with ticket polling stopped.
+    const status = displayTicketStatus(ticket?.status);
 
     return (
       <div
@@ -901,11 +908,11 @@ export default function QueuePage({
           fontSize: '10px',
           fontWeight: 800,
           textTransform: 'uppercase',
-          color: ticket?.status === 'matched' ? '#ffe4a0' : ticket?.status === 'queued' ? '#a9f0c5' : 'rgba(255,255,255,0.7)',
-          background: ticket?.status === 'matched' ? 'rgba(180,120,20,0.22)' : ticket?.status === 'queued' ? 'rgba(24,120,62,0.22)' : 'rgba(255,255,255,0.08)',
-          border: ticket?.status === 'matched' ? '1px solid rgba(255,180,60,0.2)' : ticket?.status === 'queued' ? '1px solid rgba(78,210,132,0.2)' : '1px solid rgba(255,255,255,0.08)',
+          color: status === 'matched' ? '#ffe4a0' : status === 'queued' ? '#a9f0c5' : 'rgba(255,255,255,0.7)',
+          background: status === 'matched' ? 'rgba(180,120,20,0.22)' : status === 'queued' ? 'rgba(24,120,62,0.22)' : 'rgba(255,255,255,0.08)',
+          border: status === 'matched' ? '1px solid rgba(255,180,60,0.2)' : status === 'queued' ? '1px solid rgba(78,210,132,0.2)' : '1px solid rgba(255,255,255,0.08)',
         }}>
-          {ticket?.status ?? 'idle'}
+          {status}
         </div>
       </div>
 
@@ -916,7 +923,7 @@ export default function QueuePage({
             <div>Mode: {modeLabel(ticket.modeId)}</div>
             <div>Clock: {clockLabel(ticket.clockSeconds, ticket.clockIncrement)}</div>
             <div>Updated: {formatDateTime(ticket.updatedAt)}</div>
-            {ticket.status === 'queued' ? <div>Searching for another player in this official mode now.</div> : null}
+            {status === 'queued' ? <div>Searching for another player in this official mode now.</div> : null}
             {ticket.seatColor && <div>Seat: {ticket.seatColor === 'white' ? 'White pieces' : 'Black pieces'}</div>}
             {ticket.opponentName && <div>Opponent: {ticket.opponentName}</div>}
             {ticket.assignedRoom && <div>Your live match is ready.</div>}
@@ -945,7 +952,7 @@ export default function QueuePage({
               ? 'Preparing player...'
               : `Join ${queue === 'rated' ? 'Rated' : 'Casual'} - ${modeLabel(modeId)}`}
           </button>
-        ) : ticket.status === 'queued' ? (
+        ) : status === 'queued' ? (
           <button
             data-testid={`btn-cancel-${side}`}
             onClick={() => void handleCancel(side)}

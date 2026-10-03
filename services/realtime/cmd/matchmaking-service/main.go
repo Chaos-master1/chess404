@@ -290,7 +290,7 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 				}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"ticket":   redactTicketCancelSecret(ticket),
+					"ticket":   wireTicket(ticket),
 					"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
 				})
 				return
@@ -311,16 +311,16 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 				"tickets": service.List(queue, modeID),
 			})
 		case http.MethodPost:
-		var payload struct {
-			Queue          string `json:"queue"`
-			ModeID         string `json:"modeId"`
-			GuestID        string `json:"guestId"`
-			AccountID      string `json:"accountId"`
-			DisplayName    string `json:"displayName"`
-			Rating         int    `json:"rating"`
-			ClockSeconds   int64  `json:"clockSeconds"`
-			ClockIncrement int64  `json:"clockIncrement"`
-		}
+			var payload struct {
+				Queue          string `json:"queue"`
+				ModeID         string `json:"modeId"`
+				GuestID        string `json:"guestId"`
+				AccountID      string `json:"accountId"`
+				DisplayName    string `json:"displayName"`
+				Rating         int    `json:"rating"`
+				ClockSeconds   int64  `json:"clockSeconds"`
+				ClockIncrement int64  `json:"clockIncrement"`
+			}
 			if r.Body != nil {
 				defer r.Body.Close()
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -375,11 +375,11 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusConflict)
 					_ = json.NewEncoder(w).Encode(map[string]any{
-						"error":    err.Error(),
+						"error": err.Error(),
 						// The requester supplied only a guestId (public in every snapshot and
-				// directory), so this response must not re-reveal the cancel
-				// credential: knowing a guestId must not grant ticket cancellation.
-				"ticket":   redactTicketCancelSecret(activeErr.Ticket),
+						// directory), so this response must not re-reveal the cancel
+						// credential: knowing a guestId must not grant ticket cancellation.
+						"ticket":   wireTicket(activeErr.Ticket),
 						"snapshot": service.Snapshot(activeErr.Ticket.Queue, activeErr.Ticket.ModeID),
 					})
 					return
@@ -421,7 +421,7 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 			// be anyone. The cancel secret is issued exactly once, on the
 			// POST create response, to the enqueuing client -- never here.
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ticket":   redactTicketCancelSecret(ticket),
+				"ticket":   wireTicket(ticket),
 				"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
 			})
 		case http.MethodDelete:
@@ -468,7 +468,7 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ticket":   redactTicketCancelSecret(cancelled),
+				"ticket":   wireTicket(cancelled),
 				"snapshot": service.Snapshot(cancelled.Queue, cancelled.ModeID),
 			})
 		default:
@@ -558,10 +558,16 @@ func hasInternalServiceAccess(r *http.Request, token string) bool {
 	return false
 }
 
-// redactTicketCancelSecret strips the cancel credential from any ticket
-// embedded in an API response; only the POST /tickets create response ever
-// carries it, exactly once, to the enqueuing client.
-func redactTicketCancelSecret(ticket matchmaking.Ticket) matchmaking.Ticket {
+// wireTicket projects a stored ticket onto its client-safe wire shape before
+// it is embedded in an API response:
+//   - PublicView hides the internal two-phase pairing reservation (a ticket
+//     reserved for an in-flight match creation must read as a plain queued
+//     ticket with no assigned room, or polling clients freeze mid-handoff:
+//     they stop seeking on any non-queued status and only act on 'matched').
+//   - the cancel credential is stripped; only the POST /tickets create
+//     response ever carries it, exactly once, to the enqueuing client.
+func wireTicket(ticket matchmaking.Ticket) matchmaking.Ticket {
+	ticket = ticket.PublicView()
 	ticket.CancelSecret = ""
 	return ticket
 }

@@ -49,9 +49,9 @@ const (
 // default so a malformed payload can never inject an arbitrary clock into a
 // paired match.
 var allowedQueueClockSeconds = map[int64]bool{
-	300: true,
-	600: true,
-	900: true,
+	300:  true,
+	600:  true,
+	900:  true,
 	1800: true,
 	3600: true,
 }
@@ -76,7 +76,7 @@ func normalizeClockIncrement(value int64) int64 {
 type TicketStatus string
 
 const (
-	StatusQueued    TicketStatus = "queued"
+	StatusQueued TicketStatus = "queued"
 	// StatusPairing is the reservation state between "opponent found" and
 	// "match room created". EnqueueWithAccount releases s.mu while the
 	// creator's HTTP call runs, so concurrent readers see this state; it
@@ -84,36 +84,36 @@ const (
 	// never returned to clients as a terminal result. A crash or a wedged
 	// creator leaves a pairing ticket behind; recoverStalePairingsLocked
 	// rolls those back to queued.
-	StatusPairing  TicketStatus = "pairing"
-	StatusMatched  TicketStatus = "matched"
+	StatusPairing   TicketStatus = "pairing"
+	StatusMatched   TicketStatus = "matched"
 	StatusCancelled TicketStatus = "cancelled"
 )
 
 type Ticket struct {
-	TicketID     string                `json:"ticketId"`
-	GuestID      string                `json:"guestId"`
-	AccountID    string                `json:"accountId,omitempty"`
-	DisplayName  string                `json:"displayName,omitempty"`
-	Queue        QueueName             `json:"queue"`
-	ModeID       contracts.MatchModeID `json:"modeId,omitempty"`
+	TicketID    string                `json:"ticketId"`
+	GuestID     string                `json:"guestId"`
+	AccountID   string                `json:"accountId,omitempty"`
+	DisplayName string                `json:"displayName,omitempty"`
+	Queue       QueueName             `json:"queue"`
+	ModeID      contracts.MatchModeID `json:"modeId,omitempty"`
 	// ClockSeconds/ClockIncrement are the normalized time control this seek
 	// was created with. Pairing requires exact equality so nobody ever gets
 	// dropped into a match at a clock they did not pick.
-	ClockSeconds   int64                 `json:"clockSeconds,omitempty"`
-	ClockIncrement int64                 `json:"clockIncrement,omitempty"`
-	Status       TicketStatus          `json:"status"`
-	Rating       int                   `json:"rating"`
-	CreatedAt    time.Time             `json:"createdAt"`
-	UpdatedAt    time.Time             `json:"updatedAt"`
-	MatchedAt    *time.Time            `json:"matchedAt,omitempty"`
-	MatchedWith  string                `json:"matchedWith,omitempty"`
-	SeatColor    string                `json:"seatColor,omitempty"`
-	OpponentName string                `json:"opponentName,omitempty"`
-	AssignedRoom string                `json:"assignedRoom,omitempty"`
+	ClockSeconds   int64        `json:"clockSeconds,omitempty"`
+	ClockIncrement int64        `json:"clockIncrement,omitempty"`
+	Status         TicketStatus `json:"status"`
+	Rating         int          `json:"rating"`
+	CreatedAt      time.Time    `json:"createdAt"`
+	UpdatedAt      time.Time    `json:"updatedAt"`
+	MatchedAt      *time.Time   `json:"matchedAt,omitempty"`
+	MatchedWith    string       `json:"matchedWith,omitempty"`
+	SeatColor      string       `json:"seatColor,omitempty"`
+	OpponentName   string       `json:"opponentName,omitempty"`
+	AssignedRoom   string       `json:"assignedRoom,omitempty"`
 	// CancelSecret authorizes DELETE /tickets/{id}: only the enqueuing
 	// client (which received it at create time) or an internal service can
 	// cancel. Never serialized in List output.
-	CancelSecret string                `json:"cancelSecret,omitempty"`
+	CancelSecret string `json:"cancelSecret,omitempty"`
 }
 
 type QueueSnapshot struct {
@@ -125,20 +125,20 @@ type QueueSnapshot struct {
 }
 
 type Service struct {
-	mu                  sync.Mutex
-	store               ticketStore
-	tickets             map[string]Ticket
+	mu      sync.Mutex
+	store   ticketStore
+	tickets map[string]Ticket
 	// inFlight guards the pairing critical section: a guest mid-CreateMatch
 	// must not re-enter Enqueue (or be enqueued from a second request) until
 	// the current pairing resolves. Keyed by guestID.
-	inFlight            map[string]bool
-	creator             MatchCreator
-	now                 func() time.Time
-	queuedTTL             time.Duration
-	matchedRecoveryTTL    time.Duration
-	pairingRecoveryTTL    time.Duration
-	cancelledTicketTTL    time.Duration
-	cleanupStopCh         chan struct{}
+	inFlight           map[string]bool
+	creator            MatchCreator
+	now                func() time.Time
+	queuedTTL          time.Duration
+	matchedRecoveryTTL time.Duration
+	pairingRecoveryTTL time.Duration
+	cancelledTicketTTL time.Duration
+	cleanupStopCh      chan struct{}
 }
 
 type MatchAssignment struct {
@@ -303,7 +303,7 @@ func (s *Service) Enqueue(queue QueueName, modeID contracts.MatchModeID, guestID
 //     double-pairing guard -- no second enqueue can claim the same waiter.
 //  2. (s.mu RELEASED) the creator's HTTP call runs. Every other queue
 //     operation proceeds normally; reserved tickets read as "queued" to
-//     clients (publicView), so the wire contract is unchanged.
+//     clients (PublicView), so the wire contract is unchanged.
 //  3. (under s.mu) promote both tickets to matched -- but only if they are
 //     STILL pairing (a stale-pairing recovery or a cancel may have touched
 //     them while the lock was released). On creator failure, roll the
@@ -329,7 +329,7 @@ func (s *Service) EnqueueWithAccount(queue QueueName, modeID contracts.MatchMode
 			// (re-entrant or duplicated enqueue): idempotent return, no
 			// second pairing and no credential re-issue.
 			s.mu.Unlock()
-			return active.publicView(), nil
+			return active.PublicView(), nil
 		}
 		if active.Status == StatusMatched && active.Queue == queue && normalizeModeID(active.ModeID) == modeID {
 			// Re-joining the SAME lane while still marked matched means the
@@ -364,7 +364,7 @@ func (s *Service) EnqueueWithAccount(queue QueueName, modeID contracts.MatchMode
 			s.mu.Unlock()
 			return reissued, nil
 		} else {
-			activeErr := ActiveTicketError{Ticket: active.publicView()}
+			activeErr := ActiveTicketError{Ticket: active.PublicView()}
 			s.mu.Unlock()
 			return Ticket{}, activeErr
 		}
@@ -461,7 +461,7 @@ func (s *Service) EnqueueWithAccount(queue QueueName, modeID contracts.MatchMode
 		result := s.tickets[ticket.TicketID]
 		delete(s.inFlight, guestID)
 		s.mu.Unlock()
-		return result.publicView(), nil
+		return result.PublicView(), nil
 	}
 
 	// Phase 2: create the room with s.mu RELEASED -- other queue operations
@@ -528,12 +528,12 @@ func (s *Service) completePairingLocked(ticketID, opponentID string, assignment 
 	if !s.promotePairingLocked(ticketID, opponentID, assignment, matchedAt) {
 		log.Printf("matchmaking: pairing reservation for room %s vanished before promotion (recovered or cancelled mid-create); leaving the room to zombie GC", assignment.RoomID)
 		if t, ok := s.tickets[ticketID]; ok {
-			return t.publicView(), nil
+			return t.PublicView(), nil
 		}
 		return Ticket{}, nil
 	}
 	t := s.tickets[ticketID]
-	return t.publicView(), nil
+	return t.PublicView(), nil
 }
 
 func (s *Service) Get(ticketID string) (Ticket, bool) {
@@ -745,7 +745,7 @@ func (s *Service) findMatchCandidateLocked(queue QueueName, modeID contracts.Mat
 		if diff < 0 {
 			diff = -diff
 		}
-		expansion := int(now.Sub(ticket.CreatedAt).Seconds() / 30) * 50
+		expansion := int(now.Sub(ticket.CreatedAt).Seconds()/30) * 50
 		maxDiff := defaultMaxRatingDiff + expansion
 		if diff > maxDiff {
 			continue
@@ -791,12 +791,13 @@ func (s *Service) findActiveTicketLocked(guestID, accountID string) (Ticket, boo
 	return latest, found
 }
 
-// publicView is the client-safe projection of a ticket: the cancel secret is
-// stripped everywhere EXCEPT the create/re-join response path, which re-issues
-// it explicitly before returning (see EnqueueWithAccount). Pairing
+// PublicView is the client-safe projection of a ticket: pairing
 // reservations read as queued so the wire contract never exposes the internal
-// two-phase state.
-func (t Ticket) publicView() Ticket {
+// two-phase state (the cancel secret is a separate concern; see the HTTP
+// handlers, which strip it everywhere EXCEPT the create/re-join response
+// path that issues it). Exported because every handler that embeds a stored
+// ticket in a response must project through it, not just the queue methods.
+func (t Ticket) PublicView() Ticket {
 	out := t
 	out.CancelSecret = ""
 	if out.Status == StatusPairing {

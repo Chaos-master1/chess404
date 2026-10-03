@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/chess404/realtime/internal/contracts"
 	"github.com/chess404/realtime/internal/matchmaking"
@@ -351,5 +353,144 @@ func TestDeleteTicketWithoutSecretIsForbidden(t *testing.T) {
 	}
 	if _, ok := service.Get(created.Ticket.TicketID); !ok {
 		t.Fatalf("ticket must survive an unauthorized cancel attempt")
+	}
+}
+
+// pairingMatchCreator blocks inside CreateMatch until released, holding the
+// two-phase pairing reservation open so a test can observe the reserved
+// window deterministically.
+type pairingMatchCreator struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *pairingMatchCreator) CreateMatch(matchmaking.MatchAssignment) error {
+	c.once.Do(func() { close(c.entered) })
+	<-c.release
+	return nil
+}
+
+// A ticket reserved by an in-flight pairing (status "pairing", room already
+// assigned) is an INTERNAL two-phase state. Reads through the real handlers
+// must project it through PublicView: a raw leak parks polling clients
+// mid-handoff -- the web queue stops polling on any non-queued status and
+// only auto-opens a 'matched' ticket, so the browser sits forever on
+// "Matched - opening game..." when a poll lands inside the pairing window.
+// Production regression: e2e multiplayer handoff, 2026-10-03.
+func TestTicketReadsHidePairingReservation(t *testing.T) {
+	const internalToken = "test-internal-token"
+	service := matchmaking.NewService()
+	defer func() { _ = service.Close() }()
+	mux := buildMatchmakingMux(service, internalToken)
+
+	createBody := func(guest string) string {
+		return `{"queue":"casual","guestId":"` + guest + `","displayName":"` + guest + `"}`
+	}
+
+	// guest_a waits alone.
+	req := httptest.NewRequest(http.MethodPost, "/api/queues/tickets", strings.NewReader(createBody("guest_a")))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("guest_a enqueue: %d %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Ticket matchmaking.Ticket `json:"ticket"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("create response must decode: %v", err)
+	}
+
+	// guest_b pairs with guest_a and hangs inside CreateMatch, holding the
+	// reservation open with the queue lock released (same shape as the real
+	// cross-service room creation).
+	creator := &pairingMatchCreator{entered: make(chan struct{}), release: make(chan struct{})}
+	service.SetMatchCreator(creator)
+	type httpResult struct {
+		code int
+		body string
+	}
+	joinerDone := make(chan httpResult, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/queues/tickets", strings.NewReader(createBody("guest_b")))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		joinerDone <- httpResult{code: rec.Code, body: rec.Body.String()}
+	}()
+	select {
+	case <-creator.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the joiner enqueue to reach CreateMatch")
+	}
+
+	// While the reservation is live, every read path must expose a plain
+	// queued ticket with no room -- never status "pairing".
+	assertHidden := func(label string, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d body=%s", label, rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Ticket matchmaking.Ticket `json:"ticket"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("%s: response must decode: %v (body=%s)", label, err, rec.Body.String())
+		}
+		if response.Ticket.Status != matchmaking.StatusQueued {
+			t.Fatalf("%s: pairing reservation leaked to the client (status=%q)", label, response.Ticket.Status)
+		}
+		if response.Ticket.AssignedRoom != "" {
+			t.Fatalf("%s: pairing room leaked to the client (room=%q)", label, response.Ticket.AssignedRoom)
+		}
+		if response.Ticket.CancelSecret != "" {
+			t.Fatalf("%s: cancel secret leaked to the client", label)
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/queues/tickets/"+created.Ticket.TicketID, nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	assertHidden("GET /tickets/{id}", rec)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/queues/tickets?guestId=guest_a", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	assertHidden("GET /tickets?guestId=", rec)
+
+	// Let the pairing finish: now reads show the real matched handoff.
+	close(creator.release)
+	select {
+	case join := <-joinerDone:
+		if join.code != http.StatusOK {
+			t.Fatalf("joiner enqueue: %d %s", join.code, join.body)
+		}
+		var paired struct {
+			Ticket matchmaking.Ticket `json:"ticket"`
+		}
+		if err := json.Unmarshal([]byte(join.body), &paired); err != nil {
+			t.Fatalf("joiner response must decode: %v", err)
+		}
+		if paired.Ticket.Status != matchmaking.StatusMatched || paired.Ticket.AssignedRoom == "" || paired.Ticket.SeatColor == "" {
+			t.Fatalf("joiner must finish matched with room and seat, got %+v", paired.Ticket)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("joiner enqueue did not finish after release")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/queues/tickets/"+created.Ticket.TicketID, nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("post-pairing GET: %d %s", rec.Code, rec.Body.String())
+	}
+	var promoted struct {
+		Ticket matchmaking.Ticket `json:"ticket"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &promoted); err != nil {
+		t.Fatalf("post-pairing response must decode: %v", err)
+	}
+	if promoted.Ticket.Status != matchmaking.StatusMatched || promoted.Ticket.AssignedRoom == "" || promoted.Ticket.SeatColor == "" {
+		t.Fatalf("post-pairing read must show the matched handoff, got %+v", promoted.Ticket)
 	}
 }
