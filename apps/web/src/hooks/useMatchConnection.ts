@@ -122,6 +122,16 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
   // Mirrors `over` for the reconciliation poll's interval closure so the
   // hook's rules are respected (refs must not be created inside effects).
   const reconcileOverRef = React.useRef(over);
+  // ── The room's one terminal state ────────────────────────────────────────
+  // The stream layer is the only place that sees the server's verdict on a
+  // room, and it publishes that verdict as the 'unreadable' status. Held as
+  // the id it applies to rather than a boolean: a different room can never
+  // inherit this room's verdict, and no effect has to remember to reset it.
+  // `roomUnreadableRef` carries the same fact to the reconciliation interval,
+  // whose closure must read it without re-running the stream effect.
+  const [unreadableMatchId, setUnreadableMatchId] = React.useState<string | null>(null);
+  const roomUnreadableRef = React.useRef<string | null>(null);
+  const roomUnreadable = unreadableMatchId !== null && unreadableMatchId === authoritativeMatchId;
 
   const createAuthoritativeRematchRoom = React.useCallback(async () => {
     const matchId = authoritativeMatchIdRef.current;
@@ -228,6 +238,20 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
           setStreamDisconnected(false);
           return;
         }
+        if (status === 'unreadable') {
+          // Terminal verdict from the stream layer: no snapshot will ever
+          // arrive for this room from this browser. Record it for this room
+          // and stand every timer down -- the fallback poll and the claim /
+          // presence loops check `roomUnreadable`, and the board renders the
+          // notice instead of a silent, endless retry.
+          wsConnectedRef.current = false;
+          roomUnreadableRef.current = matchId;
+          setUnreadableMatchId(matchId);
+          setAuthoritativeLive(false);
+          setStreamDisconnected(false);
+          setCardMsg(prev => prev === STREAM_RECONNECT_MESSAGE ? '' : prev);
+          return;
+        }
         if (status === 'reconnecting') {
           wsConnectedRef.current = false;
           setAuthoritativeLive(false);
@@ -261,7 +285,9 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     // over HTTP and feed it through the normal onSnapshot path. When the
     // stream is healthy the seqNum tier classifies it same-seq/cosmetic and
     // it is a no-op; when the stream is lying, the truth (opponent's move,
-    // clocks, presence) applies immediately.
+    // clocks, presence) applies immediately. A room the stream has already
+    // declared unreadable is skipped outright: nothing is there to reconcile
+    // with, and asking again is the 404 storm this guard exists to prevent.
     let reconcileTimer: number | null = null;
     const stopReconcile = () => {
       if (reconcileTimer !== null) {
@@ -272,7 +298,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     reconcileOverRef.current = over;
     if (hostedRuntime) {
       reconcileTimer = window.setInterval(async () => {
-        if (reconcileOverRef.current || !wsConnectedRef.current || !authoritativeMatchId) return;
+        if (reconcileOverRef.current || roomUnreadableRef.current === authoritativeMatchId || !wsConnectedRef.current || !authoritativeMatchId) return;
         if (typeof navigator !== 'undefined' && !navigator.onLine) return;
         try {
           const truth = await fetchMatch(authoritativeMatchId);
@@ -296,7 +322,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
 
   // ── Presence heartbeat effect ─────────────────────────────────────────────
   React.useEffect(() => {
-    if (!hostedRuntime || !authoritativeMatchId || !viewerSeat || over) {
+    if (!hostedRuntime || !authoritativeMatchId || !viewerSeat || over || roomUnreadable) {
       return;
     }
 
@@ -341,7 +367,7 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [authoritativeActorForColor, authoritativeMatchId, hostedRuntime, over, viewerSeat]);
+  }, [authoritativeActorForColor, authoritativeMatchId, hostedRuntime, over, roomUnreadable, viewerSeat]);
 
   // ── Fallback polling fetch effect ─────────────────────────────────────────
   // This used to fire unconditionally: every open match tab issued a GET
@@ -350,9 +376,10 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
   // backing store (every request also runs through Redis-backed rate
   // limiting), that is a continuous, multiplying-by-open-tabs cost for data
   // the client already had. It is a *fallback* -- only skip it while
-  // wsConnectedRef says the primary channel is actually delivering.
+  // wsConnectedRef says the primary channel is actually delivering, and stop
+  // it outright once the room's verdict is in.
   React.useEffect(() => {
-    if (!authoritativeMatchId || over) {
+    if (!authoritativeMatchId || over || roomUnreadable) {
       return;
     }
 
@@ -366,11 +393,11 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     }, 5000);
 
     return () => window.clearInterval(interval);
-  }, [authoritativeMatchId, over, onSnapshot]);
+  }, [authoritativeMatchId, over, roomUnreadable, onSnapshot]);
 
   // ── Claim refresh effect ──────────────────────────────────────────────────
   React.useEffect(() => {
-    if (!authoritativeMatchId || over) {
+    if (!authoritativeMatchId || over || roomUnreadable) {
       return;
     }
 
@@ -442,9 +469,14 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [authoritativeMatchId, over, applyGatewayGuestSessions, applyGatewayMatchClaims, applyGatewayAccountSessions, buildGatewayBootstrapRequest, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef]);
+  }, [authoritativeMatchId, over, roomUnreadable, applyGatewayGuestSessions, applyGatewayMatchClaims, applyGatewayAccountSessions, buildGatewayBootstrapRequest, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef]);
 
   const onStreamReconnect = React.useCallback(() => {
+    // The one way out of the terminal state: an explicit retry clears the
+    // verdict so the stream, the timers and the board all try again with a
+    // fresh retry budget.
+    roomUnreadableRef.current = null;
+    setUnreadableMatchId(null);
     manualRetryRef.current?.();
   }, []);
 
@@ -452,5 +484,6 @@ export function useMatchConnection(props: UseMatchConnectionProps) {
     manualRetryRef,
     createAuthoritativeRematchRoom,
     onStreamReconnect,
+    roomUnreadable,
   };
 }

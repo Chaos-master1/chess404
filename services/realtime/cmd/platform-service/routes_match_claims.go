@@ -55,7 +55,8 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 		}
 
 		if claim, ok := claims.Get(payload.MatchID, session.Guest.GuestID); ok {
-			claim, ok = refreshStoredMatchClaim(archive, claims, claim, session.SessionSecret)
+			// A match the caller named: the owner's claim survives a finish.
+			claim, ok = refreshStoredMatchClaim(archive, claims, claim, session.SessionSecret, isReadableMatchStatus)
 			if !ok {
 				http.Error(w, `{"error":"unknown active match claim"}`, http.StatusNotFound)
 				return
@@ -75,8 +76,11 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 
 		matchState, _, archiveOk := archive.LoadMatch(payload.MatchID)
 		if archiveOk {
-			if !isRecoverableMatchStatus(matchState.Status) {
-				http.Error(w, `{"error":"match is no longer active"}`, http.StatusNotFound)
+			// READ authorization, not resumability: an already-verified guest
+			// may read a match they own, finished or not. isReadableMatchStatus
+			// carries the why, including why that cannot grant write access.
+			if !isReadableMatchStatus(matchState.Status) {
+				http.Error(w, `{"error":"match cannot be read"}`, http.StatusNotFound)
 				return
 			}
 			claim, ok := buildMatchSeatClaim(matchState, session.Guest.GuestID, session.SessionSecret)
@@ -100,8 +104,8 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 			http.Error(w, `{"error":"unknown match archive"}`, http.StatusNotFound)
 			return
 		}
-		if !isRecoverableMatchStatus(payload.MatchStatus) {
-			http.Error(w, `{"error":"match is no longer active"}`, http.StatusNotFound)
+		if !isReadableMatchStatus(payload.MatchStatus) {
+			http.Error(w, `{"error":"match cannot be read"}`, http.StatusNotFound)
 			return
 		}
 		seatColor := strings.ToLower(strings.TrimSpace(payload.SeatColor))
@@ -192,7 +196,7 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 			http.Error(w, `{"error":"unknown room claim token"}`, http.StatusNotFound)
 			return
 		}
-		claim, ok = refreshStoredMatchClaim(archive, claims, claim, claim.PlayerSecret)
+		claim, ok = refreshStoredMatchClaim(archive, claims, claim, claim.PlayerSecret, isReadableMatchStatus)
 		if !ok {
 			http.Error(w, `{"error":"unknown room claim token"}`, http.StatusNotFound)
 			return
@@ -244,7 +248,9 @@ func registerMatchClaimRoutes(mux *http.ServeMux, archive *platform.MatchArchive
 				http.Error(w, `{"error":"no active match claim"}`, http.StatusNotFound)
 				return
 			}
-			claim, ok = refreshStoredMatchClaim(archive, claims, claim, session.SessionSecret)
+			// "Which game am I currently in?" -- liveness only; a finished room
+			// must never be returned here.
+			claim, ok = refreshStoredMatchClaim(archive, claims, claim, session.SessionSecret, isRecoverableMatchStatus)
 			if !ok {
 				continue
 			}

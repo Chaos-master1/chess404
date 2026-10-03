@@ -8,13 +8,26 @@ import (
 	"github.com/chess404/realtime/internal/contracts"
 )
 
-func TestMatchArchiveStoreUpsertAndReload(t *testing.T) {
-	tempDir := t.TempDir()
-	storePath := filepath.Join(tempDir, "match-archive.json")
-	store, err := NewMatchArchiveStore(storePath)
+// newTestArchiveStore returns a store whose writeLoop is joined before the
+// test's temp dir is removed. The store persists asynchronously (writeCh ->
+// writeLoop -> archive file), so a test that walks away from it lets that
+// write land while t.TempDir cleanup is deleting the directory -- the
+// sporadic "RemoveAll cleanup: directory not empty" failures on CI. Closing
+// through t.Cleanup runs before TempDir's own cleanup (registered first).
+func newTestArchiveStore(t *testing.T, path string) *MatchArchiveStore {
+	t.Helper()
+	store, err := NewMatchArchiveStore(path)
 	if err != nil {
 		t.Fatalf("expected archive store to initialize, got %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+func TestMatchArchiveStoreUpsertAndReload(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "match-archive.json")
+	store := newTestArchiveStore(t, storePath)
 
 	now := time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC)
 	snapshot := contracts.MatchSnapshotResponse{
@@ -37,10 +50,7 @@ func TestMatchArchiveStoreUpsertAndReload(t *testing.T) {
 		t.Fatalf("expected archive flush to succeed, got %v", err)
 	}
 
-	reloaded, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store reload to succeed, got %v", err)
-	}
+	reloaded := newTestArchiveStore(t, storePath)
 	entry, ok := reloaded.Get("archive_test")
 	if !ok {
 		t.Fatalf("expected archive entry to be reloadable")
@@ -53,10 +63,7 @@ func TestMatchArchiveStoreUpsertAndReload(t *testing.T) {
 func TestMatchArchiveStorePreservesPlayerMetadata(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "match-archive.json")
-	store, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store to initialize, got %v", err)
-	}
+	store := newTestArchiveStore(t, storePath)
 
 	now := time.Date(2026, 5, 6, 11, 0, 0, 0, time.UTC)
 	snapshot := contracts.MatchSnapshotResponse{
@@ -104,10 +111,7 @@ func TestMatchArchiveStorePreservesPlayerMetadata(t *testing.T) {
 func TestMatchArchiveStoreListByGuest(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "match-archive.json")
-	store, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store to initialize, got %v", err)
-	}
+	store := newTestArchiveStore(t, storePath)
 
 	base := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
 	snapshots := []contracts.MatchSnapshotResponse{
@@ -161,10 +165,7 @@ func TestMatchArchiveStoreListByGuest(t *testing.T) {
 func TestMatchArchiveStoreListByAccountIncludesLinkedGuestFallback(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "match-archive.json")
-	store, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store to initialize, got %v", err)
-	}
+	store := newTestArchiveStore(t, storePath)
 
 	base := time.Date(2026, 5, 6, 12, 30, 0, 0, time.UTC)
 	snapshots := []contracts.MatchSnapshotResponse{
@@ -219,10 +220,7 @@ func TestMatchArchiveStoreListByAccountIncludesLinkedGuestFallback(t *testing.T)
 func TestMatchArchiveStorePreservesReplayFrames(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "match-archive.json")
-	store, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store to initialize, got %v", err)
-	}
+	store := newTestArchiveStore(t, storePath)
 
 	now := time.Date(2026, 5, 6, 13, 0, 0, 0, time.UTC)
 	snapshot := contracts.MatchSnapshotResponse{
@@ -246,10 +244,7 @@ func TestMatchArchiveStorePreservesReplayFrames(t *testing.T) {
 		t.Fatalf("expected archive flush to succeed, got %v", err)
 	}
 
-	reloaded, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store reload to succeed, got %v", err)
-	}
+	reloaded := newTestArchiveStore(t, storePath)
 	entry, ok := reloaded.Get("replay_archive")
 	if !ok {
 		t.Fatalf("expected replay archive entry to exist after reload")
@@ -262,10 +257,7 @@ func TestMatchArchiveStorePreservesReplayFrames(t *testing.T) {
 func TestMatchArchiveStoreLoadMatchRestoresPrivateState(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "match-archive.json")
-	store, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store to initialize, got %v", err)
-	}
+	store := newTestArchiveStore(t, storePath)
 
 	now := time.Date(2026, 5, 6, 14, 0, 0, 0, time.UTC)
 	snapshot := contracts.MatchSnapshotResponse{
@@ -308,10 +300,7 @@ func TestMatchArchiveStoreLoadMatchRestoresPrivateState(t *testing.T) {
 		t.Fatalf("expected archive flush to succeed, got %v", err)
 	}
 
-	reloaded, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store reload to succeed, got %v", err)
-	}
+	reloaded := newTestArchiveStore(t, storePath)
 	match, events, ok := reloaded.LoadMatch("private_restore")
 	if !ok {
 		t.Fatalf("expected private restore entry to be loadable")
@@ -327,10 +316,7 @@ func TestMatchArchiveStoreLoadMatchRestoresPrivateState(t *testing.T) {
 func TestMatchArchiveStoreStatsReflectQueuesAndStatuses(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "match-archive.json")
-	store, err := NewMatchArchiveStore(storePath)
-	if err != nil {
-		t.Fatalf("expected archive store to initialize, got %v", err)
-	}
+	store := newTestArchiveStore(t, storePath)
 
 	now := time.Date(2026, 5, 6, 15, 0, 0, 0, time.UTC)
 	snapshots := []contracts.MatchSnapshotResponse{

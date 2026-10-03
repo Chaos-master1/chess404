@@ -15,6 +15,7 @@ import {
   paintSniperAnim, paintTransformAnim, paintCloneAnim, paintBlackHoleAnim, paintPoofAnim, pushParticle,
 } from './canvas/animations';
 import { isUsableImage, getFusedImage, PIECE_IMAGES } from './canvas/images';
+import { boardSignature } from './lib/board-signature';
 import type { Particle, TransformAnim, SniperAnim, TeleportAnim, JumpAnim, SacrificeAnim, MindControlAnim, FuseAnim, ReverseAnim, CloneAnim, BlackHoleAnim, PoofAnim, BoardArrow } from './canvas/animations';
 export type { TransformAnim, SniperAnim, TeleportAnim, JumpAnim, SacrificeAnim, MindControlAnim, FuseAnim, ReverseAnim, CloneAnim, BlackHoleAnim, PoofAnim, BoardArrow };
 
@@ -151,6 +152,11 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
   }, [reverseAnim]);
 
   const displayBoard = reviewBoard ?? board;
+  // Observability only: a fingerprint of the position actually painted, so a
+  // test can distinguish a repainted board from a frozen one (every other
+  // board assertion in the suite is a visibility check, which a frozen board
+  // passes). Nothing branches on this value.
+  const paintedSignature = boardSignature(displayBoard, turn);
 
   // ── Responsive board size ─────────────────────────────────────────────────
   const MAX_BOARD_PX = 8 * IMPORTED_SQ;
@@ -2090,6 +2096,7 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
       <canvas
         ref={canvasRef}
         data-testid="board-root"
+        data-board-signature={paintedSignature}
         width={Math.round(W * dpr)}
         height={Math.round(H * dpr)}
         role="application"
