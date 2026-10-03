@@ -138,6 +138,11 @@ MATCH_REDIS_URL=rediss://default:<upstash-password>@<upstash-host>:6379
 PLATFORM_SERVICE_INTERNAL_URL=http://${{platform-service.RAILWAY_PRIVATE_DOMAIN}}:${{platform-service.PORT}}
 ALLOWED_ORIGINS=https://<web-domain>
 INTERNAL_SERVICE_TOKEN=<shared-secret>
+# Hashes seat secrets before they are written to Redis. Must be identical on
+# every match-service instance -- a rolling deploy with two values cannot
+# recognise secrets hashed by the other one. Unset keeps the built-in
+# development key and logs a boot warning; set it for any real deployment.
+MATCH_SECRET_HASH_KEY=<random-shared-secret>
 ```
 
 ## `platform-service` (suite: platform + matchmaking)

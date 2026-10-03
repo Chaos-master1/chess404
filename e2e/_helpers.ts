@@ -61,6 +61,63 @@ export async function dismissOnboarding(page: Page, settleTestId?: string) {
   }
 }
 
+// Registers a fresh account through the real UI and leaves the context signed
+// in on /account. Registration claims the browser's current guest session, so
+// matches played afterwards are attributed to the new account's linked guest --
+// which is what makes account-scoped surfaces (history) show them.
+//
+// The guest session is minted asynchronously and its arrival re-renders the
+// form, clearing anything typed before it lands, so fills are verified and
+// retried rather than assumed.
+export async function registerAccount(
+  page: Page,
+  credentials: { handle: string; email: string; password: string },
+) {
+  const { handle, email, password } = credentials;
+  await page.goto('/account');
+  await dismissOnboarding(page);
+
+  // Falls back to position for deployments that predate the tab test ids
+  // (index 0 of "Register" is the tab itself; "Sign In" also names a nav item).
+  const registerTab = page.getByTestId('auth-tab-register')
+    .or(page.getByRole('button', { name: /^register$/i }))
+    .first();
+  if (await registerTab.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    await registerTab.click().catch(() => {});
+  }
+
+  const handleField = page.getByPlaceholder('wizard404error');
+  const emailField = page.getByPlaceholder('you@example.com');
+  const passwordField = page.getByPlaceholder('Choose a strong password');
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await handleField.fill(handle);
+    await emailField.fill(email);
+    await passwordField.fill(password);
+    await page.waitForTimeout(1_500);
+    if ((await handleField.inputValue()) === handle && (await emailField.inputValue()) === email) break;
+  }
+  expect(await handleField.inputValue(), 'the register form kept clearing itself').toBe(handle);
+
+  await page.getByRole('button', { name: /create account/i }).last().click();
+
+  // Registering navigates straight to the play hub, so come back to the
+  // account surface to inspect the session it just created.
+  await page.waitForTimeout(6_000);
+  await page.goto('/account');
+  await dismissOnboarding(page);
+  await expect(
+    page.getByText(new RegExp(`@${handle}`)).first(),
+    'registration did not produce a signed-in session',
+  ).toBeVisible({ timeout: 60_000 });
+}
+
+// Unique per run so specs can be re-run against the same production DB. The
+// e2e_ prefix matters: the platform excludes these test accounts from the
+// public leaderboard, so runs never leak handles into live rankings.
+export function uniqueE2EHandle(): string {
+  return `e2e_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`.slice(0, 24);
+}
+
 export interface PageErrors {
   console: string[];
   csp: string[];

@@ -68,9 +68,12 @@ export function configureMatchServiceRuntime(config?: MatchServiceRuntimeConfig)
     httpBaseUrl = nextHttpBase;
   }
 
-  const nextWsBase = normalizeBaseUrl(config?.wsBaseUrl);
-  if (nextWsBase) {
-    wsBaseUrl = toWebSocketBaseUrl(nextWsBase);
+  if (config && 'wsBaseUrl' in config) {
+    // An explicitly supplied wsBaseUrl replaces the current one, including
+    // an empty string to force the HTTP-only path. Without this, a test (or
+    // a renderer) that once set a WS endpoint could never clear it.
+    const nextWsBase = normalizeBaseUrl(config.wsBaseUrl);
+    wsBaseUrl = nextWsBase ? toWebSocketBaseUrl(nextWsBase) : '';
   }
 }
 
@@ -448,6 +451,14 @@ export function connectToMatchStream(
   // it -- this used to report 'connected', which read as "healthy and
   // receiving" while, in fact, nothing was arriving.
   const giveUpUnreadable = () => {
+    // A live socket outranks the poll verdict: the poll that scheduled just
+    // before the WS came up can still resolve a refusal after the room became
+    // readable again, and declaring it terminal then would red-banner a room
+    // that is actively delivering. The socket is the primary channel, so it
+    // keeps the decision.
+    if (isWsConnected) {
+      return;
+    }
     stopped = true;
     clearPollTimer();
     handlers.onStatusChange?.('unreadable');
@@ -586,10 +597,12 @@ export function connectToMatchStream(
     } else if (playerIdentity?.playerClaimToken?.trim()) {
       authPromise = Promise.resolve({ claimToken: playerIdentity.playerClaimToken!.trim() });
     } else {
-      // Spectate has no player identity, so the WS stream is unavailable;
-      // polling fallback is the intended path.
+      // Spectate has no player identity, so the WS stream is unavailable and
+      // the stream's own HTTP poll is the primary channel. Do NOT mark
+      // isWsConnected here: schedulePoll() returns early while that flag is
+      // set, so the old assignment made this branch schedule nothing at all
+      // and viewers only refreshed through the hook's 15s reconcile.
       handlers.onStatusChange?.('connected');
-      isWsConnected = true;
       schedulePoll(0);
       return;
     }

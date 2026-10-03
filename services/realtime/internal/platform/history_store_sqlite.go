@@ -80,6 +80,34 @@ func (s *sqliteArchiveStore) load() (map[string]MatchArchiveEntry, map[string]Ma
 	return entries, private, nil
 }
 
+const sqliteArchiveUpsertSQL = `
+	insert into archives(match_id, entry_json, private_json)
+	values(?, ?, ?)
+	on conflict(match_id) do update set
+		entry_json = excluded.entry_json,
+		private_json = excluded.private_json
+`
+
+// sqliteArchiveUpsertArgs builds the arguments shared by the batch persist
+// and the single-row upsert so the two write paths cannot drift apart.
+func sqliteArchiveUpsertArgs(matchID string, entry MatchArchiveEntry, private *MatchArchivePrivateEntry) ([]any, error) {
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	var privateJSON any
+	if private != nil {
+		encodedPrivate, err := json.Marshal(*private)
+		if err != nil {
+			return nil, err
+		}
+		privateJSON = string(encodedPrivate)
+	}
+
+	return []any{matchID, string(entryJSON), privateJSON}, nil
+}
+
 func (s *sqliteArchiveStore) persist(entries map[string]MatchArchiveEntry, private map[string]MatchArchivePrivateEntry) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -89,39 +117,34 @@ func (s *sqliteArchiveStore) persist(entries map[string]MatchArchiveEntry, priva
 		_ = tx.Rollback()
 	}()
 
-	upsertStmt, err := tx.Prepare(`
-		insert into archives(match_id, entry_json, private_json)
-		values(?, ?, ?)
-		on conflict(match_id) do update set
-			entry_json = excluded.entry_json,
-			private_json = excluded.private_json
-	`)
+	upsertStmt, err := tx.Prepare(sqliteArchiveUpsertSQL)
 	if err != nil {
 		return err
 	}
 	defer upsertStmt.Close()
 
 	for matchID, entry := range entries {
-		entryJSON, err := json.Marshal(entry)
+		args, err := sqliteArchiveUpsertArgs(matchID, entry, privateEntryPtr(private, matchID))
 		if err != nil {
 			return err
 		}
-
-		var privateJSON any
-		if privateEntry, ok := private[matchID]; ok {
-			encodedPrivate, err := json.Marshal(privateEntry)
-			if err != nil {
-				return err
-			}
-			privateJSON = string(encodedPrivate)
-		}
-
-		if _, err := upsertStmt.Exec(matchID, string(entryJSON), privateJSON); err != nil {
+		if _, err := upsertStmt.Exec(args...); err != nil {
 			return err
 		}
 	}
 
 	return tx.Commit()
+}
+
+// upsertOne writes exactly one row, so FlushMatch can make a new match
+// durable without rewriting the other rows in the overlay.
+func (s *sqliteArchiveStore) upsertOne(entry MatchArchiveEntry, private *MatchArchivePrivateEntry) error {
+	args, err := sqliteArchiveUpsertArgs(entry.MatchID, entry, private)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(sqliteArchiveUpsertSQL, args...)
+	return err
 }
 
 func (s *sqliteArchiveStore) delete(matchID string) error {

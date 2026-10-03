@@ -8,9 +8,10 @@ test.describe('match resilience', () => {
 
     await page.goto('/play');
     await dismissOnboarding(page, 'btn-play-computer');
+    // One entry point only: the hub's difficulty grid would start a SECOND
+    // match, and that creation raced the first navigation (detached button,
+    // 409 conflict) instead of opening the board.
     await page.getByTestId('btn-play-computer').click();
-    const beginner = page.getByRole('button', { name: /beginner/i }).first();
-    if (await beginner.isVisible({ timeout: 20_000 }).catch(() => false)) await beginner.click();
     await expect(page.getByTestId('board-root')).toBeVisible({ timeout: 90_000 });
 
     await move(page, 'e2', 'e4');

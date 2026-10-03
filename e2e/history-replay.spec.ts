@@ -1,16 +1,26 @@
 import { test, expect } from '@playwright/test';
-import { collectErrors, dismissOnboarding, move } from './_helpers';
+import { collectErrors, dismissOnboarding, move, registerAccount, uniqueE2EHandle } from './_helpers';
 
 test.describe('history and replay', () => {
   test('a finished match is archived and replayable', async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(420_000);
     const errors = collectErrors(page);
+
+    // History is deliberately an account feature (guests get a sign-up gate),
+    // so the spec signs in first. Registration claims this browser's guest,
+    // which is what attributes the archived computer game to the account.
+    const handle = uniqueE2EHandle();
+    await registerAccount(page, {
+      handle,
+      email: `${handle}@example.com`,
+      password: 'Chess404-e2e-passw0rd!',
+    });
 
     await page.goto('/play');
     await dismissOnboarding(page, 'btn-play-computer');
+    // One entry point only: the hub's difficulty grid would start a second,
+    // conflicting match instead of opening this one.
     await page.getByTestId('btn-play-computer').click();
-    const beginner = page.getByRole('button', { name: /beginner/i }).first();
-    if (await beginner.isVisible({ timeout: 20_000 }).catch(() => false)) await beginner.click();
     await expect(page.getByTestId('board-root')).toBeVisible({ timeout: 90_000 });
 
     // Play a couple of moves so the archive has real content, then resign.

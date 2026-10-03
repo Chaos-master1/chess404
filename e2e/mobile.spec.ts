@@ -98,10 +98,15 @@ test.describe('mobile 390x844 touch', () => {
 
     await page.goto('/play');
     await dismissOnboarding(page);
-    await page.getByTestId('btn-play-computer').click();
+    // Drive the engine card's difficulty grid, not the one-click quick start:
+    // a difficulty button only SELECTS, the footer CTA starts the match. The
+    // grid stays inert until the guest identity lands, which is exactly when
+    // the quick-start button becomes enabled, so gate on that.
+    await expect(page.getByTestId('btn-play-computer')).toBeEnabled({ timeout: 60_000 });
     const beginner = page.getByRole('button', { name: /beginner/i }).first();
     await expect(beginner).toBeVisible({ timeout: 30_000 });
     await beginner.click();
+    await page.getByRole('button', { name: /play as .*vs beginner computer/i }).click();
 
     const board = page.getByTestId('board-root');
     await expect(board).toBeVisible({ timeout: 90_000 });

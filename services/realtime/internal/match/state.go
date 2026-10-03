@@ -552,16 +552,16 @@ func (s *Service) ensureMatchLoadedLocked(matchID string) (*matchContainer, bool
 		return c, true
 	}
 
-	restored, events, presence, ok := s.resolveMatchStateLocked(matchID)
+	hyd, ok := s.resolveMatchStateLocked(matchID)
 	if !ok {
 		return nil, false
 	}
 
-	if len(restored.History) == 0 {
-		restored.History = []contracts.PositionState{capturePositionState(&restored)}
+	if len(hyd.restored.History) == 0 {
+		hyd.restored.History = []contracts.PositionState{capturePositionState(&hyd.restored)}
 	}
 
-	return s.loadMatchContainerLocked(matchID, restored, events, presence), true
+	return s.loadMatchContainerLocked(matchID, hyd), true
 }
 
 func (s *Service) restoreArchivedMatchesLocked(loader MatchArchiveBootstrapper) {
@@ -573,15 +573,33 @@ func (s *Service) restoreArchivedMatchesLocked(loader MatchArchiveBootstrapper) 
 		// an ID the archive already told us is unfinished; it falls back to
 		// this same archive row when Redis has nothing (TTL'd out, or the
 		// match predates Redis being wired at all).
-		restored, events, presence, ok := s.resolveMatchStateLocked(matchID)
+		hyd, ok := s.resolveMatchStateLocked(matchID)
 		if !ok {
 			continue
 		}
-		if len(restored.History) == 0 {
-			restored.History = []contracts.PositionState{capturePositionState(&restored)}
+		if len(hyd.restored.History) == 0 {
+			hyd.restored.History = []contracts.PositionState{capturePositionState(&hyd.restored)}
 		}
-		s.loadMatchContainerLocked(matchID, restored, events, presence)
+		s.loadMatchContainerLocked(matchID, hyd)
 	}
+}
+
+// matchHydration is everything a container rebuild needs from the shared
+// store. It exists so the Redis path can fetch all of it in one pipelined
+// round trip: hydration runs under the service's global lock, and four
+// sequential GET round trips there stalled every match operation on the
+// instance, not just the one being loaded.
+type matchHydration struct {
+	restored contracts.MatchState
+	events   []contracts.ResolvedEvent
+	presence *matchPresenceState
+	seenIDs  []string
+	seqNum   int64
+	// fromArchive marks a hydration whose authoritative state came from the
+	// archive rather than Redis; the container build then still reads the
+	// seq counter and seen-move IDs from the store, because those keys live
+	// on their own refresh cadence and may outlive the state key.
+	fromArchive bool
 }
 
 // resolveMatchStateLocked tries the shared Redis store before the archive.
@@ -591,70 +609,92 @@ func (s *Service) restoreArchivedMatchesLocked(loader MatchArchiveBootstrapper) 
 // is not shared across instances at all. Preferring Redis means an instance
 // that never handled this match's mutations still sees the latest state
 // instead of a potentially-stale or entirely local-only archive row.
-func (s *Service) resolveMatchStateLocked(matchID string) (contracts.MatchState, []contracts.ResolvedEvent, *matchPresenceState, bool) {
-	if restored, events, presence, ok := s.hydrateFromRedisLocked(matchID); ok {
-		return restored, events, presence, true
+func (s *Service) resolveMatchStateLocked(matchID string) (matchHydration, bool) {
+	if hyd, ok := s.hydrateFromRedisLocked(matchID); ok {
+		return hyd, true
 	}
 
 	loader, ok := s.archive.(MatchArchiveLoader)
 	if !ok {
-		return contracts.MatchState{}, nil, nil, false
+		return matchHydration{}, false
 	}
 	restored, events, ok := loader.LoadMatch(matchID)
 	if !ok {
-		return contracts.MatchState{}, nil, nil, false
+		return matchHydration{}, false
 	}
-	return restored, events, nil, true
+	return matchHydration{restored: restored, events: events, fromArchive: true}, true
 }
 
-// hydrateFromRedisLocked rebuilds match state from a single Redis read.
+// hydrateFromRedisLocked rebuilds match state from a single Redis round trip.
 // SaveState stores the full contracts.MatchSnapshotResponse -- Match (board,
-// hands, seat secrets, position history) plus Events -- so LoadState alone is
-// sufficient; the separate SaveHistory/SaveEvents keys and the hashed
+// hands, seat secrets, position history) plus Events -- so the state payload
+// alone is sufficient; the separate SaveHistory/SaveEvents keys and the hashed
 // SaveSecrets key are not read here (SaveSecrets stores an HMAC, not the
 // plaintext, so it cannot authenticate a caller-supplied secret and is not
-// usable for this purpose). LoadPresence is read separately because presence
-// (connection/heartbeat/rate-limit state) is not part of MatchState at all.
-func (s *Service) hydrateFromRedisLocked(matchID string) (contracts.MatchState, []contracts.ResolvedEvent, *matchPresenceState, bool) {
+// usable for this purpose). Presence, seen client move IDs and the sequence
+// counter ride the same pipelined bundle: they all live in Redis, and
+// awaiting them one at a time multiplied the lock-held cost by four.
+func (s *Service) hydrateFromRedisLocked(matchID string) (matchHydration, bool) {
 	if s.store == nil {
-		return contracts.MatchState{}, nil, nil, false
+		return matchHydration{}, false
+	}
+
+	stateData, presenceData, seenData, seq, err := s.store.LoadHydrationBundle(matchID)
+	if err != nil {
+		return matchHydration{}, false
 	}
 
 	var snapshot contracts.MatchSnapshotResponse
-	if err := s.store.LoadState(matchID, &snapshot); err != nil || snapshot.Match.MatchID == "" {
-		return contracts.MatchState{}, nil, nil, false
+	if err := json.Unmarshal(stateData, &snapshot); err != nil || snapshot.Match.MatchID == "" {
+		return matchHydration{}, false
 	}
 
-	var presence *matchPresenceState
-	if data, err := s.store.LoadPresence(matchID); err == nil && len(data) > 0 {
-		var p matchPresenceState
-		if json.Unmarshal(data, &p) == nil {
-			presence = &p
+	hyd := matchHydration{
+		restored: snapshot.Match,
+		events:   snapshot.Events,
+		seqNum:   seq,
+	}
+	if len(presenceData) > 0 {
+		var presence matchPresenceState
+		if json.Unmarshal(presenceData, &presence) == nil {
+			hyd.presence = &presence
 		}
 	}
-
-	return snapshot.Match, snapshot.Events, presence, true
+	if len(seenData) > 0 {
+		var ids []string
+		if json.Unmarshal(seenData, &ids) == nil {
+			hyd.seenIDs = ids
+		}
+	}
+	return hyd, true
 }
 
-func (s *Service) loadMatchContainerLocked(matchID string, restored contracts.MatchState, events []contracts.ResolvedEvent, presence *matchPresenceState) *matchContainer {
-	// Restore SeenClientMoveIDs from Redis store if available
-	if s.store != nil {
+func (s *Service) loadMatchContainerLocked(matchID string, hyd matchHydration) *matchContainer {
+	if len(hyd.seenIDs) > 0 {
+		hyd.restored.SeenClientMoveIDs = hyd.seenIDs
+	}
+	if hyd.fromArchive && s.store != nil {
+		// The archive row can be older than Redis, and the seq counter and
+		// seen-move IDs have their own refresh cadence, so they may still be
+		// alive even though the state key expired. Carry them over: a reset
+		// seq counter would make every client that remembers a higher seq
+		// drop all later snapshots as stale and freeze its board.
+		if seq, err := s.store.LoadSeq(matchID); err == nil {
+			hyd.seqNum = seq
+		}
 		if data, err := s.store.LoadSeenClientMoveIDs(matchID); err == nil && len(data) > 0 {
 			var ids []string
 			if json.Unmarshal(data, &ids) == nil {
-				restored.SeenClientMoveIDs = ids
+				hyd.restored.SeenClientMoveIDs = ids
 			}
 		}
 	}
+	presence := hyd.presence
 	if presence == nil {
-		presence = newRecoveredMatchPresenceState(&restored)
+		presence = newRecoveredMatchPresenceState(&hyd.restored)
 	}
-	c := newMatchContainer(&restored, append([]contracts.ResolvedEvent{}, events...), presence)
-	if s.store != nil {
-		if seq, err := s.store.LoadSeq(matchID); err == nil {
-			c.seqNum = seq
-		}
-	}
+	c := newMatchContainer(&hyd.restored, append([]contracts.ResolvedEvent{}, hyd.events...), presence)
+	c.seqNum = hyd.seqNum
 	s.matches.Store(matchID, c)
 
 	// This instance did not create the match (CreateMatch stores directly,
@@ -1150,6 +1190,7 @@ func (s *Service) computerWorker() {
 func (s *Service) gcFinishedMatches(now time.Time) {
 	const finishedMatchTTL = 30 * time.Minute
 	const waitingMatchTTL = 30 * time.Minute
+	const activeAbandonTTL = 10 * time.Minute
 
 	// Collect first, delete after Range returns. Range holds the shard's
 	// RLock across the callback, and Delete takes that same shard's write
@@ -1162,6 +1203,13 @@ func (s *Service) gcFinishedMatches(now time.Time) {
 		c.mu.Lock()
 		status := c.state.Status
 		updatedAt := c.state.UpdatedAt
+		// Presence must be read while holding c.mu: heartbeats and
+		// ensurePresenceStateLocked write it from other goroutines, and
+		// evaluating the zombie rule after Unlock was a real data race
+		// (-race) even though it only decided eviction.
+		zombie := status == "active" &&
+			now.Sub(updatedAt) >= activeAbandonTTL &&
+			s.zombiePresenceLocked(c, now)
 		c.mu.Unlock()
 
 		switch status {
@@ -1187,8 +1235,7 @@ func (s *Service) gcFinishedMatches(now time.Time) {
 			// proves nothing about liveness. A connected player's presence
 			// heartbeat keeps the match alive regardless of how stale the
 			// UpdatedAt timestamp is.
-			const activeAbandonTTL = 10 * time.Minute
-			if now.Sub(updatedAt) >= activeAbandonTTL && s.zombiePresenceLocked(c, now) {
+			if zombie {
 				stale = append(stale, matchID)
 				zombies = append(zombies, matchID)
 			}
@@ -1201,12 +1248,30 @@ func (s *Service) gcFinishedMatches(now time.Time) {
 	}
 	for _, matchID := range stale {
 		s.matches.Delete(matchID)
+		s.deleteStoredMatch(matchID)
+	}
+}
+
+// deleteStoredMatch removes a match's Redis keys once its container is
+// evicted. The archive is the durable copy, so an early delete only means a
+// later read hydrates from there; without it the per-match keys outlive the
+// in-memory match (the seq counter in particular must not be reset while a
+// live client still tracks a higher value, so it cannot simply get a short
+// TTL -- see RedisMatchStore.IncSeq).
+func (s *Service) deleteStoredMatch(matchID string) {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.DeleteMatch(matchID); err != nil {
+		s.Log.Error("failed to delete evicted match from store", "matchId", matchID, "error", err)
 	}
 }
 
 // zombiePresenceLocked reports whether an active match looks fully abandoned:
-// neither seat has been heard from within the presence heartbeat window. A
-// container with no presence state at all predates presence tracking (or was
+// neither seat has been heard from within the presence heartbeat window.
+// Caller must hold c.mu -- it reads presence state that heartbeats mutate.
+//
+// A container with no presence state at all predates presence tracking (or was
 // never resumed through a presence-bearing path), so the historical wall-clock
 // zombie rule still applies to it -- that was the regression this branch was
 // built to clean up.

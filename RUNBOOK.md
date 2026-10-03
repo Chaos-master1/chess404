@@ -1,9 +1,9 @@
-# Chess404 Runbook (live checklist, 2026-08-30)
+# Chess404 Runbook (live checklist, 2026-10-03)
 
 ## Railway topology
 
-- **Project:** `chess404` (`ecb0135d-84ac-48b8-b1ff-75191dda030f`, env `production` `5ddaedf0-d11e-4cc7-9f31-3014083c8e65`)
-- **Services (5, 1 replica each):** `web` (`web-production-1caefb.up.railway.app`, Next.js 15), `gateway` (internal, via `web` → `/api/gateway/*`), `match-service` (`wss://match-service-production.up.railway.app`, ws + `/api/matches/*`), `platform-service` (also serves `/api/matchmaking/*`), `Postgres` (`postgres-ssl:18`).
+- **Project:** `chess404` (`979007af-4c6c-4e0d-b660-2b09eea897b0`, env `production` `8d03a03d-3c87-4fc7-a731-e018251867a2`)
+- **Services (5, 1 replica each):** `web` (`web-production-5adfa.up.railway.app`, Next.js 15), `gateway` (internal, via `web` → `/api/gateway/*`), `match-service` (`wss://match-service-production-c56b.up.railway.app`, ws + `/api/matches/*`), `platform-service` (also serves `/api/matchmaking/*`), `Postgres` (`postgres-ssl:18`).
 - **Public domains:** only `web` and `match-service`. Do not generate extra domains unless you intend to expose another service.
 
 ## What to check before you deploy
@@ -38,11 +38,11 @@ Every service should converge on the same `main` commit within a few minutes. Wa
 ## Mandatory live gate after deploy
 
 ```bash
-BASE=https://web-production-1caefb.up.railway.app
+BASE=https://web-production-5adfa.up.railway.app
 curl -sS $BASE/api/gateway/healthz          | jq .      # {"service":"gateway","status":"ok"}
 curl -sS $BASE/api/platform/status          | jq '.service, .archive.totalMatches, .archive.activeMatches'
 curl -sS $BASE/api/matchmaking/status       | jq '.service, .stats.backend, .stats.totalTickets'
-curl -sS https://match-service-production.up.railway.app/healthz | jq .  # match-service direct
+curl -sS https://match-service-production-c56b.up.railway.app/healthz | jq .  # match-service direct
 # CSP/headers
 curl -sS -D - $BASE/ -o /dev/null | grep -i -E 'content-security|strict-transport|x-frame|referrer|permissions'
 # rate limit sanity: 80 proxied calls should be zero 429s (see e2067ac fix)
@@ -58,7 +58,7 @@ On the client, open the live site, create a **vs computer** match (Play → Begi
 Then run the release-critical flows serially against the deployed Railway URL:
 
 ```bash
-BASE=https://web-production-1caefb.up.railway.app
+BASE=https://web-production-5adfa.up.railway.app
 for f in e2e/solo.spec.ts e2e/private-invite.spec.ts e2e/reconnect.spec.ts e2e/history-replay.spec.ts; do
   E2E_BASE_URL="$BASE" timeout 300 pnpm exec playwright test "$f" --reporter=line || exit 1
 done

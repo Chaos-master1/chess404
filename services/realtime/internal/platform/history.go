@@ -198,6 +198,37 @@ func (s *MatchArchiveStore) Flush() error {
 	return nil
 }
 
+// FlushMatch makes exactly one match durable, synchronously, without
+// rewriting the whole overlay. The create/join paths need their row in the
+// store before the response goes out (a claim refresh reads it), but Flush()
+// there wrote every match this instance had ever touched -- one transaction
+// of N upserts, N growing for the process lifetime -- on the critical path of
+// every game start. Backends that upsert rows individually take the
+// single-entry path; the file backend falls back to the full write so a
+// one-row map can never erase the others.
+func (s *MatchArchiveStore) FlushMatch(matchID string) error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.store == nil {
+		return nil
+	}
+	entry, ok := s.entries[matchID]
+	if !ok {
+		return nil
+	}
+	if upserter, ok := s.store.(archiveSingleRowUpserter); ok {
+		if err := upserter.upsertOne(entry, privateEntryPtr(s.private, matchID)); err != nil {
+			return err
+		}
+	} else if err := s.store.persist(s.entries, s.private); err != nil {
+		return err
+	}
+	delete(s.dirty, matchID)
+	return nil
+}
+
 func (s *MatchArchiveStore) Close() error {
 	s.mu.Lock()
 	if s.closed {

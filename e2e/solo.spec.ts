@@ -61,15 +61,19 @@ test.describe('solo vs computer', () => {
     await page.goto('/play');
     await dismissOnboarding(page);
 
-    // Play hub must offer the solo path
+    // Play hub must offer the solo path. The quick-start button doubles as the
+    // identity-readiness gate (disabled until the guest seat exists); the
+    // difficulty grid below it is the path this spec drives.
     const playComputer = page.getByTestId('btn-play-computer');
     await expect(playComputer).toBeVisible({ timeout: 60_000 });
-    await playComputer.click();
+    await expect(playComputer).toBeEnabled({ timeout: 60_000 });
 
-    // ComputerPage: pick the weakest opponent for speed, create match
+    // ComputerPage: pick the weakest opponent for speed. A difficulty button
+    // only selects -- the footer CTA is what creates the match.
     const beginner = page.getByRole('button', { name: /beginner/i }).first();
     await expect(beginner).toBeVisible({ timeout: 30_000 });
     await beginner.click();
+    await page.getByRole('button', { name: /play as .*vs beginner computer/i }).click();
 
     // Should land on a live match with the canvas board rendered
     const board = page.getByTestId('board-root');

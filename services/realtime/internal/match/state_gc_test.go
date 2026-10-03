@@ -140,3 +140,65 @@ func TestGCFinalizeAbandonedDoesNotRaceSubscribers(t *testing.T) {
 		t.Fatalf("expected zombie match finalized as finished, got %q", status)
 	}
 }
+
+// Regression test for the presence data race in gcFinishedMatches.
+//
+// The GC used to evaluate the zombie-presence rule AFTER releasing c.mu,
+// while HeartbeatPresence mutates the same presence timestamps under it.
+// Under -race that was a reported write/read pair; in production a heartbeat
+// landing mid-evaluation could make the GC sample a torn view and treat a
+// live player as gone. The rule now runs inside the locked section; this test
+// hammers both sides and requires that a match whose players are heartbeating
+// is never evicted.
+func TestGCFinishedMatchesDoesNotRacePresenceHeartbeats(t *testing.T) {
+	service := NewService()
+	now := time.Date(2026, 7, 28, 12, 30, 0, 0, time.UTC)
+
+	createTestMatch(service, contracts.CreateMatchRequest{
+		MatchID:      "zombie_presence",
+		WhiteGuestID: "guest-white",
+		BlackGuestID: "guest-black",
+	}, now)
+
+	// Fresh presence for both seats...
+	if err := service.HeartbeatPresence("zombie_presence", testPresence("guest-white"), now); err != nil {
+		t.Fatalf("white heartbeat: %v", err)
+	}
+	if err := service.HeartbeatPresence("zombie_presence", testPresence("guest-black"), now); err != nil {
+		t.Fatalf("black heartbeat: %v", err)
+	}
+	// ...while the board itself is old enough to be a zombie candidate, so
+	// every GC sweep reaches the presence evaluation.
+	c := service.getMatchContainer("zombie_presence")
+	c.mu.Lock()
+	c.state.UpdatedAt = now.Add(-11 * time.Minute)
+	c.mu.Unlock()
+
+	const workers = 4
+	const iterations = 200
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		player := "guest-white"
+		if i%2 == 1 {
+			player = "guest-black"
+		}
+		wg.Add(1)
+		go func(playerID string) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				beat := now.Add(time.Duration(j) * time.Millisecond)
+				_ = service.HeartbeatPresence("zombie_presence", testPresence(playerID), beat)
+			}
+		}(player)
+	}
+
+	// Sweeps run while the heartbeats churn.
+	for sweep := 0; sweep < 50; sweep++ {
+		service.gcFinishedMatches(now.Add(time.Second))
+	}
+	wg.Wait()
+
+	if _, ok := service.matches.Load("zombie_presence"); !ok {
+		t.Fatal("match with live heartbeating players was evicted by the GC")
+	}
+}

@@ -455,3 +455,50 @@ func TestSocketClaimOriginIsAcceptable(t *testing.T) {
 		t.Fatalf("origin %q sent by resolveSocketClaim is not in the allowed set; WS claim auth would be rejected by CSRF", sentOrigin)
 	}
 }
+
+// The WS intent path used a non-blocking send with a silent default, which
+// dropped the result of an intent the server had already applied. These two
+// tests pin the replacement: wait for capacity, and only give up when the
+// handler is done.
+func TestDeliverIntentResultWaitsForCapacityInsteadOfDropping(t *testing.T) {
+	ch := make(chan intentResult, 1)
+	ch <- intentResult{}
+	done := make(chan struct{})
+	returned := make(chan struct{})
+
+	go func() {
+		deliverIntentResult(ch, intentResult{err: fmt.Errorf("boom")}, done)
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+		t.Fatal("send returned while the channel was full -- the intent result was silently dropped")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	<-ch // the writer drains one slot
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("send did not complete after capacity was freed")
+	}
+}
+
+func TestDeliverIntentResultReleasesWhenHandlerEnds(t *testing.T) {
+	ch := make(chan intentResult) // unbuffered: no capacity without a writer
+	done := make(chan struct{})
+	returned := make(chan struct{})
+
+	go func() {
+		deliverIntentResult(ch, intentResult{}, done)
+		close(returned)
+	}()
+
+	close(done)
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("send stayed blocked after the handler ended")
+	}
+}

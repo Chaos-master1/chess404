@@ -19,12 +19,11 @@ test.describe('card play', () => {
 
     await page.goto('/play');
     await dismissOnboarding(page, 'btn-play-computer');
+    // One entry point only: the hub's computer card also renders a difficulty
+    // grid whose buttons START a match on click. Clicking both starts a second
+    // match the server rejects, and racing that against the first navigation
+    // detached the difficulty button mid-click.
     await page.getByTestId('btn-play-computer').click();
-
-    const beginner = page.getByRole('button', { name: /beginner/i }).first();
-    if (await beginner.isVisible({ timeout: 20_000 }).catch(() => false)) {
-      await beginner.click();
-    }
     await expect(page.getByTestId('board-root')).toBeVisible({ timeout: 90_000 });
 
     const anyHandCard = page.locator('[data-testid^="hand-card-"]');

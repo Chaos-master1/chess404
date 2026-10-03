@@ -2,6 +2,7 @@ package match
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -77,9 +78,16 @@ func TestSaveSnapshotAtomicWritesAllComponentsInOnePipeline(t *testing.T) {
 	if err := store.LoadState("pipe_test", &into); err != nil {
 		t.Fatalf("LoadState after atomic save: %v", err)
 	}
-	w, b, err := store.LoadSecrets("pipe_test")
-	if err != nil || w != "hash-w" || b != "hash-b" {
-		t.Fatalf("LoadSecrets after atomic save: %q %q %v", w, b, err)
+	rawSecrets, err := redisServer.Get("test:pipeline:pipe_test:secrets")
+	if err != nil {
+		t.Fatalf("secrets key missing after atomic save: %v", err)
+	}
+	var storedSecrets map[string]string
+	if err := json.Unmarshal([]byte(rawSecrets), &storedSecrets); err != nil {
+		t.Fatalf("decode stored secrets: %v", err)
+	}
+	if storedSecrets["white"] != "hash-w" || storedSecrets["black"] != "hash-b" {
+		t.Fatalf("stored secrets mismatch: %v", storedSecrets)
 	}
 	if got, err := store.LoadHistory("pipe_test"); err != nil || string(got) != string(history) {
 		t.Fatalf("LoadHistory mismatch: %s %v", got, err)
@@ -108,6 +116,95 @@ func TestSaveSnapshotAtomicWritesAllComponentsInOnePipeline(t *testing.T) {
 		if redisServer.Exists(key) {
 			t.Fatalf("expected %s to NOT exist when its component was empty", key)
 		}
+	}
+}
+
+// IncSeq refreshes a backstop TTL on the counter in the same round trip: the
+// key must never reset while any other key of the match can still exist (a
+// reset counter freezes every open board), but it also must not live forever
+// after the match's container is long gone.
+func TestIncSeqSetsBackstopTTL(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	store, err := NewRedisMatchStore("redis://"+redisServer.Addr()+"/0", "test:seqttl")
+	if err != nil {
+		t.Fatalf("new redis match store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	for i := int64(1); i <= 3; i++ {
+		got, err := store.IncSeq("ttl_match")
+		if err != nil || got != i {
+			t.Fatalf("IncSeq %d: got %d, err %v", i, got, err)
+		}
+	}
+	if ttl := redisServer.TTL("test:seqttl:ttl_match:seq"); ttl != seqTTL {
+		t.Fatalf("expected seq key TTL %v, got %v", seqTTL, ttl)
+	}
+	if got, err := store.LoadSeq("ttl_match"); err != nil || got != 3 {
+		t.Fatalf("LoadSeq after IncSeq: got %d, err %v", got, err)
+	}
+}
+
+// Hydration must read state, presence, seen client move IDs and the seq
+// counter in a single pipelined round trip: it runs under the service's
+// global lock, and the old four sequential GETs stalled every match operation
+// on the instance, not just the match being loaded.
+func TestLoadHydrationBundleReadsAllKeysInOnePipeline(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisURL := "redis://" + redisServer.Addr() + "/0"
+
+	store, err := NewRedisMatchStore(redisURL, "test:hydrate")
+	if err != nil {
+		t.Fatalf("new redis match store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	state := []byte(`{"Match":{"matchID":"hydrate_one"},"Events":[{"id":"evt_1"}]}`)
+	presence := []byte(`{"whiteLastSeenAt":"2026-09-30T12:00:00Z"}`)
+	seen := []byte(`["cmid_1"]`)
+	if err := store.SaveSnapshotAtomic("hydrate_one", state, "hash-w", "hash-b", nil, nil, presence, seen); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	if _, err := store.IncSeq("hydrate_one"); err != nil {
+		t.Fatalf("seed seq 1: %v", err)
+	}
+	if _, err := store.IncSeq("hydrate_one"); err != nil {
+		t.Fatalf("seed seq 2: %v", err)
+	}
+
+	capture := &pipelineBatchCapture{}
+	store.client.AddHook(capture)
+
+	gotState, gotPresence, gotSeen, gotSeq, err := store.LoadHydrationBundle("hydrate_one")
+	if err != nil {
+		t.Fatalf("LoadHydrationBundle: %v", err)
+	}
+	if len(capture.batches) != 1 || len(capture.batches[0]) != 4 {
+		t.Fatalf("expected exactly one pipeline batch of 4 GETs, got %v", capture.batches)
+	}
+	for _, name := range capture.batches[0] {
+		if name != "get" {
+			t.Fatalf("expected only GETs in the hydrate batch, got %v", capture.batches[0])
+		}
+	}
+	if string(gotState) != string(state) || string(gotPresence) != string(presence) || string(gotSeen) != string(seen) {
+		t.Fatalf("bundle payload mismatch: state=%s presence=%s seen=%s", gotState, gotPresence, gotSeen)
+	}
+	if gotSeq != 2 {
+		t.Fatalf("expected seq 2 from the bundle, got %d", gotSeq)
+	}
+
+	// A missing match is an all-absent bundle, not an error.
+	capture.batches = nil
+	missingState, missingPresence, missingSeen, missingSeq, err := store.LoadHydrationBundle("hydrate_missing")
+	if err != nil {
+		t.Fatalf("LoadHydrationBundle (missing): %v", err)
+	}
+	if len(capture.batches) != 1 {
+		t.Fatalf("expected one pipeline batch for the missing bundle, got %v", capture.batches)
+	}
+	if missingState != nil || missingPresence != nil || missingSeen != nil || missingSeq != 0 {
+		t.Fatalf("expected an all-absent bundle, got state=%v presence=%v seen=%v seq=%d", missingState, missingPresence, missingSeen, missingSeq)
 	}
 }
 

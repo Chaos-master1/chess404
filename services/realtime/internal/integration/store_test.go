@@ -22,6 +22,7 @@ package integration
 
 import (
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -57,15 +58,22 @@ func TestPostgresAccountStoreRoundTrip(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	suffix := now.Format("20060102150405.000000000")
+	// The handle must satisfy the same rule the server enforces
+	// (^[a-z0-9_-]{3,24}$, normalizeAccountHandle in accounts.go): no dots,
+	// at most 24 characters. The previous "integration_test_<timestamp>"
+	// produced 36 characters containing a dot, so this test failed in handle
+	// validation before it ever touched Postgres. The email is unique per run
+	// for the same reason: a reused integration database must not fail with
+	// ErrAccountEmailTaken.
+	suffix := strconv.FormatInt(now.UnixNano(), 36)
 	guest := platform.GuestProfile{
 		GuestID:     "integration_guest_" + suffix,
 		DisplayName: "Integration Test Guest",
 		CreatedAt:   now,
 		LastSeenAt:  now,
 	}
-	handle := "integration_test_" + suffix
-	session, err := store.RegisterGuestAccount(guest, handle, "integration-test@example.com", "not-a-real-password-123")
+	handle := "itg_" + suffix
+	session, err := store.RegisterGuestAccount(guest, handle, "integration-"+suffix+"@example.com", "not-a-real-password-123")
 	if err != nil {
 		t.Fatalf("RegisterGuestAccount: %v", err)
 	}

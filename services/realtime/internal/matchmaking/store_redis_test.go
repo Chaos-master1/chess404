@@ -7,6 +7,28 @@ import (
 	"github.com/chess404/realtime/internal/contracts"
 )
 
+// The queue hash needs a garbage-collection backstop TTL: without one the key
+// outlived every ticket in it and stayed in Redis forever after the last
+// service was decommissioned.
+func TestRedisQueueStorePersistSetsBackstopTTL(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisURL := "redis://" + redisServer.Addr() + "/0"
+
+	service, err := NewRedisPersistentService(redisURL, "")
+	if err != nil {
+		t.Fatalf("create redis persistent service: %v", err)
+	}
+	defer func() { _ = service.Close() }()
+
+	if _, err := service.Enqueue(QueueRated, contracts.MatchModeOpenCards, "guest_ttl", 1200, "Ttl"); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	if ttl := redisServer.TTL(defaultRedisTicketKey); ttl != ticketsTTL {
+		t.Fatalf("expected queue hash TTL %v, got %v", ticketsTTL, ttl)
+	}
+}
+
 func TestRedisQueueStorePersistsAcrossReload(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	redisURL := "redis://" + redisServer.Addr() + "/0"

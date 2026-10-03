@@ -1,5 +1,27 @@
 package platform
 
+// archiveSingleRowUpserter is implemented by backends whose persist() upserts
+// exactly the rows it receives (SQLite, Postgres). FlushMatch uses it to make
+// one match durable without rewriting the entire overlay; backends without it
+// (the file store, which rewrites its whole file per persist) fall back to
+// the full write, where handing persist a one-row map would have destroyed
+// every other row.
+type archiveSingleRowUpserter interface {
+	// upsertOne writes or updates exactly one row. private is nil when the
+	// store holds no private payload for the match, mirroring persist()'s
+	// behaviour of writing NULL in that case.
+	upsertOne(entry MatchArchiveEntry, private *MatchArchivePrivateEntry) error
+}
+
+// privateEntryPtr returns a pointer to the stored private entry for matchID,
+// or nil when there is none -- the shape both single-row upserts expect.
+func privateEntryPtr(private map[string]MatchArchivePrivateEntry, matchID string) *MatchArchivePrivateEntry {
+	if privateEntry, ok := private[matchID]; ok {
+		return &privateEntry
+	}
+	return nil
+}
+
 type archivePersistence interface {
 	backend() string
 
