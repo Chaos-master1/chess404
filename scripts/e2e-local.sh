@@ -161,7 +161,10 @@ case "${1:-start}" in
     status
     ;;
   stop)
-    for p in $PIDS; do kill "$p" 2>/dev/null; done
+    # PIDS is empty when stop runs as its own invocation, so guard the array
+    # expansion: a bare $PIDS aborts the script under `set -u` before the
+    # pkill fallbacks below ever run.
+    for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
     pkill -f "services/realtime/bin/" 2>/dev/null
     pkill -f "next dev --port 3000" 2>/dev/null
     echo stopped

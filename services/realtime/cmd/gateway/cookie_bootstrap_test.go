@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -147,7 +146,18 @@ func TestBootstrapResumesSessionFromCookiesOnly(t *testing.T) {
 	if white.SessionSecret != "" {
 		t.Fatal("resumed-supplied guest secret must be stripped from the JSON (it went out via Set-Cookie)")
 	}
-	if !strings.Contains(rec.Header().Get("Set-Cookie"), "session_secret_white=sec-w") {
-		t.Fatalf("expected the session cookie to be re-minted, got Set-Cookie: %q", rec.Header().Get("Set-Cookie"))
+	// Cookies are emitted by ranging a map (gateway_mux.go), so the order of
+	// Set-Cookie headers is not stable. Assert by cookie name, not by "the
+	// first Set-Cookie header" -- the old assertion sometimes picked the
+	// black seat's cleared cookie and failed nondeterministically.
+	var whiteSecret *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "session_secret_white" {
+			whiteSecret = cookie
+			break
+		}
+	}
+	if whiteSecret == nil || whiteSecret.Value != "sec-w" {
+		t.Fatalf("expected session_secret_white=sec-w to be re-minted, got Set-Cookie: %q", rec.Header().Values("Set-Cookie"))
 	}
 }

@@ -42,6 +42,17 @@ func main() {
 	if internalServiceToken() == "" {
 		log.Fatalf("FATAL: missing required environment variables: one of MATCH_INTERNAL_SERVICE_TOKEN, PLATFORM_INTERNAL_SERVICE_TOKEN, CHESS404_INTERNAL_SERVICE_TOKEN, INTERNAL_SERVICE_TOKEN")
 	}
+	// Seat secrets are hashed with this key before they reach Redis. Every
+	// instance that could touch the same match must hash with the same key,
+	// so a rolling deploy cannot mix keys: set the variable everywhere or
+	// nowhere. Unset keeps the shipped development default, but say so loudly
+	// because a production deployment quietly using a public default key is
+	// the kind of thing nobody notices until an incident.
+	if key := strings.TrimSpace(os.Getenv("MATCH_SECRET_HASH_KEY")); key != "" {
+		match.SetSecretHashKey(key)
+	} else {
+		log.Println("WARNING: MATCH_SECRET_HASH_KEY is not set; seat-secret hashing is using the built-in development key. Set the same value on every match-service instance before production use.")
+	}
 	archive, err := openArchiveStore()
 	if err != nil {
 		log.Fatalf("failed to initialize archive store: %v", err)
@@ -249,11 +260,13 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			} else {
 				resp = service.CreateMatch(req, httputil.NowUTC())
 			}
-			// Flush the archive row synchronously: the create response hands the
-			// caller a claim token whose platform-side refresh reads the archive.
-			// The background writeLoop could lose that race, turning the first
-			// WS auth into a spurious auth.error.
-			if err := archive.Flush(); err != nil {
+			// Flush this match's archive row synchronously: the create response
+			// hands the caller a claim token whose platform-side refresh reads
+			// the archive. The background writeLoop could lose that race,
+			// turning the first WS auth into a spurious auth.error. FlushMatch
+			// writes only this row -- Flush() would rewrite every match this
+			// instance has ever touched on the game-start critical path.
+			if err := archive.FlushMatch(resp.Match.MatchID); err != nil {
 				log.Printf("archive flush after create failed for match %s: %v", resp.Match.MatchID, err)
 			}
 			httputil.WriteJSON(w, http.StatusCreated, match.RedactSnapshotSecrets(resp))
@@ -308,9 +321,9 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			// ongoing WS broadcast stream already scopes each subscriber's copy.
 			resp.Match = match.FilterSnapshotForColor(resp.Match, resp.SeatColor)
 			// Same create-race contract as POST /api/matches: the new seat's
-			// claim refresh reads the archive, so the row must be durable
+			// claim refresh reads the archive, so this one row must be durable
 			// before the join response can trigger any client action.
-			if err := archive.Flush(); err != nil {
+			if err := archive.FlushMatch(matchID); err != nil {
 				log.Printf("archive flush after join failed for match %s: %v", matchID, err)
 			}
 			httputil.WriteJSON(w, http.StatusOK, resp)
@@ -725,6 +738,10 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 	readDone := make(chan struct{})
 	intentCh := make(chan intentResult, 32)
 	pongCh := make(chan struct{}, 4)
+	// Closed when this handler returns. The reader goroutine can be parked on
+	// a full intentCh send; without this it would block forever after the
+	// writer loop exited (one leaked goroutine per closed connection).
+	handlerDone := make(chan struct{})
 
 	go func() {
 		defer close(readDone)
@@ -780,19 +797,13 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 					if retrySecs < 1 {
 						retrySecs = 1
 					}
-					select {
-					case intentCh <- intentResult{err: fmt.Errorf("rate limited, retry after %ds", retrySecs)}:
-					default:
-					}
+					deliverIntentResult(intentCh, intentResult{err: fmt.Errorf("rate limited, retry after %ds", retrySecs)}, handlerDone)
 					continue
 				}
 			}
 
 			resp, err := service.ApplyIntent(intent, httputil.NowUTC())
-			select {
-			case intentCh <- intentResult{err: err, resp: resp}:
-			default:
-			}
+			deliverIntentResult(intentCh, intentResult{err: err, resp: resp}, handlerDone)
 		}
 	}()
 
@@ -801,6 +812,9 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 		_ = service.MarkDisconnected(matchID, playerID, playerSecret, httputil.NowUTC())
 		_ = conn.Close()
 	}()
+	// Registered after the cleanup defer so it runs FIRST on the way out
+	// (defers run LIFO): unblock the reader before the connection teardown.
+	defer close(handlerDone)
 
 	if err := writeEnvelope(conn, "match.snapshot", initial); err != nil {
 		return
@@ -846,6 +860,19 @@ func handleMatchSocket(w http.ResponseWriter, r *http.Request, service *match.Se
 		case <-readDone:
 			return
 		}
+	}
+}
+
+// deliverIntentResult hands a processed intent back to the socket writer.
+// The old call sites used a non-blocking send with a silent default, which
+// dropped the response for an intent the server had already applied (the
+// move never rendered and the client's expectedSeqNum went stale). Waiting
+// for capacity is bounded by the writer draining the channel; handlerDone
+// releases the send when the connection is gone.
+func deliverIntentResult(ch chan<- intentResult, result intentResult, handlerDone <-chan struct{}) {
+	select {
+	case ch <- result:
+	case <-handlerDone:
 	}
 }
 

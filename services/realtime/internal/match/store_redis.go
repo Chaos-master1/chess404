@@ -13,8 +13,6 @@ import (
 type MatchStore interface {
 	SaveState(matchID string, snapshot any) error
 	LoadState(matchID string, into any) error
-	SaveSecrets(matchID string, white, black string) error
-	LoadSecrets(matchID string) (white, black string, err error)
 	SaveHistory(matchID string, history []byte) error
 	LoadHistory(matchID string) ([]byte, error)
 	SaveEvents(matchID string, events []byte) error
@@ -28,8 +26,13 @@ type MatchStore interface {
 	SaveSnapshotAtomic(matchID string, state []byte, secretWhite, secretBlack string, history, events, presence, seenIDs []byte) error
 	IncSeq(matchID string) (int64, error)
 	LoadSeq(matchID string) (int64, error)
+	// LoadHydrationBundle returns every value a container rebuild reads --
+	// state, presence, seen client move IDs and the seq counter -- in one
+	// round trip. Missing keys are nil / zero, not errors; only transport
+	// failures are. Hydration holds the service's global lock, so N
+	// sequential GETs there stalled every match operation on the instance.
+	LoadHydrationBundle(matchID string) (state, presence, seenIDs []byte, seq int64, err error)
 	DeleteMatch(matchID string) error
-	ListActiveMatchIDs() ([]string, error)
 	SaveSeenClientMoveIDs(matchID string, ids []byte) error
 	LoadSeenClientMoveIDs(matchID string) ([]byte, error)
 	Ping() error
@@ -113,29 +116,6 @@ func (s *RedisMatchStore) LoadState(matchID string, into any) error {
 	return json.Unmarshal(data, into)
 }
 
-func (s *RedisMatchStore) SaveSecrets(matchID string, white, black string) error {
-	secrets := map[string]string{"white": white, "black": black}
-	data, err := json.Marshal(secrets)
-	if err != nil {
-		return fmt.Errorf("marshal secrets: %w", err)
-	}
-	ctx := context.Background()
-	return s.client.Set(ctx, s.secretsKey(matchID), data, matchTTL).Err()
-}
-
-func (s *RedisMatchStore) LoadSecrets(matchID string) (white, black string, err error) {
-	ctx := context.Background()
-	data, err := s.client.Get(ctx, s.secretsKey(matchID)).Bytes()
-	if err != nil {
-		return "", "", err
-	}
-	var secrets map[string]string
-	if err := json.Unmarshal(data, &secrets); err != nil {
-		return "", "", err
-	}
-	return secrets["white"], secrets["black"], nil
-}
-
 func (s *RedisMatchStore) SaveHistory(matchID string, history []byte) error {
 	ctx := context.Background()
 	return s.client.Set(ctx, s.historyKey(matchID), history, matchTTL).Err()
@@ -205,9 +185,27 @@ func (s *RedisMatchStore) LoadPresence(matchID string) ([]byte, error) {
 	return s.client.Get(ctx, s.presenceKey(matchID)).Bytes()
 }
 
+// seqTTL is a backstop for the sequence counter, not a liveness bound: it is
+// deliberately longer than any other key's TTL (matchTTL is 1h). A short TTL
+// here would let the counter reset while match state still exists, and since
+// clients drop snapshots whose seq is lower than one they have already seen,
+// a reset counter would freeze every open board. Seven days only stops
+// counters for matches whose container was never evicted (crashed process,
+// abandoned Redis) from accumulating forever.
+const seqTTL = 7 * 24 * time.Hour
+
+// IncSeq increments the match's shared sequence counter and refreshes its TTL
+// in one pipelined round trip.
 func (s *RedisMatchStore) IncSeq(matchID string) (int64, error) {
 	ctx := context.Background()
-	return s.client.Incr(ctx, s.seqKey(matchID)).Result()
+	key := s.seqKey(matchID)
+	pipe := s.client.Pipeline()
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, seqTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, err
+	}
+	return incr.Val(), nil
 }
 
 func (s *RedisMatchStore) LoadSeq(matchID string) (int64, error) {
@@ -220,6 +218,41 @@ func (s *RedisMatchStore) LoadSeq(matchID string) (int64, error) {
 		return 0, err
 	}
 	return strconv.ParseInt(val, 10, 64)
+}
+
+// LoadHydrationBundle fetches the four keys a container rebuild needs in one
+// pipelined round trip. A missing key is returned as nil / zero rather than
+// an error; only a transport-level failure fails the call.
+func (s *RedisMatchStore) LoadHydrationBundle(matchID string) (state, presence, seenIDs []byte, seq int64, err error) {
+	ctx := context.Background()
+	pipe := s.client.Pipeline()
+	stateCmd := pipe.Get(ctx, s.stateKey(matchID))
+	presenceCmd := pipe.Get(ctx, s.presenceKey(matchID))
+	seenCmd := pipe.Get(ctx, s.seenIDsKey(matchID))
+	seqCmd := pipe.Get(ctx, s.seqKey(matchID))
+	// Exec surfaces the first command's error; a missing key arrives as
+	// redis.Nil and is normal here, so only other errors are failures.
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, nil, nil, 0, err
+	}
+	state = bytesOrNil(stateCmd)
+	presence = bytesOrNil(presenceCmd)
+	seenIDs = bytesOrNil(seenCmd)
+	if raw, err := seqCmd.Result(); err == nil {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+			seq = parsed
+		}
+	}
+	return state, presence, seenIDs, seq, nil
+}
+
+// bytesOrNil treats a missing key (redis.Nil) as absent data, not an error.
+func bytesOrNil(cmd *redis.StringCmd) []byte {
+	data, err := cmd.Bytes()
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 func (s *RedisMatchStore) SaveSeenClientMoveIDs(matchID string, ids []byte) error {
@@ -244,43 +277,6 @@ func (s *RedisMatchStore) DeleteMatch(matchID string) error {
 	pipe.Del(ctx, s.seenIDsKey(matchID))
 	_, err := pipe.Exec(ctx)
 	return err
-}
-
-func (s *RedisMatchStore) ListActiveMatchIDs() ([]string, error) {
-	ctx := context.Background()
-	pattern := s.keyPrefix + ":*:state"
-	var matchIDs []string
-	var cursor uint64
-	for {
-		keys, nextCursor, err := s.client.Scan(ctx, cursor, pattern, 100).Result()
-		if err != nil {
-			return nil, err
-		}
-		for _, key := range keys {
-			matchID := extractMatchID(key, s.keyPrefix)
-			if matchID != "" {
-				matchIDs = append(matchIDs, matchID)
-			}
-		}
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-	return matchIDs, nil
-}
-
-func extractMatchID(key, prefix string) string {
-	prefixWithColon := prefix + ":"
-	if len(key) < len(prefixWithColon) {
-		return ""
-	}
-	rest := key[len(prefixWithColon):]
-	idx := 0
-	for idx < len(rest) && rest[idx] != ':' {
-		idx++
-	}
-	return rest[:idx]
 }
 
 func (s *RedisMatchStore) Ping() error {

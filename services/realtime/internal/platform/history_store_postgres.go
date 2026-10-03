@@ -247,6 +247,57 @@ func (s *postgresArchiveStore) queryStats() (MatchArchiveStats, error) {
 	return stats, nil
 }
 
+const postgresArchiveUpsertSQL = `
+	insert into archives(
+		match_id,
+		status,
+		queue,
+		white_guest_id,
+		black_guest_id,
+		updated_at,
+		entry_json,
+		private_json
+	)
+	values($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+	on conflict (match_id) do update set
+		status = excluded.status,
+		queue = excluded.queue,
+		white_guest_id = excluded.white_guest_id,
+		black_guest_id = excluded.black_guest_id,
+		updated_at = excluded.updated_at,
+		entry_json = excluded.entry_json,
+		private_json = excluded.private_json
+`
+
+// postgresArchiveUpsertArgs builds the arguments shared by the batch persist
+// and the single-row upsert so the two write paths cannot drift apart.
+func postgresArchiveUpsertArgs(matchID string, entry MatchArchiveEntry, private *MatchArchivePrivateEntry) ([]any, error) {
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	var privateJSON any
+	if private != nil {
+		encodedPrivate, err := json.Marshal(*private)
+		if err != nil {
+			return nil, err
+		}
+		privateJSON = encodedPrivate
+	}
+
+	return []any{
+		matchID,
+		entry.Status,
+		entry.Queue,
+		nullIfEmpty(entry.WhiteGuestID),
+		nullIfEmpty(entry.BlackGuestID),
+		entry.UpdatedAt,
+		entryJSON,
+		privateJSON,
+	}, nil
+}
+
 func (s *postgresArchiveStore) persist(entries map[string]MatchArchiveEntry, private map[string]MatchArchivePrivateEntry) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -256,62 +307,35 @@ func (s *postgresArchiveStore) persist(entries map[string]MatchArchiveEntry, pri
 		_ = tx.Rollback()
 	}()
 
-	upsertStmt, err := tx.Prepare(`
-		insert into archives(
-			match_id,
-			status,
-			queue,
-			white_guest_id,
-			black_guest_id,
-			updated_at,
-			entry_json,
-			private_json
-		)
-		values($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
-		on conflict (match_id) do update set
-			status = excluded.status,
-			queue = excluded.queue,
-			white_guest_id = excluded.white_guest_id,
-			black_guest_id = excluded.black_guest_id,
-			updated_at = excluded.updated_at,
-			entry_json = excluded.entry_json,
-			private_json = excluded.private_json
-	`)
+	upsertStmt, err := tx.Prepare(postgresArchiveUpsertSQL)
 	if err != nil {
 		return err
 	}
 	defer upsertStmt.Close()
 
 	for matchID, entry := range entries {
-		entryJSON, err := json.Marshal(entry)
+		args, err := postgresArchiveUpsertArgs(matchID, entry, privateEntryPtr(private, matchID))
 		if err != nil {
 			return err
 		}
-
-		var privateJSON any
-		if privateEntry, ok := private[matchID]; ok {
-			encodedPrivate, err := json.Marshal(privateEntry)
-			if err != nil {
-				return err
-			}
-			privateJSON = encodedPrivate
-		}
-
-		if _, err := upsertStmt.Exec(
-			matchID,
-			entry.Status,
-			entry.Queue,
-			nullIfEmpty(entry.WhiteGuestID),
-			nullIfEmpty(entry.BlackGuestID),
-			entry.UpdatedAt,
-			entryJSON,
-			privateJSON,
-		); err != nil {
+		if _, err := upsertStmt.Exec(args...); err != nil {
 			return err
 		}
 	}
 
 	return tx.Commit()
+}
+
+// upsertOne writes exactly one row in a single statement, making a freshly
+// created match durable on the create/join critical path without rewriting
+// every other row in the overlay.
+func (s *postgresArchiveStore) upsertOne(entry MatchArchiveEntry, private *MatchArchivePrivateEntry) error {
+	args, err := postgresArchiveUpsertArgs(entry.MatchID, entry, private)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(postgresArchiveUpsertSQL, args...)
+	return err
 }
 
 func (s *postgresArchiveStore) delete(matchID string) error {

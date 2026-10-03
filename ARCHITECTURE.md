@@ -39,19 +39,19 @@ chess404/
 ```
 * `platform-service` in production serves both `platform` and `matchmaking` logic to stay within Railway free-tier service limits (5 services: web, gateway, match-service, platform-service, Postgres). The `matchmaking-service` binary exists for future scale-out but is not a separate Railway service.
 
-Live Railway topology (2026-08-30): `web` (public), `gateway` (internal, via web `/api/gateway/*`), `match-service` (`wss://match-service-production.up.railway.app`), `platform-service` (also serves `/api/matchmaking/*` and `/api/platform/*`), `Postgres`.
+Live Railway topology (2026-10-03): `web` (`https://web-production-5adfa.up.railway.app`, public), `gateway` (internal, via web `/api/gateway/*`), `match-service` (`wss://match-service-production-c56b.up.railway.app`), `platform-service` (also serves `/api/matchmaking/*` and `/api/platform/*`), `Postgres`.
 
-## Service Architecture (production, 2026-08-30)
+## Service Architecture (production, 2026-10-03)
 
 ```
 Browser ──► web (Next.js, public) ──► gateway (internal, via web /api/gateway/*)
-                                    ├── match-service (WebSocket wss://match-service-production.up.railway.app + HTTP internal)
+                                    ├── match-service (WebSocket wss://match-service-production-c56b.up.railway.app + HTTP internal)
                                     └── platform-service ──┬── /api/platform/* (accounts, guests, history, Postgres)
                                                             └── /api/matchmaking/* (queue tickets, Redis) [* merged ]
 ```
 
-- **Gateway**: Proxied through web (`/api/gateway/*`). Auth, CORS, CSRF, rate limiting, service token injection. Single logical entry point; not a public domain (traffic enters via `web-production-1caefb.up.railway.app`).
-- **Match Service**: Hosts live games via WebSocket (`/api/matches/{id}/ws`). Server-authoritative state machine. 37 card effects resolved server-side. Custom chess engine for computer opponent. Public WS at `wss://match-service-production.up.railway.app`.
+- **Gateway**: Proxied through web (`/api/gateway/*`). Auth, CORS, CSRF, rate limiting, service token injection. Single logical entry point; not a public domain (traffic enters via `web-production-5adfa.up.railway.app`).
+- **Match Service**: Hosts live games via WebSocket (`/api/matches/{id}/ws`). Server-authoritative state machine. 37 card effects resolved server-side. Custom chess engine for computer opponent. Public WS at `wss://match-service-production-c56b.up.railway.app`.
 - **Platform Service**: Guest accounts, registered accounts, match history (Postgres archive, 97 matches live), rankings, friendships, notifications, moderation. In production also serves matchmaking queue endpoints (`/api/matchmaking/*`) via shared Redis.
 - **Matchmaking Service**: Queue ticketing, Elo-based matching, direct challenges. Binary exists in `services/realtime/cmd/matchmaking-service/` but is **merged into `platform-service` in production** (free-tier service cap).
 - **Replay Worker**: Async archival of finished matches. Code exists (`services/realtime/cmd/replay-worker/`), not deployed as a separate service — archival is done inline by `platform-service`.
@@ -73,7 +73,7 @@ Card lifecycle: pool → hand (1 per round) → play → resolve. Server validat
 
 ## Data Flow
 
-1. Client sends intent via WebSocket (`wss://match-service-production.up.railway.app/api/matches/{id}/ws`) or HTTP (`POST /api/gateway/matches/{id}/intents` → gateway → match-service)
+1. Client sends intent via WebSocket (`wss://match-service-production-c56b.up.railway.app/api/matches/{id}/ws`) or HTTP (`POST /api/gateway/matches/{id}/intents` → gateway → match-service)
 2. Gateway (or direct WS) authenticates via `X-Chess404-Service-Token` + per-seat `X-Player-ID`/`X-Player-Secret` or claim token; CSRF validated via `Origin`/`X-Forwarded-*`
 3. Match-service validates intent against game state (`match.Service.ApplyIntent`, seqNum staleness check)
 4. State machine applies move/card/effect (37 mechanics, `match` 71.9% cover, `engine/search` 90.2% cover)
@@ -81,7 +81,7 @@ Card lifecycle: pool → hand (1 per round) → play → resolve. Server validat
 6. State dual-written to memory + Redis (if configured) + Postgres archive via `finalizingArchiveStore`
 7. Archive: `platform.MatchArchiveStore` dual-writes to memory + Postgres (`MATCH_ARCHIVE_POSTGRES_URL`), with lazy DB queries for Postgres backend (`useQueries=true`). No NATS in production — Redis Pub/Sub only.
 
-## Infrastructure (2026-08-30 verified)
+## Infrastructure (2026-10-03 verified)
 
 - **State storage**: In-memory + Redis (`MATCH_REDIS_URL`, `MatchStore` + `Broadcaster`) with Postgres archive (`MATCH_ARCHIVE_POSTGRES_URL`, `MatchArchiveStore`). `platform-service` and `match-service` share Postgres + Redis.
 - **Cross-instance**: Redis Pub/Sub for WebSocket broadcast (if `MATCH_REDIS_URL` set). No NATS in production.

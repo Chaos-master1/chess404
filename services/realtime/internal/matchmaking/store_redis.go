@@ -10,6 +10,14 @@ import (
 
 const defaultRedisTicketKey = "chess404:matchmaking:tickets"
 
+// ticketsTTL is a garbage-collection backstop for the whole queue hash, not a
+// liveness bound: every persist refreshes it, so a running service never
+// loses a ticket to it. It only removes the hash once the queue has seen no
+// write for a week -- comfortably longer than any ticket's lifetime (queued
+// 10m, matched 15m, pairing 1m, cancelled 30s) -- so an abandoned deployment
+// cannot leave an immortal key behind.
+const ticketsTTL = 7 * 24 * time.Hour
+
 type redisTicketStore struct {
 	client *redis.Client
 	key    string
@@ -88,6 +96,9 @@ func (s *redisTicketStore) persist(tickets map[string]Ticket) error {
 	for id := range stale {
 		pipe.HDel(ctx, s.key, id)
 	}
+
+	// Refresh the hash's TTL in the same round trip as the writes above.
+	pipe.Expire(ctx, s.key, ticketsTTL)
 
 	_, err = pipe.Exec(ctx)
 	return err

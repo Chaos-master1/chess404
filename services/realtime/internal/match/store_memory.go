@@ -60,23 +60,6 @@ func (s *MemoryMatchStore) LoadState(matchID string, into any) error {
 	return json.Unmarshal(data, into)
 }
 
-func (s *MemoryMatchStore) SaveSecrets(matchID string, white, black string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.secrets[matchID] = map[string]string{"white": white, "black": black}
-	return nil
-}
-
-func (s *MemoryMatchStore) LoadSecrets(matchID string) (white, black string, err error) {
-	s.mu.RLock()
-	secrets, ok := s.secrets[matchID]
-	s.mu.RUnlock()
-	if !ok {
-		return "", "", fmt.Errorf("secrets not found")
-	}
-	return secrets["white"], secrets["black"], nil
-}
-
 func (s *MemoryMatchStore) SaveHistory(matchID string, history []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -168,6 +151,17 @@ func (s *MemoryMatchStore) LoadSeq(matchID string) (int64, error) {
 	return atomic.LoadInt64(ptr), nil
 }
 
+// LoadHydrationBundle mirrors the Redis store's batched hydrate read: one
+// lock acquisition for all four values, absent entries returned as nil / zero.
+func (s *MemoryMatchStore) LoadHydrationBundle(matchID string) (state, presence, seenIDs []byte, seq int64, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if ptr, ok := s.seqs[matchID]; ok {
+		seq = atomic.LoadInt64(ptr)
+	}
+	return s.states[matchID], s.presence[matchID], s.seenIDs[matchID], seq, nil
+}
+
 func (s *MemoryMatchStore) SaveSeenClientMoveIDs(matchID string, ids []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -196,16 +190,6 @@ func (s *MemoryMatchStore) DeleteMatch(matchID string) error {
 	delete(s.seqs, matchID)
 	delete(s.seenIDs, matchID)
 	return nil
-}
-
-func (s *MemoryMatchStore) ListActiveMatchIDs() ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ids := make([]string, 0, len(s.states))
-	for id := range s.states {
-		ids = append(ids, id)
-	}
-	return ids, nil
 }
 
 func (s *MemoryMatchStore) Ping() error { return nil }

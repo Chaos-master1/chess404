@@ -108,6 +108,118 @@ func TestMatchArchiveStorePreservesPlayerMetadata(t *testing.T) {
 	}
 }
 
+// FlushMatch is the create/join critical path: it must make ONE match durable
+// without rewriting the rest of the overlay. The file backend rewrites its
+// whole file per persist and therefore does not implement the single-row
+// fast path -- this test pins the documented fallback, where persist still
+// receives every entry so a one-row flush can never erase siblings.
+func TestMatchArchiveStoreFlushMatchPreservesOtherRows(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "match-archive.json")
+	store := newTestArchiveStore(t, storePath)
+
+	now := time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC)
+	for i, id := range []string{"flush_a", "flush_b", "flush_c"} {
+		if err := store.Upsert(contracts.MatchSnapshotResponse{Match: contracts.MatchState{
+			MatchID:      id,
+			RulesVersion: "v1-alpha-foundation",
+			Status:       "active",
+			CreatedAt:    now,
+			UpdatedAt:    now.Add(time.Duration(i) * time.Minute),
+		}}); err != nil {
+			t.Fatalf("expected upsert of %s to succeed, got %v", id, err)
+		}
+	}
+	if err := store.Flush(); err != nil {
+		t.Fatalf("expected initial flush to succeed, got %v", err)
+	}
+
+	// Re-upsert one row as finished, then flush ONLY that row.
+	if err := store.Upsert(contracts.MatchSnapshotResponse{Match: contracts.MatchState{
+		MatchID:      "flush_b",
+		RulesVersion: "v1-alpha-foundation",
+		Status:       "finished",
+		Winner:       "white",
+		CreatedAt:    now,
+		UpdatedAt:    now.Add(10 * time.Minute),
+	}}); err != nil {
+		t.Fatalf("expected dirty upsert to succeed, got %v", err)
+	}
+	if err := store.FlushMatch("flush_b"); err != nil {
+		t.Fatalf("expected FlushMatch to succeed, got %v", err)
+	}
+	// An unknown id must be a silent no-op, not a full rewrite or an error.
+	if err := store.FlushMatch("flush_missing"); err != nil {
+		t.Fatalf("expected FlushMatch of an unknown match to be a no-op, got %v", err)
+	}
+
+	reloaded := newTestArchiveStore(t, storePath)
+	for _, id := range []string{"flush_a", "flush_b", "flush_c"} {
+		if _, ok := reloaded.Get(id); !ok {
+			t.Fatalf("expected %s to survive a sibling's FlushMatch", id)
+		}
+	}
+	entry, _ := reloaded.Get("flush_b")
+	if entry.Status != "finished" || entry.Winner != "white" {
+		t.Fatalf("expected the flushed row to carry its new state, got %#v", entry)
+	}
+}
+
+// singleRowFakeStore is a backend whose persist() upserts only what it is
+// given, like SQLite and Postgres. It records which write path FlushMatch took.
+type singleRowFakeStore struct {
+	*freshnessFakeStore
+	upserted  []string
+	persisted int
+}
+
+func (f *singleRowFakeStore) upsertOne(entry MatchArchiveEntry, _ *MatchArchivePrivateEntry) error {
+	f.upserted = append(f.upserted, entry.MatchID)
+	return nil
+}
+
+func (f *singleRowFakeStore) persist(map[string]MatchArchiveEntry, map[string]MatchArchivePrivateEntry) error {
+	f.persisted++
+	return nil
+}
+
+// FlushMatch must prefer the backend's single-row upsert when it has one:
+// the whole point is that game creation stops rewriting the process-lifetime
+// overlay. Backends without it keep the full-write fallback.
+func TestFlushMatchPrefersSingleRowUpserter(t *testing.T) {
+	fake := &singleRowFakeStore{freshnessFakeStore: &freshnessFakeStore{
+		rows:     map[string]MatchArchiveEntry{},
+		privates: map[string]MatchArchivePrivateEntry{},
+	}}
+	store, err := newMatchArchiveStore(fake)
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Seed the overlay directly: Upsert would poke the background write loop
+	// and make the persist counter nondeterministic.
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	store.mu.Lock()
+	store.entries["flush_single"] = MatchArchiveEntry{
+		MatchID:   "flush_single",
+		Status:    "active",
+		UpdatedAt: now,
+	}
+	store.dirty["flush_single"] = struct{}{}
+	store.mu.Unlock()
+
+	if err := store.FlushMatch("flush_single"); err != nil {
+		t.Fatalf("expected FlushMatch to succeed, got %v", err)
+	}
+	if len(fake.upserted) != 1 || fake.upserted[0] != "flush_single" {
+		t.Fatalf("expected exactly one single-row upsert for flush_single, got %v", fake.upserted)
+	}
+	if fake.persisted != 0 {
+		t.Fatalf("expected FlushMatch to skip the full persist, got %d calls", fake.persisted)
+	}
+}
+
 func TestMatchArchiveStoreListByGuest(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "match-archive.json")

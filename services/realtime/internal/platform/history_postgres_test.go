@@ -205,6 +205,71 @@ type freshnessFakeStore struct {
 	privates map[string]MatchArchivePrivateEntry
 }
 
+// FlushMatch on the create/join critical path must go through the single-row
+// upsert: one Exec, no transaction rewriting every overlay row, and it must
+// return only after that write was attempted.
+func TestPostgresArchiveStoreFlushMatchWritesSingleRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("expected sqlmock database, got %v", err)
+	}
+	mock.ExpectExec(regexp.QuoteMeta(postgresArchiveInitSQL)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	archiveStore, err := NewPostgresArchiveStoreWithDB(db)
+	if err != nil {
+		t.Fatalf("expected postgres archive store to initialize, got %v", err)
+	}
+	matchStore, err := newMatchArchiveStore(archiveStore)
+	if err != nil {
+		t.Fatalf("expected wrapped archive store to initialize, got %v", err)
+	}
+	defer func() { _ = matchStore.Close() }()
+
+	now := time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC)
+	// Seed the overlay directly: Upsert signals the background write loop,
+	// whose persist would race this test's ordered sqlmock expectations.
+	matchStore.mu.Lock()
+	matchStore.entries["pg_flush_match"] = MatchArchiveEntry{
+		MatchID:      "pg_flush_match",
+		Status:       "active",
+		WhiteGuestID: "guest_white",
+		BlackGuestID: "guest_black",
+		UpdatedAt:    now,
+	}
+	matchStore.private["pg_flush_match"] = MatchArchivePrivateEntry{
+		WhitePlayerSecret: "white-secret",
+		BlackPlayerSecret: "black-secret",
+	}
+	matchStore.mu.Unlock()
+
+	// An unknown id is a silent no-op: no error, no write.
+	if err := matchStore.FlushMatch("pg_flush_missing"); err != nil {
+		t.Fatalf("expected FlushMatch of an unknown match to be a no-op, got %v", err)
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(postgresArchiveUpsertSQL)).
+		WithArgs(
+			"pg_flush_match",
+			"active",
+			"", // queue is written as an empty string, exactly like the batch persist
+			"guest_white",
+			"guest_black",
+			now,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := matchStore.FlushMatch("pg_flush_match"); err != nil {
+		t.Fatalf("expected FlushMatch to succeed, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet postgres FlushMatch expectations: %v", err)
+	}
+}
+
 func (f *freshnessFakeStore) backend() string { return "postgres" }
 func (f *freshnessFakeStore) load() (map[string]MatchArchiveEntry, map[string]MatchArchivePrivateEntry, error) {
 	return map[string]MatchArchiveEntry{}, map[string]MatchArchivePrivateEntry{}, nil

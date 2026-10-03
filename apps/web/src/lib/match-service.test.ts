@@ -74,7 +74,10 @@ function installFetch(options: {
   return { reads };
 }
 
-function collect(matchId: string) {
+function collect(
+  matchId: string,
+  identity?: { playerId?: string; playerSecret?: string; playerClaimToken?: string } | null,
+) {
   const statuses: MatchStreamStatus[] = [];
   const seqNums: number[] = [];
   const stream = connectToMatchStream(matchId, {
@@ -82,7 +85,7 @@ function collect(matchId: string) {
       if (snapshot.seqNum) seqNums.push(snapshot.seqNum);
     },
     onStatusChange: status => statuses.push(status),
-  });
+  }, identity);
   return { stream, statuses, seqNums };
 }
 
@@ -98,7 +101,9 @@ describe('connectToMatchStream terminal verdicts', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    configureMatchServiceRuntime({ httpBaseUrl: '/api/realtime' });
+    // Explicitly clear the WS endpoint so a test that configured one cannot
+    // leak into the polling-only tests that follow.
+    configureMatchServiceRuntime({ httpBaseUrl: '/api/realtime', wsBaseUrl: '' });
   });
 
   it('stops asking about a room the server refuses and reports it as unreadable', async () => {
@@ -226,6 +231,93 @@ describe('connectToMatchStream terminal verdicts', () => {
     expect(statuses).toContain('connected');
     expect(statuses).not.toContain('unreadable');
     expect(reads).toHaveLength(1);
+    stream.disconnect();
+  });
+
+  it('keeps polling a room with no player identity even when a websocket endpoint exists', async () => {
+    // Regression: the spectator branch set isWsConnected = true and then
+    // called schedulePoll(0), which returns immediately while that flag is
+    // set -- so with a WS endpoint configured, anonymous viewers never
+    // started the stream's poll at all (updates only arrived via the hook's
+    // 15s reconcile instead of the intended ~1s poll).
+    configureMatchServiceRuntime({ httpBaseUrl: '/api/realtime', wsBaseUrl: 'ws://spectator.test' });
+    const { reads } = installFetch({
+      fallback: matchId => ({ snapshot: liveSnapshot(matchId, ROOM_TAIL_SEQ) }),
+    });
+    const { stream, statuses, seqNums } = collect('room_watch');
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(reads.filter(id => id === 'room_watch').length).toBeGreaterThanOrEqual(3);
+    expect(seqNums.length).toBeGreaterThanOrEqual(3);
+    expect(statuses).toContain('connected');
+    expect(statuses).not.toContain('unreadable');
+    stream.disconnect();
+  });
+
+  it('goes from a websocket auth refusal to the poll verdict once reconnects are exhausted', async () => {
+    // A seat the server refuses to authenticate must not sit in a reconnect
+    // loop forever: after the attempts are spent the stream falls back to
+    // HTTP polling, and the poll's own budget ends in the room's terminal
+    // verdict (which the board renders as "could not be loaded").
+    configureMatchServiceRuntime({ httpBaseUrl: '/api/realtime', wsBaseUrl: 'ws://auth-error.test' });
+
+    class RefusedSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = RefusedSocket.CONNECTING;
+      private listeners = new Map<string, ((event: unknown) => void)[]>();
+      constructor(public url: string) {
+        setTimeout(() => {
+          if (this.readyState !== RefusedSocket.CONNECTING) return;
+          this.readyState = RefusedSocket.OPEN;
+          this.emit('open', {});
+          this.emit('message', { data: JSON.stringify({ type: 'auth.error' }) });
+        }, 0);
+      }
+      addEventListener(type: string, listener: (event: unknown) => void) {
+        const list = this.listeners.get(type) ?? [];
+        list.push(listener);
+        this.listeners.set(type, list);
+      }
+      send() {}
+      close() {
+        if (this.readyState === RefusedSocket.CLOSED) return;
+        this.readyState = RefusedSocket.CLOSED;
+        this.emit('close', {});
+      }
+      private emit(type: string, event: unknown) {
+        for (const listener of this.listeners.get(type) ?? []) listener(event);
+      }
+    }
+    vi.stubGlobal('WebSocket', RefusedSocket);
+
+    const reads: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/token')) {
+          return new Response(JSON.stringify({ token: 'tok' }), { status: 200 });
+        }
+        reads.push(url);
+        return new Response(JSON.stringify({ error: 'match is not public' }), { status: 404 });
+      }),
+    );
+
+    const { stream, statuses, seqNums } = collect('room_refused', {
+      playerId: 'p1',
+      playerSecret: 's1',
+    });
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(statuses).toContain('disconnected');
+    expect(statuses[statuses.length - 1]).toBe('unreadable');
+    expect(seqNums).toEqual([]);
+    expect(reads.length).toBe(10);
     stream.disconnect();
   });
 });

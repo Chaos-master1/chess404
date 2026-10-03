@@ -407,8 +407,8 @@ without the owner's explicit approval.
 
 Production topology (verified directly against Railway, not from docs):
 
-- URL: `https://web-production-1caefb.up.railway.app` (the older `web-production-ddc27` host is dead)
-- Railway project `chess404` (`ecb0135d-84ac-48b8-b1ff-75191dda030f`), **5 services**: `web`, `gateway`, `match-service`, `platform-service`, `Postgres`. There is no separate `matchmaking-service` (it runs inside the platform-service container on port 8084) and no `replay-worker`.
+- URL: `https://web-production-5adfa.up.railway.app`; public match-service WS at `wss://match-service-production-c56b.up.railway.app`.
+- Railway project `chess404` (`979007af-4c6c-4e0d-b660-2b09eea897b0`, env `production` `8d03a03d-3c87-4fc7-a731-e018251867a2`), **5 services**: `web`, `gateway`, `match-service`, `platform-service`, `Postgres`. There is no separate `matchmaking-service` (it runs inside the platform-service container on port 8084) and no `replay-worker`.
 - Persistence is **split**: all platform stores (accounts, guests, friendships, moderation, notifications, match archive) are `postgres`; match-claims and matchmaking tickets are Upstash `redis`.
 - Only `web` and `match-service` have public domains. `gateway` and `platform-service` are internal-only and reachable solely through the web app's `/api/*` proxy routes.
 - `GATEWAY_INTERNAL_URL`, `MATCH_SERVICE_INTERNAL_URL` and `PLATFORM_SERVICE_INTERNAL_URL` are all set to a value ending in a bare `:` with no port. This is harmless today only because `app/api/_lib/internal-service.ts` detects the missing port and falls back to a hardcoded `:8080` — which happens to be correct. Fix the variables rather than relying on that.
