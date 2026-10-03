@@ -349,11 +349,22 @@ export function isMatchGone(matchId: string): boolean {
   return goneMatchIds.has(matchId?.trim() ?? '');
 }
 
+// The stream's honest view of a room. 'unreadable' is the terminal verdict:
+// the server refused every read of this room for this browser (404/410 past
+// the retry budget), so no consumer should ask again until a deliberate retry.
+// 'connected' only ever means snapshots are actually arriving.
+export type MatchStreamStatus =
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'disconnected'
+  | 'unreadable';
+
 export function connectToMatchStream(
   matchId: string,
   handlers: {
     onSnapshot: (snapshot: MatchSnapshotMessage) => void;
-    onStatusChange?: (status: 'connecting' | 'connected' | 'reconnecting' | 'disconnected') => void;
+    onStatusChange?: (status: MatchStreamStatus) => void;
     onError?: (error: Event) => void;
   },
   playerIdentity?: { playerId?: string; playerSecret?: string; playerClaimToken?: string } | null
@@ -371,12 +382,24 @@ export function connectToMatchStream(
   // stop polling) from "we could never see it at all" (auth/creds problem:
   // keep retrying, a reconnect may fix it).
   let sawLiveSnapshot = false;
-  // Terminal-state latch: once a snapshot with status "finished" has been
-  // delivered, the stream is done. The server stops broadcasting after the
-  // final state, so without this latch every reconnect attempt, poll tick
-  // and watchdog fired forever -- the post-game "Reconnecting…" banner +
-  // ping loop on finished matches.
-  let finished = false;
+  // Consecutive 404/410 responses, reset by any success or any other error.
+  // sawLiveSnapshot alone is not a sufficient stop condition: a client that
+  // never receives a single good snapshot (a page load that lands straight on
+  // an unreadable room) would otherwise poll forever. Observed live: a
+  // finished match answered 404 from web on every attempt and the client kept
+  // retrying for 34 minutes after the game ended. A budget keeps the "keep
+  // retrying, a reconnect may fix it" intent for transient failures while
+  // guaranteeing the loop terminates.
+  const maxGoneResponses = 10;
+  let goneResponses = 0;
+  // Terminal-state latch: once the room has reached a final state the stream
+  // is done, and every scheduled task below checks this. Two ways in: a
+  // delivered snapshot with status "finished" (the server stops broadcasting
+  // after the final state, so without the latch every reconnect attempt, poll
+  // tick and watchdog fired forever -- the post-game "Reconnecting…" banner +
+  // ping loop on finished matches), or this room proving unreadable to this
+  // browser (giveUpUnreadable below).
+  let stopped = false;
   // Zombie-socket watchdog: the server pings every 20s (browser answers
   // automatically) and the 1s tick broadcasts snapshots, so a HEALTHY stream
   // delivers a message at least every ~2s. If nothing arrives for 45s while
@@ -391,7 +414,7 @@ export function connectToMatchStream(
     stopWatchdog();
     lastStreamMessageAt = Date.now();
     watchdogTimer = window.setInterval(() => {
-      if (disposed || finished || !isWsConnected) return;
+      if (disposed || stopped || !isWsConnected) return;
       if (Date.now() - lastStreamMessageAt <= STREAM_WATCHDOG_MS) return;
       console.warn('[match-stream] no messages for ' + STREAM_WATCHDOG_MS / 1000 + 's on an open socket; forcing reconnect');
       try { socket?.close(); } catch { /* already closing */ }
@@ -419,6 +442,17 @@ export function connectToMatchStream(
     }
   };
 
+  // Terminal verdict for this room: the server refused every read for long
+  // enough that another attempt cannot be expected to help. The verdict is
+  // published through onStatusChange so the consumers' own timers stop with
+  // it -- this used to report 'connected', which read as "healthy and
+  // receiving" while, in fact, nothing was arriving.
+  const giveUpUnreadable = () => {
+    stopped = true;
+    clearPollTimer();
+    handlers.onStatusChange?.('unreadable');
+  };
+
   const schedulePoll = (delay = MATCH_POLL_INTERVAL_MS) => {
     if (disposed) {
       return;
@@ -438,13 +472,14 @@ export function connectToMatchStream(
         const snapshot = await fetchMatch(matchId);
         if (!disposed) {
           pollFailures = 0;
+          goneResponses = 0;
           sawLiveSnapshot = true;
           if (snapshot.seqNum) recordMatchSeqNum(matchId, snapshot.seqNum);
           handlers.onSnapshot(snapshot);
           if (snapshot.match?.status === 'finished') {
-            finished = true;
+            // Readable, and final: stop asking, but the room did answer.
+            stopped = true;
             clearPollTimer();
-            handlers.onStatusChange?.('connected');
           }
           handlers.onStatusChange?.('connected');
         }
@@ -464,12 +499,22 @@ export function connectToMatchStream(
           // viewer. Polling it forever produced the post-game 404 storm and
           // the stuck reconnect banner. Treat it as a graceful terminal stop,
           // exactly like a finished snapshot.
+          //
+          // The same verdict is reached after maxGoneResponses CONSECUTIVE
+          // 404/410s even when no snapshot ever landed, so an unreadable room
+          // cannot spin forever either. Any non-404 failure resets the count,
+          // because an alternating 404/5xx pattern means an unhealthy backend
+          // rather than a room that is gone.
           const errStatus = (error as { status?: number } | null)?.status;
-          const definitiveGone = (errStatus === 404 || errStatus === 410) && sawLiveSnapshot;
+          const isGone = errStatus === 404 || errStatus === 410;
+          if (isGone) {
+            goneResponses += 1;
+          } else {
+            goneResponses = 0;
+          }
+          const definitiveGone = isGone && (sawLiveSnapshot || goneResponses >= maxGoneResponses);
           if (definitiveGone) {
-            finished = true;
-            clearPollTimer();
-            handlers.onStatusChange?.('connected');
+            giveUpUnreadable();
             return;
           }
           // After ten straight failures stop pretending to recover: surface
@@ -478,14 +523,14 @@ export function connectToMatchStream(
           handlers.onStatusChange?.(pollFailures >= 10 ? 'disconnected' : 'reconnecting');
         }
       } finally {
-        if (!disposed && !finished) schedulePoll(nextDelay);
+        if (!disposed && !stopped) schedulePoll(nextDelay);
       }
     }, delay);
   };
 
   const maxReconnectAttempts = 10;
   const scheduleReconnect = () => {
-    if (disposed || finished) {
+    if (disposed || stopped) {
       return;
     }
     if (reconnectAttempt >= maxReconnectAttempts) {
@@ -620,12 +665,12 @@ export function connectToMatchStream(
             }
             sawLiveSnapshot = true;
             handlers.onSnapshot(snapshot);
-            if (snapshot.match?.status === 'finished' && !finished) {
+            if (snapshot.match?.status === 'finished' && !stopped) {
               // Final state delivered: stop quietly. Closing the socket here
               // must NOT enter the reconnect loop -- that loop was the
               // post-game "Reconnecting…" banner + sound ping on finished
               // matches.
-              finished = true;
+              stopped = true;
               stopWatchdog();
               stopPing();
               clearPollTimer();
@@ -652,7 +697,7 @@ export function connectToMatchStream(
         isWsConnected = false;
         stopWatchdog();
         stopPing();
-        if (!disposed && !finished) scheduleReconnect();
+        if (!disposed && !stopped) scheduleReconnect();
       });
     }).catch(() => {
       if (!disposed) schedulePoll(0);
@@ -665,6 +710,12 @@ export function connectToMatchStream(
     if (disposed) return;
     reconnectAttempt = 0;
     pollFailures = 0;
+    // An explicit retry is a fresh start for this room: the terminal latch and
+    // the spent gone-count are both cleared, or the verdict would re-publish
+    // on the very next refusal and the poll would not even reschedule
+    // (stomping the affordance that offers to try again).
+    stopped = false;
+    goneResponses = 0;
     clearReconnectTimer();
     clearPollTimer();
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {

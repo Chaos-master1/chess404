@@ -214,10 +214,11 @@ async function resolveVerifiedMatchSeat(request: Request, matchId: string): Prom
         continue;
       }
       const claim = await response.json() as MatchClaimResponse;
-      // The platform claims route only answers 200 while the claimed match is
-      // still active (it 404s finished matches itself), and the claim payload
-      // carries no status field -- a matched matchId + guestId pair is the
-      // complete ownership proof.
+      // A 200 here means the caller's session proved a seat in this match,
+      // whatever the match's status: the claims route answers seat owners for
+      // finished games too and only refuses strangers and aborted games. The
+      // claim payload carries no status field, so the matched matchId +
+      // guestId pair is the complete ownership proof.
       if (normalize(claim.matchId) === normalize(matchId) && normalize(claim.guestId) === normalize(candidate.guestId)) {
         // Queue-matched seats hold server-generated secrets the browser was
         // never given, so the browser's own session secret cannot scope the

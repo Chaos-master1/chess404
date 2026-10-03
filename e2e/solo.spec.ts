@@ -38,6 +38,13 @@ async function move(page: Page, from: string, to: string, viewerColor: 'white' |
   await clickSquare(page, to, viewerColor);
 }
 
+// Fingerprint of the position the canvas actually paints. Asserting on this
+// (rather than on board visibility) is what catches a board that renders but
+// never repaints -- the signature only changes if the painted position does.
+async function paintedSignature(page: Page): Promise<string | null> {
+  return page.getByTestId('board-root').getAttribute('data-board-signature');
+}
+
 // First-visit onboarding modal (z-index 10000) covers the whole app.
 async function dismissOnboarding(page: Page) {
   const skip = page.getByRole('button', { name: /skip tutorial/i });
@@ -72,7 +79,25 @@ test.describe('solo vs computer', () => {
     });
 
     // We are white (preferredSeat=white in creation flow): open as e2-e4
+    const signatureBeforeMove = await paintedSignature(page);
+    expect(signatureBeforeMove, 'board did not expose a painted-position signature').toBeTruthy();
+    expect(signatureBeforeMove, 'board reported a malformed position').not.toBe('invalid');
+
     await move(page, 'e2', 'e4');
+
+    // The board must actually repaint. A frozen board still passes every
+    // visibility check in this file, which is how a change that made the
+    // authoritative snapshot path unreachable once shipped green. The
+    // comparison is normalised so the poll cannot pass on a disappearing
+    // value either: the position must still be readable AND different.
+    await expect
+      .poll(async () => {
+        const signatureAfterMove = await paintedSignature(page);
+        return Boolean(signatureAfterMove)
+          && signatureAfterMove !== 'invalid'
+          && signatureAfterMove !== signatureBeforeMove;
+      }, { timeout: 30_000 })
+      .toBe(true);
 
     // Give the engine its reply window on the small free-tier box
     await page.waitForTimeout(15_000);

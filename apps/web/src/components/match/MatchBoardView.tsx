@@ -119,6 +119,7 @@ export function MatchBoardView() {
     cardMsg,
     setCardMsg,
     streamDisconnected,
+    roomUnreadable,
     onStreamReconnect,
     clickSq,
     getMoves,
@@ -695,6 +696,18 @@ export function MatchBoardView() {
             Private room is waiting for the second player to open the invite link. This seat is reserved, but the game will only start once both seats are claimed.
           </div>
         ) : null}
+        {roomUnreadable && (
+          <div style={{ marginBottom:'8px', padding:'9px 14px', background:'rgba(231,76,60,0.12)', border:'1px solid rgba(231,76,60,0.45)', borderRadius:'8px', color:'#f87171', fontSize:'11px', fontWeight:700, textAlign:'center', display:'flex', alignItems:'center', justifyContent:'center', gap:'10px', flexWrap:'wrap' }}>
+            <span>This game could not be loaded. It may have finished, or this browser may no longer have access to it.</span>
+            <button
+              type="button"
+              onClick={onStreamReconnect}
+              style={{ padding:'4px 12px', background:'rgba(248,113,113,0.15)', border:'1px solid rgba(248,113,113,0.5)', borderRadius:'6px', color:'#fca5a5', fontWeight:700, fontSize:'11px', cursor:'pointer' }}
+            >
+              Try again
+            </button>
+          </div>
+        )}
         {activeDisconnectGraceFor && activeDisconnectGraceFor !== viewerSeat && (
           <div style={{ marginBottom:'8px', padding:'9px 14px', background:'rgba(245,158,11,0.15)', border:'1px solid rgba(245,158,11,0.4)', borderRadius:'8px', color:'#f59e0b', fontSize:'11px', fontWeight:700, textAlign:'center', display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
             <span style={{ animation:'pulse 1.5s ease-in-out infinite' }}>⏳</span>

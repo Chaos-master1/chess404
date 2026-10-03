@@ -181,9 +181,41 @@ func matchClaimStoreRedisURL() string {
 	return httputil.EnvOrDefault("MATCH_CLAIM_STORE_REDIS_URL", "")
 }
 
+// isRecoverableMatchStatus answers "may this match still be resumed?".
+// A LIVENESS question -- used by the "which game am I in?" lookup, which must
+// never hand back a finished room.
 func isRecoverableMatchStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "waiting", "active":
+		return true
+	default:
+		return false
+	}
+}
+
+// isReadableMatchStatus reports statuses for which a guest who has already
+// proven seat ownership may still READ the match.
+//
+// This is deliberately NOT the liveness predicate above ("waiting"/"active"
+// only). Reusing that one for reads conflated two unrelated questions and made
+// finished games unreadable to the people who played them: the claims route
+// refused the claim, the web layer then had no verified seat to scope the
+// snapshot with, and its public-spectator gate requires status==active -- so
+// both players got a 404 for their own finished game while match-service served
+// it happily (observed live: a completed match returned 200 from
+// match-service and 404 from web, with the client retrying for 34 minutes).
+//
+// "finished" is included on purpose: the final position, clocks and result are
+// the player's own data. Granting read access cannot grant write access -- every
+// mutating intent calls ensureActive() (match_actions.go, cards_play.go,
+// cards_target_select.go), which rejects anything that is not "active".
+//
+// "aborted" and unknown statuses stay excluded: an aborted game is never
+// persisted to the archive at all (history.go deletes the row on abort), so
+// there is nothing legitimate to read.
+func isReadableMatchStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "waiting", "active", "finished":
 		return true
 	default:
 		return false
@@ -256,11 +288,17 @@ func buildMatchSeatClaimFromSnapshot(matchState contracts.MatchState, guestID, f
 // Tests in this package override this probe to simulate an outage.
 var isLikelyArchiveOutage = platform.ArchiveBackendDegraded
 
+// allowsStatus is the caller's own rule for "may this stored claim survive a
+// refresh against an archived status?" -- isReadableMatchStatus for an
+// ownership check on a named match, isRecoverableMatchStatus for the "which
+// match am I currently in?" lookup. Passing the rule in keeps each route
+// stating its own policy at its own call site.
 func refreshStoredMatchClaim(
 	archive *platform.MatchArchiveStore,
 	claims *platform.MatchClaimStore,
 	claim platform.MatchSeatClaim,
 	fallbackSecret string,
+	allowsStatus func(string) bool,
 ) (platform.MatchSeatClaim, bool) {
 	matchState, _, ok := archive.LoadMatch(claim.MatchID)
 	if !ok {
@@ -279,9 +317,14 @@ func refreshStoredMatchClaim(
 		}
 		return platform.MatchSeatClaim{}, false
 	}
-	if !isRecoverableMatchStatus(matchState.Status) {
-		// The row exists but says the match is finished: the claim is
-		// genuinely dead, consume it.
+	if !allowsStatus(matchState.Status) {
+		// The caller's rule rejected this status, so the claim is consumed. For
+		// a named match that means an aborted (or unrecognised) row -- a merely
+		// FINISHED match must not land here, because the owner still needs the
+		// claim to read the final state and dropping it is what stranded
+		// clients in a 404 retry loop. For the liveness lookup, a finished room
+		// is consumed on purpose: "resume my game" must never return a
+		// completed one.
 		_ = claims.Delete(claim.MatchID, claim.GuestID)
 		return platform.MatchSeatClaim{}, false
 	}

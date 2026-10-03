@@ -6,18 +6,19 @@ const matchId = 'private-room-1';
 const matchUrl = `http://match-service.railway.internal:8080/api/matches/${matchId}`;
 const claimsUrl = 'http://platform-service.railway.internal:8080/api/platform/match-claims';
 
-function snapshot(queue = 'direct') {
+function snapshot(queue = 'direct', status = 'active', extra: Record<string, unknown> = {}) {
   return {
     match: {
       matchId,
       queue,
-      status: 'active',
+      status,
       whiteGuestId: 'white-guest',
       blackGuestId: 'black-guest',
       whitePlayerSecret: 'white-seat-secret',
       blackPlayerSecret: 'black-seat-secret',
       whiteHand: [{ id: 'white-card' }],
       blackHand: [{ id: 'black-card' }],
+      ...extra,
     },
   };
 }
@@ -81,6 +82,59 @@ describe('private match snapshot route', () => {
         'x-chess404-white-session-secret': 'wrong-secret',
       },
     }), { params: Promise.resolve({ matchId }) });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: 'match is not public' });
+  });
+
+  // A finished match must stay readable to a seat owner. Live incident: the
+  // claims route refused every completed match, so this layer had no verified
+  // seat, fell through to the public-spectator gate (which requires
+  // status === 'active') and answered 404 "match is not public" for BOTH
+  // players of every finished game -- while match-service served the very same
+  // match with 200. The client then polled a finished match for 34 minutes.
+  // A verified seat must short-circuit the public gate regardless of status.
+  it('returns 200 to a verified seat owner for a finished match', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === claimsUrl) {
+        return new Response(JSON.stringify({ matchId, guestId: 'White-Guest' }));
+      }
+      expect(url).toBe(matchUrl);
+      const finished = snapshot('direct', 'finished', { winner: 'white', finishReason: 'checkmate' });
+      return new Response(JSON.stringify(finished));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(new Request(`https://web.example/api/realtime/matches/${matchId}`, {
+      headers: {
+        'x-chess404-white-guest-id': 'White-Guest',
+        'x-chess404-white-session-secret': 'White-Session-Secret',
+      },
+    }), { params: Promise.resolve({ matchId }) });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.match.status).toBe('finished');
+    expect(body.match.winner).toBe('white');
+  });
+
+  // Widening finished-match READS for owners must not widen PUBLIC access:
+  // spectate-privacy.spec.ts requires that vs-computer and direct matches stay
+  // out of the anonymous surface. An unauthenticated read of a finished match
+  // must still be refused.
+  it('still refuses an unauthenticated read of a finished match', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === claimsUrl) {
+        return new Response(JSON.stringify({ error: 'not a participant' }), { status: 403 });
+      }
+      expect(url).toBe(matchUrl);
+      return new Response(JSON.stringify(snapshot('direct', 'finished')));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(new Request(`https://web.example/api/realtime/matches/${matchId}`), {
+      params: Promise.resolve({ matchId }),
+    });
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: 'match is not public' });

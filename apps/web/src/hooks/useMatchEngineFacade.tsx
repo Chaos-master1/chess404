@@ -1210,7 +1210,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     })()),
   });
 
-  const { onStreamReconnect } = useMatchConnection({
+  const { onStreamReconnect, roomUnreadable } = useMatchConnection({
     sets: {
       setAuthoritativeMatchId,
       setAuthoritativeLive,
@@ -1372,7 +1372,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     fmtClock, evalStr, evalLabel, renderPlayerCard, renderJokerPicker,
     premove, setPremove, premoveRef,
     chatMessages, setChatMessages, chatInput, setChatInput, chatRef, resetChat,
-    roundNumber, streamDisconnected, hasPrimaryAccountSession,
+    roundNumber, streamDisconnected, roomUnreadable, hasPrimaryAccountSession,
     submitAuthoritativeIntent, bootstrapAuthoritativeMatch, requestedMatchIdRef,
     matchLoadError, setMatchLoadError,
     ratedInviteSignInRequired, setRatedInviteSignInRequired,

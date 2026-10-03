@@ -160,7 +160,7 @@ func TestMatchClaimResolveConsumesTokenOnlyOnSuccess(t *testing.T) {
 
 // A genuinely dead claim (archived match finished) is still consumed on a
 // resolve attempt -- the fix narrows transient handling, not cleanup.
-func TestMatchClaimResolveReapsClaimForFinishedMatch(t *testing.T) {
+func TestMatchClaimResolveKeepsClaimForFinishedMatch(t *testing.T) {
 	archive, guests, claims, guestID := newClaimResolveTestEnv(t)
 
 	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
@@ -195,10 +195,60 @@ func TestMatchClaimResolveReapsClaimForFinishedMatch(t *testing.T) {
 
 	mux := buildTestPlatformMux(t, archive, guests, claims)
 	rec := postResolve(t, mux, "room_finished", stored.ClaimToken)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected resolve for a finished match to fail, got status %d", rec.Code)
+
+	// A finished match is still readable by its seat owner, so the claim
+	// must resolve rather than be consumed. This used to 404 and reap, which
+	// left both players unable to load their own completed game (the live
+	// "match is not public" 404 loop). Writes stay blocked by ensureActive().
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected resolve for a finished match to succeed, got status %d body=%s", rec.Code, rec.Body.String())
 	}
-	if _, ok := claims.PeekByToken("room_finished", stored.ClaimToken); ok {
-		t.Fatal("a claim for a finished match must be reaped on resolve")
+	if _, ok := claims.PeekByToken("room_finished", stored.ClaimToken); !ok {
+		t.Fatal("a claim for a finished match must be retained so the owner can still read the result")
+	}
+}
+
+// Claims for a match that is genuinely NOT readable by its owner are still
+// reaped, so unreadable claims do not linger for their TTL. "aborted" rows are
+// deleted by Upsert, so an unrecognised status is used as the durable
+// stand-in for "not readable".
+func TestMatchClaimResolveReapsClaimForUnreadableMatch(t *testing.T) {
+	archive, guests, claims, guestID := newClaimResolveTestEnv(t)
+
+	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	if err := archive.Upsert(contracts.MatchSnapshotResponse{
+		Match: contracts.MatchState{
+			MatchID:      "room_unreadable",
+			Status:       "cancelled",
+			Queue:        "rated",
+			WhiteGuestID: guestID,
+			BlackGuestID: "guest_other",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}); err != nil {
+		t.Fatalf("expected archived match to persist, got %v", err)
+	}
+	if err := claims.Put(platform.MatchSeatClaim{
+		MatchID:      "room_unreadable",
+		GuestID:      guestID,
+		SeatColor:    "white",
+		PlayerID:     guestID,
+		PlayerSecret: "unreadable_secret",
+	}); err != nil {
+		t.Fatalf("expected claim put to succeed, got %v", err)
+	}
+	stored, ok := claims.Get("room_unreadable", guestID)
+	if !ok || stored.ClaimToken == "" {
+		t.Fatalf("expected a stored claim with a token, got ok=%v", ok)
+	}
+
+	mux := buildTestPlatformMux(t, archive, guests, claims)
+	rec := postResolve(t, mux, "room_unreadable", stored.ClaimToken)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected resolve for an unreadable match to fail, got status %d", rec.Code)
+	}
+	if _, ok := claims.PeekByToken("room_unreadable", stored.ClaimToken); ok {
+		t.Fatal("a claim for an unreadable match must be reaped on resolve")
 	}
 }
