@@ -340,8 +340,8 @@ func itoa(n int) string {
 // slowMatchCreator sleeps before (successfully) creating, simulating the
 // ~2s WAN round trip to match-service in production.
 type slowMatchCreator struct {
-	delay    time.Duration
-	mu       sync.Mutex
+	delay       time.Duration
+	mu          sync.Mutex
 	assignments []MatchAssignment
 }
 
@@ -470,7 +470,7 @@ func TestPairingReservationBlocksDoublePairing(t *testing.T) {
 	}
 
 	// A second joiner arrives while the waiter is RESERVED: it must NOT pair
-	// with the reserved waiter -- it queues up instead (publicView shows it
+	// with the reserved waiter -- it queues up instead (PublicView shows it
 	// as queued) -- and the waiter is still consumed exactly once.
 	second, err := service.Enqueue(QueueCasual, contracts.MatchModeOpenCards, "joiner_2", 1205, "Joiner2")
 	if err != nil {
