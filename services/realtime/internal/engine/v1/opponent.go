@@ -2,6 +2,7 @@ package v1
 
 import (
 	"math/rand"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -362,21 +363,23 @@ func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.Pla
 	}
 
 	// The FIRST of a double move's two moves may not itself put the enemy
-	// king in check (applyMove's guard, match_actions.go:105-108: "first
-	// double move cannot put enemy king in check") -- but SearchWithTime has
+	// king in check (applyMove's guard, match_actions.go: "first double
+	// move cannot put enemy king in check") -- but SearchWithTime has
 	// no notion of this precondition, so an ordinary eval-driven search is
 	// free to prefer a checking move here exactly because check is usually
 	// strong. Found by xgauntlet's E0 cross-engine gauntlet: a real game
-	// failed with exactly this rejection. Rather than teach the general
-	// search about a card-specific, turn-position-specific rule, fall back
-	// to the first legal candidate (from the same `moves` already generated
-	// above) that doesn't trip the constraint -- correctness over
+	// failed with exactly this rejection, and a later one failed with a
+	// check applyMoveCopy alone cannot see (see FirstDoubleMoveRejected).
+	// Rather than teach the general search about a card-specific,
+	// turn-position-specific rule, reject the offending candidate and fall
+	// back to the first legal candidate (from the same `moves` already
+	// generated above) that doesn't trip the constraint -- correctness over
 	// optimality here, matching the ply-cap and no-result fallbacks
 	// elsewhere in this file and in gauntlet.go.
-	if state.DoubleMove != nil && state.DoubleMove.MovesLeft == 2 && IsKingInCheck(applyMoveCopy(state, &result.BestMove)) {
+	if FirstDoubleMoveRejected(state, &result.BestMove) {
 		replaced := false
 		for i := range moves {
-			if IsKingInCheck(applyMoveCopy(state, &moves[i])) {
+			if FirstDoubleMoveRejected(state, &moves[i]) {
 				continue
 			}
 			result.BestMove = moves[i]
@@ -428,6 +431,137 @@ func (co *ComputerOpponent) MakeMove(state *contracts.MatchState) *contracts.Pla
 	}
 
 	return intent
+}
+
+// FirstDoubleMoveRejected reports whether internal/match's applyMove would
+// reject move as the FIRST half of a double move. It mirrors applyMove's
+// guard (match_actions.go: "first double move cannot put enemy king in
+// check"), which evaluates the board AFTER the move AND after
+// resolveParasiteEffects has run: capturing a piece with a parasite link
+// can destroy the mover's own linked blocker as a side effect, uncovering
+// a discovered check the capture itself never made -- a check
+// applyMoveCopy, which models no card mechanics, cannot see. The parasite
+// replay also honors resolveParasiteEffects' own safety gate: a removal
+// that would leave the removed piece's own king in check aborts the whole
+// intent with "parasite capture would leave a king in check", which is
+// equally unsubmitable, so both rejections map to true here. Found by
+// xgauntlet's E0 cross-engine gauntlet: real games were rejected with
+// exactly the guard above.
+//
+// False whenever the first half is not active, so callers can consult it
+// unconditionally. Fortress zones are not modeled (v1's attack model has
+// never carried them): seeing strictly more slider attacks than the
+// fortress-aware server can only over-filter candidates, never submit one
+// the server would reject.
+func FirstDoubleMoveRejected(state *contracts.MatchState, move *Move) bool {
+	if state.DoubleMove == nil || state.DoubleMove.MovesLeft != 2 {
+		return false
+	}
+	next := applyMoveCopy(state, move)
+	if !applyParasiteCaptureEffects(next, state, move) {
+		return true
+	}
+	return IsKingInCheck(next)
+}
+
+// applyParasiteCaptureEffects replays resolveParasiteEffects' two removal
+// loops (cards_mechanics.go) onto next -- the board after move has been
+// applied -- using the piece move captured from before. Returns false when
+// the server would abort the intent before ever reaching its own guards
+// ("parasite capture would leave a king in check").
+func applyParasiteCaptureEffects(next *contracts.MatchState, before *contracts.MatchState, move *Move) bool {
+	capturedSquare := move.To
+	captured := before.Board[move.To.Row][move.To.Col]
+	if captured == nil {
+		moving := before.Board[move.From.Row][move.From.Col]
+		if moving != nil && moving.Type == "pawn" && move.From.Col != move.To.Col {
+			capturedSquare = contracts.Square{Row: move.From.Row, Col: move.To.Col}
+			captured = before.Board[capturedSquare.Row][capturedSquare.Col]
+		}
+	}
+	if captured == nil || captured.Fake {
+		return true
+	}
+
+	if captured.ParasiteTarget != "" {
+		if hostSq, ok := parseParasiteTarget(captured.ParasiteTarget); ok {
+			hostPiece := next.Board[hostSq.Row][hostSq.Col]
+			if hostPiece != nil && hostPiece.Type != "king" {
+				if hostPiece.Shielded {
+					hostPiece.Shielded = false
+					hostPiece.ShieldTurn = nil
+				} else {
+					if removalWouldLeaveOwnKingInCheck(next, hostSq) {
+						return false
+					}
+					next.Board[hostSq.Row][hostSq.Col] = nil
+				}
+			}
+		}
+	}
+
+	for r := 0; r < len(next.Board); r++ {
+		for c := 0; c < len(next.Board[r]); c++ {
+			piece := next.Board[r][c]
+			if piece == nil || piece.ParasiteTarget == "" || piece.Fake {
+				continue
+			}
+			targetSq, ok := parseParasiteTarget(piece.ParasiteTarget)
+			if !ok || targetSq.Row != capturedSquare.Row || targetSq.Col != capturedSquare.Col {
+				continue
+			}
+			if piece.Type == "king" {
+				continue
+			}
+			if piece.Shielded {
+				piece.Shielded = false
+				piece.ShieldTurn = nil
+				continue
+			}
+			sq := contracts.Square{Row: r, Col: c}
+			if removalWouldLeaveOwnKingInCheck(next, sq) {
+				return false
+			}
+			next.Board[r][c] = nil
+		}
+	}
+	return true
+}
+
+// removalWouldLeaveOwnKingInCheck mirrors ensurePieceRemovalKeepsOwnKingSafe
+// (cards_util.go, used by resolveParasiteEffects): removing the piece at sq
+// must leave its own color's king unattacked.
+func removalWouldLeaveOwnKingInCheck(state *contracts.MatchState, sq contracts.Square) bool {
+	piece := state.Board[sq.Row][sq.Col]
+	if piece == nil {
+		return false
+	}
+	state.Board[sq.Row][sq.Col] = nil
+	king := findKing(state.Board, piece.Color)
+	inCheck := king != nil && isAttackedWithFusion(state.Board, *king, oppositeColor(piece.Color))
+	state.Board[sq.Row][sq.Col] = piece
+	return inCheck
+}
+
+// parseParasiteTarget parses the "row,col" ParasiteTarget encoding, the
+// same shape internal/match's parseParasiteSquare accepts.
+func parseParasiteTarget(value string) (contracts.Square, bool) {
+	parts := strings.Split(value, ",")
+	if len(parts) != 2 {
+		return contracts.Square{}, false
+	}
+	row, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return contracts.Square{}, false
+	}
+	col, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return contracts.Square{}, false
+	}
+	if row < 0 || row > 7 || col < 0 || col > 7 {
+		return contracts.Square{}, false
+	}
+	return contracts.Square{Row: row, Col: col}, true
 }
 
 func (co *ComputerOpponent) HandleSelectTarget(state *contracts.MatchState) *contracts.PlayerIntent {
