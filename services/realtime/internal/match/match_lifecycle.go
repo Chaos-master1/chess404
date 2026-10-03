@@ -180,9 +180,15 @@ func (s *Service) CreateMatch(req contracts.CreateMatchRequest, now time.Time) c
 
 	broadcastSnap := buildSnapshotWithPresence(c.state, c.presence, len(c.events), []contracts.ResolvedEvent{startEvent}, now)
 	persistSnap := buildSnapshotWithPresence(c.state, c.presence, len(c.events), c.events, now)
-	c.mu.Unlock()
-
+	// flushCommit marshals the LIVE c.presence pointer (json.Marshal(presence)
+	// in buildRedisSaveBundle), so it must run while c.mu is held -- the
+	// invariant every other call site already follows (see
+	// finalizeAbandonedMatch). Unlocking first let the broadcast worker's
+	// evaluatePresenceRuntime write WhiteConnected/DisconnectGraceFor while
+	// that marshal read them: a real data race that -race caught in CI as a
+	// write on match_lifecycle.go:1290 against a read in buildRedisSaveBundle.
 	s.flushCommit(persistSnap, c.presence)
+	c.mu.Unlock()
 	s.Log.Info("match:create: ok", "matchID", matchID, "status", broadcastSnap.Match.Status, "turn", broadcastSnap.Match.Turn, "whiteFingerprint", redactPlayerSecret(broadcastSnap.Match.WhitePlayerSecret), "blackFingerprint", redactPlayerSecret(broadcastSnap.Match.BlackPlayerSecret), "computers", c.computer != nil)
 
 	return broadcastSnap
