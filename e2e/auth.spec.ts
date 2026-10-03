@@ -1,14 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { collectErrors, dismissOnboarding } from './_helpers';
-
-// Unique per run so the spec can be re-run against the same production DB.
-function uniqueHandle(): string {
-  // Prefix choice matters: accounts directory themselves by handle, so these
-  // test accounts are EXCLUDED from the public leaderboard by the platform's
-  // e2e test-account filter. Without the marker, every CI run leaked a new
-  // handle into the live rankings (the stray "@e2e_..." players users saw).
-  return `e2e_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`.slice(0, 24);
-}
+import { collectErrors, dismissOnboarding, registerAccount, uniqueE2EHandle } from './_helpers';
 
 // Both auth surfaces render a "Sign In" control and one of them is a disabled
 // tab, so click whichever instance is actually enabled.
@@ -28,52 +19,13 @@ test.describe('account auth', () => {
   test('register, sign out, sign back in, and reject a bad password', async ({ page }) => {
     test.setTimeout(300_000);
     const errors = collectErrors(page);
-    const handle = uniqueHandle();
+    const handle = uniqueE2EHandle();
     const email = `${handle}@example.com`;
     const password = 'Chess404-e2e-passw0rd!';
 
-    await page.goto('/account');
-    await dismissOnboarding(page);
-
-    // Falls back to position for deployments that predate the tab test ids
-    // (index 0 of "Register" is the tab itself; "Sign In" also names a nav item).
-    const registerTab = page.getByTestId('auth-tab-register')
-      .or(page.getByRole('button', { name: /^register$/i }))
-      .first();
-    if (await registerTab.isVisible({ timeout: 15_000 }).catch(() => false)) {
-      await registerTab.click().catch(() => {});
-    }
-
-    // The guest session is minted asynchronously and its arrival re-renders the
-    // form, clearing anything typed before it lands. Fill, verify the values
-    // survived, and refill if the render wiped them.
-    const handleField = page.getByPlaceholder('wizard404error');
-    const emailField = page.getByPlaceholder('you@example.com');
-    const passwordField = page.getByPlaceholder('Choose a strong password');
-
-    for (let attempt = 0; attempt < 6; attempt++) {
-      await handleField.fill(handle);
-      await emailField.fill(email);
-      await passwordField.fill(password);
-      await page.waitForTimeout(1_500);
-      if ((await handleField.inputValue()) === handle && (await emailField.inputValue()) === email) break;
-    }
-    expect(await handleField.inputValue(), 'the register form kept clearing itself').toBe(handle);
-
-    await page.getByRole('button', { name: /create account/i }).last().click();
-
-    // Registering navigates straight to the play hub, so come back to the
-    // account surface to inspect the session it just created.
-    await page.waitForTimeout(6_000);
-    await page.goto('/account');
-    await dismissOnboarding(page);
-
-    // Signed out, /account renders the auth form; signed in, it renders the
-    // account surface. The handle appearing there is the session proof.
-    await expect(
-      page.getByText(new RegExp(`@${handle}`)).first(),
-      'registration did not produce a signed-in session',
-    ).toBeVisible({ timeout: 60_000 });
+    // Leaves the context signed in on /account; the handle showing there is
+    // the session proof this spec builds on.
+    await registerAccount(page, { handle, email, password });
 
     // Two controls share this accessible name: the per-other-device revoke
     // buttons in the sessions list, and this device's own Sign Out beside the
