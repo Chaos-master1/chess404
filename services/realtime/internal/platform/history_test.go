@@ -1,7 +1,10 @@
 package platform
 
 import (
+	"fmt"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -173,6 +176,35 @@ type singleRowFakeStore struct {
 	persisted int
 }
 
+// slowUpserterFakeStore makes upsertOne take real time and records peak
+// concurrency, so tests can prove concurrent FlushMatch calls overlap instead
+// of serializing on the overlay lock.
+type slowUpserterFakeStore struct {
+	*freshnessFakeStore
+	delay       time.Duration
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+	upserts     atomic.Int32
+	onUpsert    func() // optional hook, runs after the delay
+}
+
+func (f *slowUpserterFakeStore) upsertOne(entry MatchArchiveEntry, _ *MatchArchivePrivateEntry) error {
+	cur := f.inFlight.Add(1)
+	for {
+		max := f.maxInFlight.Load()
+		if cur <= max || f.maxInFlight.CompareAndSwap(max, cur) {
+			break
+		}
+	}
+	time.Sleep(f.delay)
+	f.inFlight.Add(-1)
+	f.upserts.Add(1)
+	if f.onUpsert != nil {
+		f.onUpsert()
+	}
+	return nil
+}
+
 func (f *singleRowFakeStore) upsertOne(entry MatchArchiveEntry, _ *MatchArchivePrivateEntry) error {
 	f.upserted = append(f.upserted, entry.MatchID)
 	return nil
@@ -217,6 +249,139 @@ func TestFlushMatchPrefersSingleRowUpserter(t *testing.T) {
 	}
 	if fake.persisted != 0 {
 		t.Fatalf("expected FlushMatch to skip the full persist, got %d calls", fake.persisted)
+	}
+}
+
+// FlushMatch on single-row backends must write OUTSIDE the overlay lock: a
+// shared managed Postgres measured ~450ms per single-row upsert in production,
+// and holding the global lock across it serialized every concurrent match
+// creation behind one write at a time (a 909ms -> 9.7s burst-20 staircase).
+func TestFlushMatchWritesConcurrentlyForUpserterBackends(t *testing.T) {
+	fake := &slowUpserterFakeStore{
+		freshnessFakeStore: &freshnessFakeStore{
+			rows:     map[string]MatchArchiveEntry{},
+			privates: map[string]MatchArchivePrivateEntry{},
+		},
+		delay: 80 * time.Millisecond,
+	}
+	store, err := newMatchArchiveStore(fake)
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	store.mu.Lock()
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprintf("burst_match_%d", i)
+		store.entries[id] = MatchArchiveEntry{MatchID: id, Status: "active", UpdatedAt: now}
+		store.gens[id] = 1
+		store.dirty[id] = struct{}{}
+	}
+	store.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := store.FlushMatch(fmt.Sprintf("burst_match_%d", i)); err != nil {
+				t.Errorf("expected FlushMatch %d to succeed, got %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if got := fake.upserts.Load(); got != 6 {
+		t.Fatalf("expected 6 single-row upserts, got %d", got)
+	}
+	if fake.maxInFlight.Load() < 2 {
+		t.Fatalf("expected concurrent FlushMatch DB writes to overlap, peak in-flight was %d", fake.maxInFlight.Load())
+	}
+	store.mu.Lock()
+	remaining := len(store.dirty)
+	store.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("expected all flushed rows to leave the dirty set, %d remain", remaining)
+	}
+}
+
+// If the row changes while its flush write is in flight, the flush must NOT
+// clear the dirty flag: the newer version still needs to reach the backend.
+func TestFlushMatchKeepsDirtyWhenRowChangesMidFlush(t *testing.T) {
+	fake := &slowUpserterFakeStore{
+		freshnessFakeStore: &freshnessFakeStore{
+			rows:     map[string]MatchArchiveEntry{},
+			privates: map[string]MatchArchivePrivateEntry{},
+		},
+		delay: 40 * time.Millisecond,
+	}
+	store, err := newMatchArchiveStore(fake)
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	now := time.Date(2026, 10, 4, 12, 30, 0, 0, time.UTC)
+	store.mu.Lock()
+	store.entries["gen_guard"] = MatchArchiveEntry{MatchID: "gen_guard", Status: "active", UpdatedAt: now}
+	store.gens["gen_guard"] = 7
+	store.dirty["gen_guard"] = struct{}{}
+	store.mu.Unlock()
+
+	fake.onUpsert = func() {
+		store.mu.Lock()
+		store.entries["gen_guard"] = MatchArchiveEntry{MatchID: "gen_guard", Status: "finished", UpdatedAt: now.Add(time.Minute)}
+		store.gens["gen_guard"] = 8
+		store.mu.Unlock()
+	}
+
+	if err := store.FlushMatch("gen_guard"); err != nil {
+		t.Fatalf("expected FlushMatch to succeed, got %v", err)
+	}
+	store.mu.Lock()
+	_, stillDirty := store.dirty["gen_guard"]
+	store.mu.Unlock()
+	if !stillDirty {
+		t.Fatal("expected dirty to remain after the row changed mid-flush")
+	}
+}
+
+// The write loop's one-by-one drain for single-row backends must write every
+// dirty row exactly once and clear only rows that did not change mid-flight.
+func TestPersistDirtyOneByOneDrainsAndGuardsGenerations(t *testing.T) {
+	fake := &slowUpserterFakeStore{
+		freshnessFakeStore: &freshnessFakeStore{
+			rows:     map[string]MatchArchiveEntry{},
+			privates: map[string]MatchArchivePrivateEntry{},
+		},
+		delay: time.Millisecond,
+	}
+	store, err := newMatchArchiveStore(fake)
+	if err != nil {
+		t.Fatalf("expected archive store to initialize, got %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	now := time.Date(2026, 10, 4, 13, 0, 0, 0, time.UTC)
+	store.mu.Lock()
+	for _, id := range []string{"drain_a", "drain_b", "drain_c"} {
+		store.entries[id] = MatchArchiveEntry{MatchID: id, Status: "active", UpdatedAt: now}
+		store.gens[id] = 1
+		store.dirty[id] = struct{}{}
+	}
+	store.mu.Unlock()
+
+	store.persistDirtyOneByOne(fake)
+
+	if got := fake.upserts.Load(); got != 3 {
+		t.Fatalf("expected 3 upserts, got %d", got)
+	}
+	store.mu.Lock()
+	remaining := len(store.dirty)
+	store.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("expected the dirty set to drain, %d rows remain", remaining)
 	}
 }
 
