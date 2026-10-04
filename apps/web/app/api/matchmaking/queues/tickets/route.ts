@@ -1,5 +1,12 @@
 import { proxyMatchmaking } from '../../_lib/proxy';
-import { buildUpstreamHeaders, UPSTREAM_TIMEOUT_MS } from '../../../_lib/internal-service';
+import {
+  buildUpstreamHeaders,
+  filterResponseHeaders,
+  isLocalRequest,
+  NULL_BODY_STATUSES,
+  resolveBackendBaseUrl,
+  UPSTREAM_TIMEOUT_MS,
+} from '../../../_lib/internal-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +19,6 @@ const platformBaseUrl = resolveBackendBaseUrl(
   process.env.PLATFORM_SERVICE_INTERNAL_URL,
   'http://platform-service.railway.internal:8080',
 );
-
-// The Fetch spec forbids a body on these statuses -- Response's constructor
-// throws if body is anything other than null, even an empty string.
-const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 interface QueueTicketCreatePayload {
   guestId?: string;
@@ -105,15 +108,27 @@ async function validateRatedAccountSession(
   accountId: string,
   sessionToken: string,
 ): Promise<PlatformAccountSessionPayload | Response> {
-  const upstream = await fetch(`${platformBaseUrl}/api/platform/account-sessions`, {
-    method: 'POST',
-    headers: ensureJSONHeaders(buildUpstreamHeaders(request, 'platform')),
-    cache: 'no-store',
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-    body: JSON.stringify({ accountId, sessionToken }),
-  });
-
-  const body = await upstream.text();
+  let upstream: Response;
+  let body: string;
+  try {
+    upstream = await fetch(`${platformBaseUrl}/api/platform/account-sessions`, {
+      method: 'POST',
+      headers: ensureJSONHeaders(buildUpstreamHeaders(request, 'platform')),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      body: JSON.stringify({ accountId, sessionToken }),
+    });
+    body = await upstream.text();
+  } catch (error) {
+    // A timeout or refused connection is an upstream outage, not a bug in
+    // this handler: JSON 504/502 instead of an opaque Next 500.
+    const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    return jsonError(
+      timedOut ? 'platform service timed out' : 'platform service is unreachable',
+      timedOut ? 504 : 502,
+      noStoreHeaders(),
+    );
+  }
   if (!upstream.ok) {
     const headers = filterResponseHeaders(upstream.headers);
     const fallbackStatus = upstream.status === 403 ? 403 : 401;
@@ -141,15 +156,26 @@ async function forwardMatchmaking(request: Request, payload: QueueTicketCreatePa
   // internal service token that takes the request out of the shared per-IP
   // bulkheads. Without them a busy origin's enqueues ride the raw 60/min
   // global cap and 429 under load.
-  const upstream = await fetch(`${matchmakingBaseUrl}/api/queues/tickets`, {
-    method: 'POST',
-    headers: ensureJSONHeaders(buildUpstreamHeaders(request)),
-    cache: 'no-store',
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-    body: JSON.stringify(payload),
-  });
-
-  const body = await upstream.text();
+  let upstream: Response;
+  let body: string;
+  try {
+    upstream = await fetch(`${matchmakingBaseUrl}/api/queues/tickets`, {
+      method: 'POST',
+      headers: ensureJSONHeaders(buildUpstreamHeaders(request)),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      body: JSON.stringify(payload),
+    });
+    body = await upstream.text();
+  } catch (error) {
+    // See validateRatedAccountSession: gateway conditions answer 504/502.
+    const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    return jsonError(
+      timedOut ? 'matchmaking service timed out' : 'matchmaking service is unreachable',
+      timedOut ? 504 : 502,
+      noStoreHeaders(),
+    );
+  }
   return new Response(NULL_BODY_STATUSES.has(upstream.status) ? null : body, {
     status: upstream.status,
     headers: filterResponseHeaders(upstream.headers),
@@ -182,34 +208,6 @@ function ensureJSONHeaders(headers: Headers): Headers {
     next.set('Accept', 'application/json');
   }
   return next;
-}
-
-function filterResponseHeaders(headers: Headers): Headers {
-  const next = new Headers();
-  headers.forEach((value, key) => {
-    const lower = key.toLowerCase();
-    if (lower === 'content-length' || lower === 'connection' || lower === 'transfer-encoding') {
-      return;
-    }
-    next.set(key, value);
-  });
-  return next;
-}
-
-function resolveBackendBaseUrl(explicit: string | undefined, fallback: string): string {
-  const value = explicit?.trim().replace(/\/$/, '');
-  if (!value || value.includes('${{') || /:\s*$/.test(value)) {
-    return fallback;
-  }
-  return value;
-}
-
-function isLocalRequest(request: Request): boolean {
-  if (process.env.NODE_ENV === 'production') {
-    return false;
-  }
-  const host = request.headers.get('host')?.toLowerCase() ?? '';
-  return host.startsWith('localhost') || host.startsWith('127.0.0.1');
 }
 
 function noStoreHeaders(): Headers {

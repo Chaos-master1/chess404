@@ -1,3 +1,5 @@
+import { isLocalRequest } from '../../_lib/internal-service';
+
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request): Promise<Response> {
@@ -9,12 +11,4 @@ export async function POST(request: Request): Promise<Response> {
   return Response.json({
     error: 'client-side account result finalization is disabled',
   }, { status: 404 });
-}
-
-function isLocalRequest(request: Request): boolean {
-  if (process.env.NODE_ENV === 'production') {
-    return false;
-  }
-  const host = request.headers.get('host')?.toLowerCase() ?? '';
-  return host.startsWith('localhost') || host.startsWith('127.0.0.1');
 }

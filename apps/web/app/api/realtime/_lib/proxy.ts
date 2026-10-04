@@ -1,24 +1,21 @@
-import { internalServiceTokenForTarget } from '../../_lib/internal-service';
+import {
+  buildInternalHeaders,
+  filterResponseHeaders,
+  NULL_BODY_STATUSES,
+  resolveBackendBaseUrl,
+  UPSTREAM_TIMEOUT_MS,
+} from '../../_lib/internal-service';
 
 const backendBaseUrl = resolveBackendBaseUrl(
   process.env.MATCH_SERVICE_INTERNAL_URL,
   'http://match-service.railway.internal:8080',
 );
 
-// undici's default headers timeout is 300s. Without a bound, a wedged
-// match-service pins this handler for five minutes per request.
-const UPSTREAM_TIMEOUT_MS = 8000;
-
-// The Fetch spec forbids a body on these statuses -- Response's constructor
-// throws "Invalid response status code" if body is anything other than
-// null, even an empty string. match-service's presence handler returns 204.
-const NULL_BODY_STATUSES = new Set([204, 205, 304]);
-
 export async function proxyRealtime(request: Request, path: string): Promise<Response> {
   const url = `${backendBaseUrl}${path}`;
   const init: RequestInit = {
     method: request.method,
-    headers: buildUpstreamHeaders(request.headers),
+    headers: buildInternalHeaders(request.headers, 'match'),
     cache: 'no-store',
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   };
@@ -44,45 +41,4 @@ export async function proxyRealtime(request: Request, path: string): Promise<Res
       { status: timedOut ? 504 : 502, headers: { 'cache-control': 'no-store' } },
     );
   }
-}
-
-function filterHeaders(headers: Headers): Headers {
-  const next = new Headers();
-  headers.forEach((value, key) => {
-    const lower = key.toLowerCase();
-    if (lower === 'host' || lower === 'connection' || lower === 'content-length') {
-      return;
-    }
-    next.set(key, value);
-  });
-  return next;
-}
-
-function buildUpstreamHeaders(headers: Headers): Headers {
-  const next = filterHeaders(headers);
-  const token = internalServiceTokenForTarget('match');
-  if (token) {
-    next.set('x-chess404-service-token', token);
-  }
-  return next;
-}
-
-function filterResponseHeaders(headers: Headers): Headers {
-  const next = new Headers();
-  headers.forEach((value, key) => {
-    const lower = key.toLowerCase();
-    if (lower === 'content-length' || lower === 'connection' || lower === 'transfer-encoding') {
-      return;
-    }
-    next.set(key, value);
-  });
-  return next;
-}
-
-function resolveBackendBaseUrl(explicit: string | undefined, fallback: string): string {
-  const value = explicit?.trim().replace(/\/$/, '');
-  if (!value || value.includes('${{') || /:\s*$/.test(value)) {
-    return fallback;
-  }
-  return value;
 }

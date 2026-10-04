@@ -1,4 +1,10 @@
-import { internalServiceTokenForTarget, UPSTREAM_TIMEOUT_MS } from '../../../_lib/internal-service';
+import {
+  buildInternalHeaders,
+  filterResponseHeaders,
+  isLocalRequest,
+  resolveBackendBaseUrl,
+  UPSTREAM_TIMEOUT_MS,
+} from '../../../_lib/internal-service';
 import { proxyRealtime } from '../../_lib/proxy';
 
 export const dynamic = 'force-dynamic';
@@ -30,19 +36,33 @@ export async function GET(
     upstreamHeaders.set('X-Player-ID', verifiedSeat.guestId);
     upstreamHeaders.set('X-Player-Secret', verifiedSeat.playerSecret);
   }
-  const upstream = await fetch(upstreamUrl, {
-    method: 'GET',
-    headers: upstreamHeaders,
-    cache: 'no-store',
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-  });
-  const body = await upstream.text();
+  let upstream: Response;
+  let body: string;
+  try {
+    upstream = await fetch(upstreamUrl, {
+      method: 'GET',
+      headers: upstreamHeaders,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    });
+    body = await upstream.text();
+  } catch (error) {
+    // A wedged match-service is a gateway condition, not a bug in this
+    // handler: answer with the proxy convention (504/502 JSON) instead of
+    // letting Next turn the rejection into an opaque 500.
+    const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    console.error(`[MATCH_FETCH] upstream ${upstreamUrl} failed: ${error instanceof Error ? error.message : String(error)}`);
+    return Response.json(
+      { error: timedOut ? 'match service timed out' : 'match service is unreachable' },
+      { status: timedOut ? 504 : 502, headers: noStoreHeaders() },
+    );
+  }
   if (!upstream.ok) {
     console.error(`[MATCH_FETCH] upstream ${upstreamUrl} returned ${upstream.status}: ${body.slice(0, 200)}`);
-    return new Response(body, {
-      status: upstream.status,
-      headers: filterResponseHeaders(upstream.headers),
-    });
+    const headers = filterResponseHeaders(upstream.headers);
+    // This route's passthrough must never be cached.
+    headers.set('Cache-Control', 'no-store');
+    return new Response(body, { status: upstream.status, headers });
   }
 
   let snapshot: MatchSnapshotResponse;
@@ -286,14 +306,6 @@ function readSideSecretsFromCookies(headers: Headers): Record<'white' | 'black',
   };
 }
 
-function isLocalRequest(request: Request): boolean {
-  if (process.env.NODE_ENV === 'production') {
-    return false;
-  }
-  const host = request.headers.get('host')?.toLowerCase() ?? '';
-  return host.startsWith('localhost') || host.startsWith('127.0.0.1');
-}
-
 function normalize(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
@@ -306,46 +318,4 @@ function noStoreHeaders(): Headers {
   const headers = new Headers();
   headers.set('Cache-Control', 'no-store');
   return headers;
-}
-
-function filterHeaders(headers: Headers): Headers {
-  const next = new Headers();
-  headers.forEach((value, key) => {
-    const lower = key.toLowerCase();
-    if (lower === 'host' || lower === 'connection' || lower === 'content-length') {
-      return;
-    }
-    next.set(key, value);
-  });
-  return next;
-}
-
-function buildInternalHeaders(headers: Headers, target: 'match' | 'platform'): Headers {
-  const next = filterHeaders(headers);
-  const token = internalServiceTokenForTarget(target);
-  if (token) {
-    next.set('x-chess404-service-token', token);
-  }
-  return next;
-}
-
-function filterResponseHeaders(headers: Headers): Headers {
-  const next = new Headers();
-  headers.forEach((value, key) => {
-    const lower = key.toLowerCase();
-    if (lower === 'content-length' || lower === 'connection' || lower === 'transfer-encoding') {
-      return;
-    }
-    next.set(key, value);
-  });
-  next.set('Cache-Control', 'no-store');
-  return next;
-}
-
-function resolveBackendBaseUrl(explicit: string | undefined, fallback: string): string {
-  const value = explicit?.trim().replace(/\/$/, '');
-  if (!value || value.includes('${{') || /:\s*$/.test(value)) {
-    return fallback;
-  }
-  return value;
 }
