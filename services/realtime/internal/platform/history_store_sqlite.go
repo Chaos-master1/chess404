@@ -25,6 +25,11 @@ func newSQLiteArchiveStore(path string) (*sqliteArchiveStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	// SQLite allows a single writer: serialize all access through one
+	// pooled connection so concurrent out-of-lock writes (FlushMatch on the
+	// create path racing the write loop's one-by-one drain) can never hit
+	// SQLITE_BUSY. PostgreSQL keeps its real pool.
+	db.SetMaxOpenConns(1)
 	store := &sqliteArchiveStore{db: db}
 	if err := store.init(); err != nil {
 		_ = db.Close()

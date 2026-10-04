@@ -66,6 +66,7 @@ type MatchArchiveStore struct {
 	entries     map[string]MatchArchiveEntry
 	private     map[string]MatchArchivePrivateEntry
 	dirty       map[string]struct{}
+	gens        map[string]uint64 // bumped on every Upsert; guards dirty-clearing after out-of-lock writes
 	writeCh     chan struct{}
 	closeCh     chan struct{}
 	loopDone    chan struct{} // closed by writeLoop on exit; Close joins it
@@ -113,12 +114,13 @@ func NewPostgresMatchArchiveStoreWithDB(db *sql.DB) (*MatchArchiveStore, error) 
 
 func newMatchArchiveStore(persistence archivePersistence) (*MatchArchiveStore, error) {
 	store := &MatchArchiveStore{
-		store:   persistence,
-		entries: make(map[string]MatchArchiveEntry),
-		private: make(map[string]MatchArchivePrivateEntry),
-		dirty:   make(map[string]struct{}),
-		writeCh: make(chan struct{}, 64),
-		closeCh: make(chan struct{}),
+		store:    persistence,
+		entries:  make(map[string]MatchArchiveEntry),
+		private:  make(map[string]MatchArchivePrivateEntry),
+		dirty:    make(map[string]struct{}),
+		gens:     make(map[string]uint64),
+		writeCh:  make(chan struct{}, 64),
+		closeCh:  make(chan struct{}),
 		loopDone: make(chan struct{}),
 	}
 	// Postgres uses lazy-loaded DB queries; file/SQLite load everything.
@@ -139,13 +141,29 @@ func (s *MatchArchiveStore) writeLoop() {
 	for {
 		select {
 		case <-s.writeCh:
-		drainLoop:
-			for {
-				select {
-				case <-s.writeCh:
-				default:
-					break drainLoop
+			drainLoop:
+				for {
+					select {
+					case <-s.writeCh:
+					default:
+						break drainLoop
+					}
 				}
+			// Snapshot the backend under the lock: Close writes s.store
+			// = nil under s.mu, so the type assertion must not race it.
+			s.mu.Lock()
+			var upserter archiveSingleRowUpserter
+			if s.store != nil {
+				upserter, _ = s.store.(archiveSingleRowUpserter)
+			}
+			s.mu.Unlock()
+			if upserter != nil {
+				// Single-row backends write each dirty row OUTSIDE the
+				// overlay lock: a whole-transaction persist under the lock
+				// blocked every in-memory Upsert (i.e. every match
+				// mutation) for the transaction's duration.
+				s.persistDirtyOneByOne(upserter)
+				continue
 			}
 			s.persistMu.Lock()
 			s.mu.Lock()
@@ -207,26 +225,102 @@ func (s *MatchArchiveStore) Flush() error {
 // single-entry path; the file backend falls back to the full write so a
 // one-row map can never erase the others.
 func (s *MatchArchiveStore) FlushMatch(matchID string) error {
-	s.persistMu.Lock()
-	defer s.persistMu.Unlock()
+	// Snapshot the row under the lock, then write it OUTSIDE the lock: the
+	// DB write is slow (a shared managed Postgres measured ~450ms per
+	// single-row upsert in production) and holding the global overlay lock
+	// across it serialized every concurrent match creation behind one
+	// write at a time. The generation counter keeps dirty-clearing safe:
+	// a row changed while its write is in flight stays dirty and is
+	// rewritten by the write loop.
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed || s.store == nil {
+		s.mu.Unlock()
 		return nil
 	}
 	entry, ok := s.entries[matchID]
 	if !ok {
+		s.mu.Unlock()
 		return nil
 	}
-	if upserter, ok := s.store.(archiveSingleRowUpserter); ok {
-		if err := upserter.upsertOne(entry, privateEntryPtr(s.private, matchID)); err != nil {
+	private, hasPrivate := s.private[matchID]
+	gen := s.gens[matchID]
+	upserter, isUpserter := s.store.(archiveSingleRowUpserter)
+	s.mu.Unlock()
+
+	if isUpserter {
+		var privPtr *MatchArchivePrivateEntry
+		if hasPrivate {
+			privPtr = &private
+		}
+		if err := upserter.upsertOne(entry, privPtr); err != nil {
 			return err
 		}
-	} else if err := s.store.persist(s.entries, s.private); err != nil {
+	} else {
+		// File backend (no single-row fast path) REWRITES the whole file
+		// from the maps it is given, so persist and the dirty-clear must
+		// stay atomic under both locks -- a dirty-subset persist from the
+		// write loop slipping in between them would erase sibling rows
+		// from the file. Keep the legacy lock-across-write behavior here.
+		s.persistMu.Lock()
+		s.mu.Lock()
+		err := s.store.persist(s.entries, s.private)
+		if err == nil {
+			delete(s.dirty, matchID)
+		}
+		s.mu.Unlock()
+		s.persistMu.Unlock()
 		return err
 	}
-	delete(s.dirty, matchID)
+
+	s.mu.Lock()
+	if s.gens[matchID] == gen {
+		delete(s.dirty, matchID)
+	}
+	s.mu.Unlock()
 	return nil
+}
+
+// persistDirtyOneByOne drains the dirty set one row at a time for backends
+// with the single-row upsert fast path, writing each row OUTSIDE the overlay
+// lock (see FlushMatch). Rows changed while their write is in flight
+// (generation bump) stay dirty and are picked up by a later pass, so a slow
+// write can never drop an update. Caller must NOT hold s.mu or persistMu.
+func (s *MatchArchiveStore) persistDirtyOneByOne(upserter archiveSingleRowUpserter) {
+	for {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return
+		}
+		var matchID string
+		for id := range s.dirty {
+			matchID = id
+			break
+		}
+		if matchID == "" {
+			s.mu.Unlock()
+			return
+		}
+		entry := s.entries[matchID]
+		private, hasPrivate := s.private[matchID]
+		gen := s.gens[matchID]
+		s.mu.Unlock()
+
+		var privPtr *MatchArchivePrivateEntry
+		if hasPrivate {
+			privPtr = &private
+		}
+		err := upserter.upsertOne(entry, privPtr)
+
+		s.mu.Lock()
+		if err == nil && s.gens[matchID] == gen {
+			delete(s.dirty, matchID)
+		}
+		s.mu.Unlock()
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (s *MatchArchiveStore) Close() error {
@@ -256,6 +350,7 @@ func (s *MatchArchiveStore) Close() error {
 	s.entries = nil
 	s.private = nil
 	s.dirty = nil
+	s.gens = nil
 	s.mu.Unlock()
 	s.persistMu.Unlock()
 	return nil
@@ -291,6 +386,7 @@ func (s *MatchArchiveStore) Upsert(snapshot contracts.MatchSnapshotResponse) err
 			_ = s.store.delete(match.MatchID)
 		}
 		delete(s.dirty, match.MatchID)
+		delete(s.gens, match.MatchID)
 		return nil
 	}
 	entry := MatchArchiveEntry{
@@ -321,6 +417,10 @@ func (s *MatchArchiveStore) Upsert(snapshot contracts.MatchSnapshotResponse) err
 		BlackPlayerSecret: match.BlackPlayerSecret,
 		History:           clonePositionHistory(match.History),
 	}
+	if s.gens == nil {
+		s.gens = make(map[string]uint64)
+	}
+	s.gens[match.MatchID]++
 	s.dirty[match.MatchID] = struct{}{}
 	select {
 	case s.writeCh <- struct{}{}:
@@ -649,6 +749,7 @@ func (s *MatchArchiveStore) load() error {
 		private = make(map[string]MatchArchivePrivateEntry)
 	}
 	s.private = private
+	s.gens = make(map[string]uint64)
 	return nil
 }
 

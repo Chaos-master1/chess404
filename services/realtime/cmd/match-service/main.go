@@ -249,6 +249,7 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			// Computer-mode creations go through the one-active-game guard: a
 			// player must finish their current game before starting another
 			// one vs the engine (clients were stacking matches).
+			createStart := time.Now()
 			var resp contracts.MatchSnapshotResponse
 			if contracts.NormalizeMatchModeID(string(req.ModeID)) == contracts.MatchModeComputer {
 				var createErr error
@@ -260,15 +261,21 @@ func buildMatchServiceMux(service *match.Service, archive *platform.MatchArchive
 			} else {
 				resp = service.CreateMatch(req, httputil.NowUTC())
 			}
+			createElapsed := time.Since(createStart)
 			// Flush this match's archive row synchronously: the create response
 			// hands the caller a claim token whose platform-side refresh reads
 			// the archive. The background writeLoop could lose that race,
 			// turning the first WS auth into a spurious auth.error. FlushMatch
 			// writes only this row -- Flush() would rewrite every match this
 			// instance has ever touched on the game-start critical path.
+			flushStart := time.Now()
 			if err := archive.FlushMatch(resp.Match.MatchID); err != nil {
 				log.Printf("archive flush after create failed for match %s: %v", resp.Match.MatchID, err)
 			}
+			// Always-on: creations are low-rate and this is the only way to see
+			// where the game-start critical path spends its time in production
+			// (the 2026-10-04 burst regression was invisible without it).
+			log.Printf("match create timing: matchID=%s create=%s archive_flush=%s total=%s", resp.Match.MatchID, createElapsed, time.Since(flushStart), time.Since(createStart))
 			httputil.WriteJSON(w, http.StatusCreated, match.RedactSnapshotSecrets(resp))
 		default:
 			httputil.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
