@@ -21,6 +21,19 @@ const ticketsTTL = 7 * 24 * time.Hour
 type redisTicketStore struct {
 	client *redis.Client
 	key    string
+	// lastPersisted mirrors the encoded ticket fields this store last
+	// successfully wrote to (or loaded from) the hash. persist() diffs the
+	// incoming map against it and ships only the changed fields. The old
+	// implementation re-wrote EVERY ticket (an HKeys probe plus a full HSet
+	// pipeline) on every queue operation, so with N live tickets a single
+	// enqueue moved O(N) bytes over the WAN Redis and -- serialized under
+	// the Service mutex -- convoyed every other queue operation behind it;
+	// under a 20-pair soak that measured as 24-44s enqueues and 8s polls.
+	// The Service only calls persist while holding s.mu, so the cache has
+	// exactly one writer and needs no lock of its own. The cache advances
+	// only after a successful Exec: a failed persist leaves it stale, so
+	// the next persist re-sends the missing diff (no lost update).
+	lastPersisted map[string]string
 }
 
 func newRedisTicketStore(redisURL, key string) (*redisTicketStore, error) {
@@ -52,56 +65,91 @@ func (s *redisTicketStore) backend() string {
 	return "redis"
 }
 
+// refreshCache syncs lastPersisted from the server without decoding tickets.
+// persist uses it when it runs before any load (cold store): the diff must
+// reflect what is actually in the hash, or a ticket written by an earlier
+// process would be treated as new and one written by nobody would be kept.
+func (s *redisTicketStore) refreshCache(ctx context.Context) error {
+	values, err := s.client.HGetAll(ctx, s.key).Result()
+	if err != nil {
+		return err
+	}
+	cache := make(map[string]string, len(values))
+	for ticketID, raw := range values {
+		cache[ticketID] = raw
+	}
+	s.lastPersisted = cache
+	return nil
+}
+
 func (s *redisTicketStore) load() (map[string]Ticket, error) {
-	values, err := s.client.HGetAll(context.Background(), s.key).Result()
+	ctx := context.Background()
+	values, err := s.client.HGetAll(ctx, s.key).Result()
 	if err != nil {
 		return nil, err
 	}
-
+	cache := make(map[string]string, len(values))
 	tickets := make(map[string]Ticket, len(values))
 	for ticketID, raw := range values {
+		cache[ticketID] = raw
 		var ticket Ticket
 		if err := json.Unmarshal([]byte(raw), &ticket); err != nil {
 			return nil, err
 		}
 		tickets[ticketID] = ticket
 	}
+	s.lastPersisted = cache
 	return tickets, nil
 }
 
 func (s *redisTicketStore) persist(tickets map[string]Ticket) error {
 	ctx := context.Background()
-
-	existing, err := s.client.HKeys(ctx, s.key).Result()
-	if err != nil {
-		return err
+	if s.lastPersisted == nil {
+		// Cold store: seed the diff baseline from the server first so this
+		// and every later persist write only real changes.
+		if err := s.refreshCache(ctx); err != nil {
+			return err
+		}
 	}
 
 	pipe := s.client.Pipeline()
-
-	stale := make(map[string]struct{}, len(existing))
-	for _, k := range existing {
-		stale[k] = struct{}{}
-	}
-
+	upserts := make(map[string]string)
+	var deletes []string
 	for ticketID, ticket := range tickets {
-		delete(stale, ticketID)
 		encoded, err := json.Marshal(ticket)
 		if err != nil {
 			return err
 		}
-		pipe.HSet(ctx, s.key, ticketID, string(encoded))
+		raw := string(encoded)
+		if prev, ok := s.lastPersisted[ticketID]; ok && prev == raw {
+			continue
+		}
+		pipe.HSet(ctx, s.key, ticketID, raw)
+		upserts[ticketID] = raw
 	}
 
-	for id := range stale {
-		pipe.HDel(ctx, s.key, id)
+	for ticketID := range s.lastPersisted {
+		if _, ok := tickets[ticketID]; !ok {
+			pipe.HDel(ctx, s.key, ticketID)
+			deletes = append(deletes, ticketID)
+		}
 	}
 
 	// Refresh the hash's TTL in the same round trip as the writes above.
 	pipe.Expire(ctx, s.key, ticketsTTL)
 
-	_, err = pipe.Exec(ctx)
-	return err
+	if _, err := pipe.Exec(ctx); err != nil {
+		return err
+	}
+	// Commit the baseline only now that the server acknowledged the writes;
+	// on error it stays untouched and the next persist re-sends the diff.
+	for ticketID, raw := range upserts {
+		s.lastPersisted[ticketID] = raw
+	}
+	for _, ticketID := range deletes {
+		delete(s.lastPersisted, ticketID)
+	}
+	return nil
 }
 
 func (s *redisTicketStore) close() error {
