@@ -203,3 +203,38 @@ describe('private match snapshot route', () => {
     expect(body.match.blackHand).toEqual([]);
   });
 });
+
+// The 8s abort budget (app/api/_lib/internal-service.ts) turns a wedged
+// match-service into a rejection; this route must translate it to the proxy
+// convention -- JSON 504 on timeout, JSON 502 otherwise -- instead of letting
+// Next turn an unhandled rejection into an opaque 500.
+describe('private match snapshot route upstream failures', () => {
+  it('answers 504 with a JSON body when the snapshot upstream times out', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new DOMException('The operation timed out', 'TimeoutError');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(new Request(`https://web.example/api/realtime/matches/${matchId}`), {
+      params: Promise.resolve({ matchId }),
+    });
+
+    expect(response.status).toBe(504);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    await expect(response.json()).resolves.toEqual({ error: 'match service timed out' });
+  });
+
+  it('answers 502 with a JSON body when the snapshot upstream is unreachable', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(new Request(`https://web.example/api/realtime/matches/${matchId}`), {
+      params: Promise.resolve({ matchId }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: 'match service is unreachable' });
+  });
+});

@@ -1,4 +1,4 @@
-import { filterHeaders } from '../../_lib/internal-service';
+import { filterResponseHeaders, NULL_BODY_STATUSES } from '../../_lib/internal-service';
 import { proxyGateway } from '../_lib/proxy';
 import { buildSessionSecretCookies } from './cookies';
 
@@ -31,7 +31,7 @@ async function bootstrapWithSecretCookies(request: Request): Promise<Response> {
     NULL_BODY_STATUSES.has(upstream.status) ? null : JSON.stringify(payload),
     {
       status: upstream.status,
-      headers: filterHeaders(upstream.headers),
+      headers: filterResponseHeaders(upstream.headers),
     },
   );
   for (const cookie of buildSessionSecretCookies(payload)) {
@@ -39,7 +39,3 @@ async function bootstrapWithSecretCookies(request: Request): Promise<Response> {
   }
   return response;
 }
-
-// The Fetch spec forbids a body on these statuses -- the Response constructor
-// throws "Invalid response status code" if body is anything other than null.
-const NULL_BODY_STATUSES = new Set([204, 205, 304]);

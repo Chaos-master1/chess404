@@ -13,7 +13,7 @@ const UPSTREAM_STREAM_TIMEOUT_MS = 15000;
 // other than null, even an empty string. Presence heartbeats return 204,
 // so every 204 through this proxy crashed into the catch block below and
 // surfaced as a misleading "gateway is unreachable" 502.
-const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+export const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 interface InternalServiceProxyConfig {
   explicitUrl?: string;
@@ -179,8 +179,39 @@ export function filterHeaders(headers: Headers): Headers {
   return next;
 }
 
+// Headers-based sibling of buildUpstreamHeaders for callers that build the
+// outgoing header set by hand (synthetic JSON headers, proxied request
+// headers) instead of deriving it from a whole Request: the hop filter plus
+// the per-target internal service token, nothing else.
+export function buildInternalHeaders(headers: Headers, target: InternalServiceTarget): Headers {
+  const next = filterHeaders(headers);
+  const token = internalServiceTokenForTarget(target);
+  if (token) {
+    next.set('x-chess404-service-token', token);
+  }
+  return next;
+}
+
+// Single owner for resolving an explicit internal-service URL against its
+// fallback: trims, strips a trailing slash, and rejects unexpanded template
+// placeholders or a trailing colon (an env that ended in "host:" without a
+// port).
+export function resolveBackendBaseUrl(explicit: string | undefined, fallback: string): string {
+  return sanitizeBaseUrl(explicit) ?? fallback;
+}
+
+// Dev-only raw-upstream gate: production always takes the public path; only
+// loopback hosts on a non-production build see local passthroughs.
+export function isLocalRequest(request: Request): boolean {
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
+  const host = request.headers.get('host')?.toLowerCase() ?? '';
+  return host.startsWith('localhost') || host.startsWith('127.0.0.1');
+}
+
 // buildUpstreamHeaders prepares the headers for the outgoing request to an
-// internal backend service. It does two things on top of filterHeaders:
+// internal backend service. It does two things on top of buildInternalHeaders:
 //
 //   1. Injects X-Forwarded-Proto and X-Forwarded-Host from the incoming
 //      request, so the backend can reconstruct the public origin for its
@@ -193,7 +224,7 @@ export function filterHeaders(headers: Headers): Headers {
 //      POSTs from the gateway arrive at the backend with no Origin and
 //      are rejected with 403 "CSRF check failed: origin header required".
 export function buildUpstreamHeaders(request: Request, target: InternalServiceTarget = 'gateway'): Headers {
-  const headers = filterHeaders(request.headers);
+  const headers = buildInternalHeaders(request.headers, target);
   const url = new URL(request.url);
   const forwardedHost = headers.get('x-forwarded-host') ?? url.host;
   const forwardedProto = headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '');
@@ -205,10 +236,6 @@ export function buildUpstreamHeaders(request: Request, target: InternalServiceTa
   }
   if (!headers.has('origin') && forwardedHost) {
     headers.set('origin', `${forwardedProto}://${forwardedHost}`);
-  }
-  const token = internalServiceTokenForTarget(target);
-  if (token) {
-    headers.set('x-chess404-service-token', token);
   }
   return headers;
 }
@@ -259,7 +286,7 @@ export function internalServiceTokenForTarget(target: InternalServiceTarget): st
   }
 }
 
-function filterResponseHeaders(headers: Headers): Headers {
+export function filterResponseHeaders(headers: Headers): Headers {
   const next = new Headers();
   headers.forEach((value, key) => {
     const lower = key.toLowerCase();
