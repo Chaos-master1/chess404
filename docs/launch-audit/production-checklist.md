@@ -111,26 +111,47 @@ real global limiter: tokened burst 100/100 OK, untokened burst 429s.
 Operational note: nothing to configure — the shared token envs already set
 on both services satisfy the lookup.
 
-## 8. Serialized pub/sub dial on match creation — FIXED 2026-10-04
+## 8. Burst-pairing stall after #13 — FIXED 2026-10-04 (three-part root cause)
 
-The token fix alone did not clear the soaks (20-pair still 22/40). The WARN
-log line added in section 7 plus a direct latency probe against production
-(`POST /api/matches`: serial ≈ 900ms; burst of 20 = a perfect arithmetic
-staircase 909 → 9692ms, ~450-500ms per step) exposed the real serializer:
-`RedisBroadcaster.Subscribe` dialed a dedicated pub/sub connection
-(cross-region TLS handshake) **while holding the global `b.mu`**, and
-`CreateMatch` → `ensureRedisRelay` → `Subscribe` runs on every new match
-(hydrate paths too). #13's concurrent Phase-2 creations each paid one
-serialized handshake at a time; matchmaking's 3s create timeout only
-survived ~5 concurrent creations. Pre-#13 it never showed because the lock
-convoy serialized pairing upstream.
+The post-#13 soaks (20-pair: 22/40 with 18 stuck; 100-pair: 22/200) had
+**three** stacked causes, each real, only the last one decisive for the
+staircase:
 
-Fix (`internal/match/broadcast_redis.go`): `Subscribe` now checks the map
-under `b.mu`, releases it, dials outside the lock, then re-locks to adopt or
-install the subscription (a lost race closes its extra connection).
-Concurrent creations dial in parallel instead of serializing; semantics
-otherwise unchanged. Regression tests (`broadcast_redis_test.go`, miniredis)
-cover publish/subscribe roundtrip, 30 concurrent distinct-match subscribes,
-and 12 concurrent same-match subscribes converging on one subscription with
-correct refcounting. Also documented go-redis's shared-channel `Channel()`
-semantics (multiple `Channel()` consumers drain one shared Go channel).
+1. **Missing service token (PR #14).** `httpMatchCreator.CreateMatch` sent
+   `POST /api/matches` without `X-Chess404-Service-Token`, so room creations
+   counted against match-service's global 60 req/min per-IP limit — the
+   100-pair soak minute logged 116 × 429s. Every 429 rolled the pair back to
+   queued **silently** (also fixed: WARN log on rollback), and the
+   re-enqueue's active-ticket re-join path never re-attempts pairing →
+   stranded pairs. `matchServiceCallerToken()` mirrors
+   `platformServiceCallerToken()` (destination's accept list).
+2. **Serialized pub/sub dial (PR #15).** `RedisBroadcaster.Subscribe` dialed
+   its dedicated connection under the global `b.mu`; `CreateMatch` →
+   `ensureRedisRelay` runs on every create (and hydrate). Necessary hygiene,
+   but the probe was unchanged after deploying it — see the deployment note.
+3. **Archive write under the global overlay lock (PR #16) — the decisive
+   serializer.** `MatchArchiveStore.FlushMatch` held `persistMu` + `s.mu`
+   across its single-row Postgres upsert, and that one `Exec` measures
+   **~450ms** on the shared managed Postgres. Concurrent creations queued one
+   archive write at a time: a production probe showed a perfect arithmetic
+   staircase, 909ms → 9.7s for a burst of 20 (`+~450ms` per step), against
+   matchmaking's 3s create timeout. The write loop's whole-transaction
+   `persistLocked` had the mirror bug (blocks every in-memory Upsert).
+   Single-row backends now snapshot under the lock and write outside it with
+   a generation-guarded dirty-clear; the file backend stays atomic (its
+   whole-file persist would erase siblings — caught by a test mid-development)
+   and SQLite caps its pool at one connection (single-writer engine).
+
+**Deployment lesson:** match-service is its own Railway service. The first
+two verification cycles ran `railway up -s platform-service` (which ships
+the platform + matchmaking binaries), so the match-service-side fixes in
+#15/#16 were merged but not running, and the probe appeared to disprove the
+hypothesis. Deploy the service that owns the changed binary before judging a
+fix. Always-on create-path timing logs (`match create timing: create=…
+archive_flush=… total=…`) now make this path observable permanently.
+
+**Final verified state (2026-10-04):** burst-20 creates 9.7s → **1.56s**
+wall, zero >2.5s; 20-pair soak **40/40 in 9.4s** (post-#12 baseline: 14.2s);
+100-pair soak **200/200 in 35.3s** — the first 100-pair pass ever recorded —
+0 stuck, 0 leaks, 0 claim failures, 0 × 429; e2e
+`queue-handoff-pairing-window` green; lobby drained to queuedCount=0.
