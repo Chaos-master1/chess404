@@ -65,3 +65,4 @@ lichess repo/
 # Compiled Go binaries (build artifacts)
 services/realtime/bin/
 services/realtime/gateway
+test_output.txt
