@@ -1,4 +1,4 @@
-import { internalServiceTokenForTarget } from '../../../_lib/internal-service';
+import { internalServiceTokenForTarget, UPSTREAM_TIMEOUT_MS } from '../../../_lib/internal-service';
 import { proxyRealtime } from '../../_lib/proxy';
 
 export const dynamic = 'force-dynamic';
@@ -34,6 +34,7 @@ export async function GET(
     method: 'GET',
     headers: upstreamHeaders,
     cache: 'no-store',
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
   const body = await upstream.text();
   if (!upstream.ok) {
@@ -201,6 +202,7 @@ async function resolveVerifiedMatchSeat(request: Request, matchId: string): Prom
         method: 'POST',
         headers: buildInternalHeaders(new Headers({ 'Content-Type': 'application/json', Accept: 'application/json' }), 'platform'),
         cache: 'no-store',
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
         body: JSON.stringify(payload),
       });
       if (!response.ok) {

@@ -1,5 +1,5 @@
 import { proxyMatchmaking } from '../../_lib/proxy';
-import { buildUpstreamHeaders } from '../../../_lib/internal-service';
+import { buildUpstreamHeaders, UPSTREAM_TIMEOUT_MS } from '../../../_lib/internal-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -109,6 +109,7 @@ async function validateRatedAccountSession(
     method: 'POST',
     headers: ensureJSONHeaders(buildUpstreamHeaders(request, 'platform')),
     cache: 'no-store',
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     body: JSON.stringify({ accountId, sessionToken }),
   });
 
@@ -144,6 +145,7 @@ async function forwardMatchmaking(request: Request, payload: QueueTicketCreatePa
     method: 'POST',
     headers: ensureJSONHeaders(buildUpstreamHeaders(request)),
     cache: 'no-store',
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     body: JSON.stringify(payload),
   });
 
