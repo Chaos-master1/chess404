@@ -135,6 +135,21 @@ func platformServiceCallerToken() string {
 	return ""
 }
 
+// matchServiceCallerToken is the credential this service SENDS to
+// match-service (its accept list, in precedence order) so room creations
+// are exempt from match-service's global per-IP rate limit. Mirrors
+// platformServiceCallerToken: deliberately independent of the inbound
+// chain -- staging MATCHMAKING_INTERNAL_SERVICE_TOKEN here must not
+// change what we send to match-service.
+func matchServiceCallerToken() string {
+	for _, name := range []string{"MATCH_INTERNAL_SERVICE_TOKEN", "PLATFORM_INTERNAL_SERVICE_TOKEN", "CHESS404_INTERNAL_SERVICE_TOKEN", "INTERNAL_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // checkAccountRestriction consults the platform-service moderation store to
 // determine whether the supplied account is currently banned or suspended.
 // Returns (true, kind) when the account is restricted, (false, "") when it is
@@ -492,8 +507,9 @@ func openMatchmakingService() (*matchmaking.Service, error) {
 	log.Printf("[matchmaking] Initializing with match service URL: %s", matchServiceURL)
 
 	serviceCreator := &httpMatchCreator{
-		baseURL: matchServiceURL,
-		client:  &http.Client{Timeout: 3 * time.Second},
+		baseURL:      matchServiceURL,
+		serviceToken: matchServiceCallerToken(),
+		client:       &http.Client{Timeout: 3 * time.Second},
 	}
 
 	var (
@@ -587,8 +603,9 @@ func queueSnapshots(service *matchmaking.Service, queueFilter matchmaking.QueueN
 }
 
 type httpMatchCreator struct {
-	baseURL string
-	client  *http.Client
+	baseURL      string
+	serviceToken string
+	client       *http.Client
 }
 
 func (c *httpMatchCreator) CreateMatch(assignment matchmaking.MatchAssignment) error {
@@ -645,6 +662,14 @@ func (c *httpMatchCreator) CreateMatch(assignment matchmaking.MatchAssignment) e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", c.baseURL)
+	if c.serviceToken != "" {
+		// Present the internal service token so match-service's trusted
+		// bypass exempts room creation from its global per-IP rate limit.
+		// Without it, a burst of pairings 429s at 60 req/min and every
+		// failed create rolls both tickets back to queued, stranding the
+		// pair until some later guest enqueues.
+		req.Header.Set("X-Chess404-Service-Token", c.serviceToken)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[matchmaking] ERROR: failed to send match creation request for room %s: %v", assignment.RoomID, err)

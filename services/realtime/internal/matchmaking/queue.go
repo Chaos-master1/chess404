@@ -547,6 +547,7 @@ func (s *Service) completePairingLocked(ticketID, opponentID string, assignment 
 		// waiting and polling for minutes and must simply keep waiting. If
 		// the room was half-created despite the error it holds no ticket and
 		// the match-service zombie GC finalizes it as an abandon draw.
+		log.Printf("matchmaking: rolling back pairing reservation for room %s to queued after create failure: %v (tickets stay queued and pair with the next arrival)", assignment.RoomID, createErr)
 		s.rollbackPairingLocked(t, o, s.nowUTC())
 		return Ticket{}, createErr
 	}
