@@ -81,3 +81,32 @@ https://station.railway.com/questions/security-critical-questions-on-edge-prox-8
 Leftmost-XFF parsing in `ClientIP` is therefore correct for Railway: no code
 change needed, and no `TRUST_FORWARDED_HEADERS` variable to set (the
 `RAILWAY_ENVIRONMENT` default already covers production).
+
+## 7. Internal service token on room creation — FIXED 2026-10-04
+
+The post-#13 soak regression (20-pair: 22/40 completed with 18 tickets stuck
+queued; 100-pair: 22/200) traced to `httpMatchCreator.CreateMatch` sending
+`POST /api/matches` to match-service **without** the
+`X-Chess404-Service-Token` header. match-service's trusted bypass
+(`GlobalIPRateLimitMiddleware(rl, internalToken)`) was wired correctly but
+never saw a token to match, so every room creation counted against the
+global per-IP budget of 60 req/min. #12's slow pairing spread creations out;
+#13's fast pairing burst them: match-service logged 116 × 429 on
+`POST /api/matches` in the 100-pair soak minute, all from the matchmaking
+container IP. Each 429 made `completePairingLocked` silently roll both
+tickets back to queued (no log line — a forensic blind spot, also fixed),
+and the subsequent re-enqueue hit the active-ticket re-join path, which
+never re-attempts pairing — stranding the pair until a later enqueue or the
+queued TTL.
+
+Fix (matchmaking-service): new `matchServiceCallerToken()` reads
+match-service's accept list in precedence order
+(`MATCH_INTERNAL_SERVICE_TOKEN`, `PLATFORM_INTERNAL_SERVICE_TOKEN`,
+`CHESS404_INTERNAL_SERVICE_TOKEN`, `INTERNAL_SERVICE_TOKEN` — mirroring the
+existing `platformServiceCallerToken()` pattern) and `httpMatchCreator` now
+sets the header on every create when a token is configured. All other
+service-to-service callers already sent the token; this was the one gap.
+Regression tests (`match_creator_test.go`) reproduce the burst against the
+real global limiter: tokened burst 100/100 OK, untokened burst 429s.
+Operational note: nothing to configure — the shared token envs already set
+on both services satisfy the lookup.
