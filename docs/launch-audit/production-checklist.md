@@ -110,3 +110,27 @@ Regression tests (`match_creator_test.go`) reproduce the burst against the
 real global limiter: tokened burst 100/100 OK, untokened burst 429s.
 Operational note: nothing to configure — the shared token envs already set
 on both services satisfy the lookup.
+
+## 8. Serialized pub/sub dial on match creation — FIXED 2026-10-04
+
+The token fix alone did not clear the soaks (20-pair still 22/40). The WARN
+log line added in section 7 plus a direct latency probe against production
+(`POST /api/matches`: serial ≈ 900ms; burst of 20 = a perfect arithmetic
+staircase 909 → 9692ms, ~450-500ms per step) exposed the real serializer:
+`RedisBroadcaster.Subscribe` dialed a dedicated pub/sub connection
+(cross-region TLS handshake) **while holding the global `b.mu`**, and
+`CreateMatch` → `ensureRedisRelay` → `Subscribe` runs on every new match
+(hydrate paths too). #13's concurrent Phase-2 creations each paid one
+serialized handshake at a time; matchmaking's 3s create timeout only
+survived ~5 concurrent creations. Pre-#13 it never showed because the lock
+convoy serialized pairing upstream.
+
+Fix (`internal/match/broadcast_redis.go`): `Subscribe` now checks the map
+under `b.mu`, releases it, dials outside the lock, then re-locks to adopt or
+install the subscription (a lost race closes its extra connection).
+Concurrent creations dial in parallel instead of serializing; semantics
+otherwise unchanged. Regression tests (`broadcast_redis_test.go`, miniredis)
+cover publish/subscribe roundtrip, 30 concurrent distinct-match subscribes,
+and 12 concurrent same-match subscribes converging on one subscription with
+correct refcounting. Also documented go-redis's shared-channel `Channel()`
+semantics (multiple `Channel()` consumers drain one shared Go channel).

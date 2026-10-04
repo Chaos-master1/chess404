@@ -78,23 +78,56 @@ func (b *RedisBroadcaster) Publish(matchID string, data []byte) error {
 }
 
 func (b *RedisBroadcaster) Subscribe(matchID string) <-chan []byte {
+	// Fast path: an existing subscription for this match -- bump the
+	// refcount and fan out. No network I/O is ever done while holding
+	// b.mu (see the slow-path comment for why that matters).
 	b.mu.Lock()
-
-	sub, ok := b.subs[matchID]
-	if !ok {
-		ps := b.client.Subscribe(context.Background(), b.channelName(matchID))
-		sub = &redisSubscription{ps: ps, refCount: 0}
-		b.subs[matchID] = sub
+	if sub, ok := b.subs[matchID]; ok {
+		atomic.AddInt32(&sub.refCount, 1)
+		ps := sub.ps
+		b.mu.Unlock()
+		return b.fanOut(matchID, ps)
 	}
-	atomic.AddInt32(&sub.refCount, 1)
-	ps := sub.ps
 	b.mu.Unlock()
 
-	// Each subscriber gets its own buffered channel. The relay goroutine
-	// never blocks longer than a single message write: if the local
-	// consumer is slow, the message is dropped (and logged) so the
-	// shared ps.Channel() stays drained. This prevents one slow consumer
-	// from blocking every other subscriber's delivery.
+	// Slow path: dial the dedicated pub/sub connection OUTSIDE b.mu.
+	// client.Subscribe performs a TCP+TLS handshake, which on a
+	// cross-region managed Redis costs hundreds of milliseconds; holding
+	// the global mutex across it serialized every concurrent match
+	// creation behind one handshake at a time (observed in production as
+	// a ~450ms-per-creation latency staircase that blew matchmaking's 3s
+	// create timeout under burst pairing). Concurrent creators now dial
+	// in parallel; a caller that loses the race closes its extra
+	// connection and adopts the winner's subscription. A concurrent
+	// Unsubscribe in the same window no-ops (it finds no map entry), and
+	// the re-check under the lock prevents any use-after-close.
+	ps := b.client.Subscribe(context.Background(), b.channelName(matchID))
+
+	b.mu.Lock()
+	sub, ok := b.subs[matchID]
+	if ok {
+		b.mu.Unlock()
+		_ = ps.Close()
+		atomic.AddInt32(&sub.refCount, 1)
+		return b.fanOut(matchID, sub.ps)
+	}
+	sub = &redisSubscription{ps: ps, refCount: 1}
+	b.subs[matchID] = sub
+	b.mu.Unlock()
+
+	return b.fanOut(matchID, sub.ps)
+}
+
+// fanOut returns a buffered channel fed by a dedicated goroutine draining
+// the subscription's shared message channel. Note: go-redis's PubSub.Channel()
+// returns the SAME Go channel on every call, so multiple Subscribe calls for
+// one matchID drain a shared channel (messages are distributed between
+// consumers, not duplicated). Production subscribes exactly once per match
+// (ensureRedisRelay's relayStarted guard), so in practice each PubSub has a
+// single consumer. The relay goroutine never blocks longer than a single
+// message write: if the consumer is slow, the message is dropped (and logged)
+// so the underlying channel stays drained.
+func (b *RedisBroadcaster) fanOut(matchID string, ps *redis.PubSub) <-chan []byte {
 	ch := make(chan []byte, 64)
 	go func() {
 		defer close(ch)
