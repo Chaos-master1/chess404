@@ -30,6 +30,7 @@ afterEach(() => {
 describe('private match snapshot route', () => {
   it('forwards a seat credential only after platform ownership verification', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal); // every upstream call must be bounded (see app/api/_lib/internal-service.ts)
       if (url === claimsUrl) {
         expect(JSON.parse(String(init?.body))).toMatchObject({
           matchId,
@@ -67,6 +68,7 @@ describe('private match snapshot route', () => {
 
   it('does not return a direct-match snapshot when ownership verification fails', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal); // every upstream call must be bounded (see app/api/_lib/internal-service.ts)
       if (url === claimsUrl) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
       expect(url).toBe(matchUrl);
       const headers = new Headers(init?.headers);
@@ -145,6 +147,7 @@ describe('private match snapshot route', () => {
   // may be a live private match, and the client then drops its seat state.
   it('answers 503 (not 404) when the claims service is down and the match is not public-readable', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal); // every upstream call must be bounded (see app/api/_lib/internal-service.ts)
       if (url === claimsUrl) return new Response(JSON.stringify({ error: 'internal' }), { status: 500 });
       expect(url).toBe(matchUrl);
       return new Response(JSON.stringify(snapshot()));
@@ -165,6 +168,7 @@ describe('private match snapshot route', () => {
 
   it('answers 503 when the claims service is unreachable over the network', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal); // every upstream call must be bounded (see app/api/_lib/internal-service.ts)
       if (url === claimsUrl) throw new TypeError('fetch failed');
       expect(url).toBe(matchUrl);
       return new Response(JSON.stringify(snapshot()));

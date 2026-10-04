@@ -2,7 +2,7 @@
 // default headers timeout is 300s, which is far longer than any healthy
 // internal hop and long enough for a wedged upstream to exhaust the Next.js
 // event loop.
-const UPSTREAM_TIMEOUT_MS = 8000;
+export const UPSTREAM_TIMEOUT_MS = 8000;
 // Must stay >= the upstream long-poll window (platform-service holds
 // /inbox/stream for ~15s per request). This budget covers response
 // establishment only -- see proxyInternalServiceStream.
