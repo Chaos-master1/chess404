@@ -290,7 +290,7 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 				}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"ticket":   wireTicket(ticket),
+					"ticket":   matchmaking.WireTicket{Ticket: ticket},
 					"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
 				})
 				return
@@ -306,9 +306,17 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 			}
 			queue := parseQueueName(r.URL.Query().Get("queue"))
 			modeID := parseModeID(r.URL.Query().Get("modeId"))
+			// Even though this list is internal-only, it still projects every
+			// ticket so no reader can ever observe the pairing reservation
+			// through this binary, whatever their access level.
+			listed := service.List(queue, modeID)
+			wireList := make([]matchmaking.WireTicket, len(listed))
+			for i, t := range listed {
+				wireList[i] = matchmaking.WireTicket{Ticket: t}
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"tickets": service.List(queue, modeID),
+				"tickets": wireList,
 			})
 		case http.MethodPost:
 			var payload struct {
@@ -379,7 +387,7 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 						// The requester supplied only a guestId (public in every snapshot and
 						// directory), so this response must not re-reveal the cancel
 						// credential: knowing a guestId must not grant ticket cancellation.
-						"ticket":   wireTicket(activeErr.Ticket),
+						"ticket":   matchmaking.WireTicket{Ticket: activeErr.Ticket},
 						"snapshot": service.Snapshot(activeErr.Ticket.Queue, activeErr.Ticket.ModeID),
 					})
 					return
@@ -421,7 +429,7 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 			// be anyone. The cancel secret is issued exactly once, on the
 			// POST create response, to the enqueuing client -- never here.
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ticket":   wireTicket(ticket),
+				"ticket":   matchmaking.WireTicket{Ticket: ticket},
 				"snapshot": service.Snapshot(ticket.Queue, ticket.ModeID),
 			})
 		case http.MethodDelete:
@@ -468,7 +476,7 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ticket":   wireTicket(cancelled),
+				"ticket":   matchmaking.WireTicket{Ticket: cancelled},
 				"snapshot": service.Snapshot(cancelled.Queue, cancelled.ModeID),
 			})
 		default:
@@ -556,20 +564,6 @@ func hasInternalServiceAccess(r *http.Request, token string) bool {
 		}
 	}
 	return false
-}
-
-// wireTicket projects a stored ticket onto its client-safe wire shape before
-// it is embedded in an API response:
-//   - PublicView hides the internal two-phase pairing reservation (a ticket
-//     reserved for an in-flight match creation must read as a plain queued
-//     ticket with no assigned room, or polling clients freeze mid-handoff:
-//     they stop seeking on any non-queued status and only act on 'matched').
-//   - the cancel credential is stripped; only the POST /tickets create
-//     response ever carries it, exactly once, to the enqueuing client.
-func wireTicket(ticket matchmaking.Ticket) matchmaking.Ticket {
-	ticket = ticket.PublicView()
-	ticket.CancelSecret = ""
-	return ticket
 }
 
 func queueSnapshots(service *matchmaking.Service, queueFilter matchmaking.QueueName, modeFilter contracts.MatchModeID) []matchmaking.QueueSnapshot {

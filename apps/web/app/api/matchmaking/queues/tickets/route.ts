@@ -1,4 +1,5 @@
 import { proxyMatchmaking } from '../../_lib/proxy';
+import { buildUpstreamHeaders } from '../../../_lib/internal-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,7 +107,7 @@ async function validateRatedAccountSession(
 ): Promise<PlatformAccountSessionPayload | Response> {
   const upstream = await fetch(`${platformBaseUrl}/api/platform/account-sessions`, {
     method: 'POST',
-    headers: ensureJSONHeaders(filterHeaders(request.headers)),
+    headers: ensureJSONHeaders(buildUpstreamHeaders(request, 'platform')),
     cache: 'no-store',
     body: JSON.stringify({ accountId, sessionToken }),
   });
@@ -133,9 +134,15 @@ async function validateRatedAccountSession(
 }
 
 async function forwardMatchmaking(request: Request, payload: QueueTicketCreatePayload): Promise<Response> {
+  // The enqueue POST must carry the same upstream contract as every other
+  // proxy path: an Origin the backend's CSRF check can validate even when the
+  // caller is a server (browsers omit Origin on same-origin POSTs), and the
+  // internal service token that takes the request out of the shared per-IP
+  // bulkheads. Without them a busy origin's enqueues ride the raw 60/min
+  // global cap and 429 under load.
   const upstream = await fetch(`${matchmakingBaseUrl}/api/queues/tickets`, {
     method: 'POST',
-    headers: ensureJSONHeaders(filterHeaders(request.headers)),
+    headers: ensureJSONHeaders(buildUpstreamHeaders(request)),
     cache: 'no-store',
     body: JSON.stringify(payload),
   });
@@ -172,18 +179,6 @@ function ensureJSONHeaders(headers: Headers): Headers {
   if (!next.has('Accept')) {
     next.set('Accept', 'application/json');
   }
-  return next;
-}
-
-function filterHeaders(headers: Headers): Headers {
-  const next = new Headers();
-  headers.forEach((value, key) => {
-    const lower = key.toLowerCase();
-    if (lower === 'host' || lower === 'connection' || lower === 'content-length') {
-      return;
-    }
-    next.set(key, value);
-  });
   return next;
 }
 

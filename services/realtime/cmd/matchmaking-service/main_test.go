@@ -356,6 +356,73 @@ func TestDeleteTicketWithoutSecretIsForbidden(t *testing.T) {
 	}
 }
 
+// The handler layer wraps every response ticket in WireTicket, whose
+// MarshalJSON projects through PublicView. That makes the projection a
+// marshal-time property: even a future call site that forgets the wrapper
+// cannot serialize a raw stored ticket through this type. This pins the
+// projection at the type level, independent of any handler wiring.
+func TestWireTicketMarshalsProjectedNotRaw(t *testing.T) {
+	reserved := matchmaking.Ticket{
+		TicketID:     "ticket_leakcheck",
+		GuestID:      "guest_leakcheck",
+		Queue:        matchmaking.QueueCasual,
+		ModeID:       contracts.MatchModeOpenCards,
+		Status:       matchmaking.StatusPairing,
+		Rating:       1200,
+		AssignedRoom: "room_reservedmidcreate",
+		SeatColor:    "",
+		CancelSecret: "cancel_secret_stored_internal",
+	}
+
+	// Marshal through the exact shape the handlers embed in responses.
+	wire, err := json.Marshal(map[string]any{"ticket": matchmaking.WireTicket{Ticket: reserved}})
+	if err != nil {
+		t.Fatalf("WireTicket must marshal: %v", err)
+	}
+	body := string(wire)
+	if strings.Contains(body, string(matchmaking.StatusPairing)) {
+		t.Fatalf("WireTicket leaked the pairing reservation: %s", body)
+	}
+	if strings.Contains(body, reserved.AssignedRoom) {
+		t.Fatalf("WireTicket leaked the reserved room: %s", body)
+	}
+	if strings.Contains(body, reserved.CancelSecret) {
+		t.Fatalf("WireTicket leaked the cancel secret: %s", body)
+	}
+	if !strings.Contains(body, `"status":"queued"`) {
+		t.Fatalf("WireTicket must present the reservation as plain queued, got %s", body)
+	}
+
+	// The embedded state must marshal FLAT (the embedded Ticket's fields, not
+	// a nested object) so the wire contract is byte-for-byte what handlers
+	// shipped before the wrapper existed.
+	var decoded struct {
+		Ticket map[string]any `json:"ticket"`
+	}
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatalf("response shape must decode like the old flat ticket: %v", err)
+	}
+	if decoded.Ticket["ticketId"] != reserved.TicketID {
+		t.Fatalf("expected flat embedded fields (ticketId at ticket level), got %s", body)
+	}
+	if _, nested := decoded.Ticket["Ticket"]; nested {
+		t.Fatalf("WireTicket must not introduce a nested object into the wire contract: %s", body)
+	}
+
+	// PublicView is idempotent: wrapping an already-projected ticket (the
+	// service returns public views on some paths) must not change anything.
+	// Marshal through the same response shape so the comparison is apples to
+	// apples.
+	alreadyProjected := matchmaking.WireTicket{Ticket: reserved.PublicView()}
+	twice, err := json.Marshal(map[string]any{"ticket": alreadyProjected})
+	if err != nil {
+		t.Fatalf("double projection must marshal: %v", err)
+	}
+	if string(twice) != body {
+		t.Fatalf("projection must be idempotent:\nfirst:  %s\nsecond: %s", body, twice)
+	}
+}
+
 // pairingMatchCreator blocks inside CreateMatch until released, holding the
 // two-phase pairing reservation open so a test can observe the reserved
 // window deterministically.
