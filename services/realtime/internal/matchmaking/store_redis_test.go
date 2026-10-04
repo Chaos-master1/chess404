@@ -28,6 +28,7 @@ func TestRedisQueueStorePersistSetsBackstopTTL(t *testing.T) {
 	if _, err := service.Enqueue(QueueRated, contracts.MatchModeOpenCards, "guest_ttl", 1200, "Ttl"); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
+	service.flushNow()
 
 	if ttl := redisServer.TTL(defaultRedisTicketKey); ttl != ticketsTTL {
 		t.Fatalf("expected queue hash TTL %v, got %v", ticketsTTL, ttl)
@@ -52,6 +53,7 @@ func TestRedisQueueStorePersistsAcrossReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue second ticket: %v", err)
 	}
+	service.flushNow()
 
 	reloaded, err := NewRedisPersistentService(redisURL, "")
 	if err != nil {
@@ -154,6 +156,7 @@ func TestRedisQueueStorePersistWritesOnlyChangedTickets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue first ticket: %v", err)
 	}
+	service.flushNow()
 	if got := counter.of("hset"); got != 1 {
 		t.Fatalf("expected exactly 1 HSET for first enqueue, got %d (counts %v)", got, counter.counts)
 	}
@@ -168,6 +171,7 @@ func TestRedisQueueStorePersistWritesOnlyChangedTickets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-enqueue ticket: %v", err)
 	}
+	service.flushNow()
 	if got := counter.of("hset"); got != 1 {
 		t.Fatalf("expected exactly 1 HSET for the re-issued secret, got %d (counts %v)", got, counter.counts)
 	}
@@ -184,6 +188,7 @@ func TestRedisQueueStorePersistWritesOnlyChangedTickets(t *testing.T) {
 	if _, _, err := service.Cancel(rejoined.TicketID, rejoined.CancelSecret); err != nil {
 		t.Fatalf("cancel ticket: %v", err)
 	}
+	service.flushNow()
 	if got := counter.of("hgetall") + counter.of("hkeys"); got != 0 {
 		t.Fatalf("expected no read probes on cancel, got %d (counts %v)", got, counter.counts)
 	}
@@ -222,6 +227,7 @@ func TestRedisQueueStorePruneDeletesOnlyExpiredFields(t *testing.T) {
 	if _, _, err := service.CancelByService(first.TicketID); err != nil {
 		t.Fatalf("cancel first ticket: %v", err)
 	}
+	service.flushNow()
 
 	originalNow := service.now
 	service.now = func() time.Time { return originalNow().Add(31 * time.Second) }
@@ -231,6 +237,7 @@ func TestRedisQueueStorePruneDeletesOnlyExpiredFields(t *testing.T) {
 	if _, ok := service.Get(first.TicketID); ok {
 		t.Fatalf("expected expired ticket to be pruned")
 	}
+	service.flushNow()
 	if got := counter.of("hdel"); got != 1 {
 		t.Fatalf("expected exactly 1 HDEL for the expired ticket, got %d (counts %v)", got, counter.counts)
 	}
@@ -290,11 +297,17 @@ func TestRedisQueueStoreFailedPersistResendsDiff(t *testing.T) {
 	}
 	defer func() { _ = service.Close() }()
 
+	// Write-behind semantics: enqueue stays available while the store is
+	// down (in-memory only), the flush fails without advancing the diff
+	// baseline, and the update is re-sent once the store recovers.
 	redisServer.SetError("injected outage")
-	if _, err := service.Enqueue(QueueRated, contracts.MatchModeOpenCards, "guest_retry", 1200, "Retry"); err == nil {
-		t.Fatalf("expected enqueue to fail while redis errors")
+	queued, err := service.Enqueue(QueueRated, contracts.MatchModeOpenCards, "guest_retry", 1200, "Retry")
+	if err != nil {
+		t.Fatalf("enqueue must succeed while redis errors (write-behind): %v", err)
 	}
+	service.flushNow() // fails: baseline stays put, retry scheduled
 	redisServer.SetError("")
+	service.flushNow() // retry re-sends the missing diff
 
 	reloaded, err := NewRedisPersistentService(redisURL, "")
 	if err != nil {
@@ -302,11 +315,67 @@ func TestRedisQueueStoreFailedPersistResendsDiff(t *testing.T) {
 	}
 	defer func() { _ = reloaded.Close() }()
 
-	again, err := reloaded.Enqueue(QueueRated, contracts.MatchModeOpenCards, "guest_retry", 1200, "Retry")
-	if err != nil {
-		t.Fatalf("enqueue after outage: %v", err)
-	}
-	if _, ok := reloaded.Get(again.TicketID); !ok {
+	if _, ok := reloaded.Get(queued.TicketID); !ok {
 		t.Fatalf("expected retried ticket to be persisted after the outage")
 	}
 }
+
+// The flusher must never hold s.mu across the store write: queue operations
+// stay instant even while a slow (cross-region) persist is in flight. Before
+// the off-lock flush, every operation serialized behind the WAN roundtrip and
+// the platform collapsed past ~40 concurrent guests.
+func TestQueueOpsDoNotBlockOnRedisFlush(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisURL := "redis://" + redisServer.Addr() + "/0"
+
+	inner, err := newRedisTicketStore(redisURL, "")
+	if err != nil {
+		t.Fatalf("create redis ticket store: %v", err)
+	}
+	t.Cleanup(func() { _ = inner.close() })
+
+	slow := &slowStore{inner: inner, delay: 400 * time.Millisecond}
+	service, err := newPersistentService(slow)
+	if err != nil {
+		t.Fatalf("create persistent service: %v", err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+
+	start := time.Now()
+	ticket, err := service.Enqueue(QueueRated, contracts.MatchModeOpenCards, "guest_offlock", 1200, "Offlock")
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= 200*time.Millisecond {
+		t.Fatalf("enqueue waited on the store write: %v with %v store latency", elapsed, slow.delay)
+	}
+
+	readStart := time.Now()
+	if _, ok := service.Get(ticket.TicketID); !ok {
+		t.Fatalf("expected ticket to be readable in memory")
+	}
+	if elapsed := time.Since(readStart); elapsed >= 200*time.Millisecond {
+		t.Fatalf("read blocked behind an in-flight flush: %v", elapsed)
+	}
+
+	// Drain the coalesced flush and prove the write actually landed.
+	service.flushNow()
+	if got := redisServer.HGet(defaultRedisTicketKey, ticket.TicketID); got == "" {
+		t.Fatalf("expected ticket flushed to the store after flushNow")
+	}
+}
+
+// slowStore wraps a real store with write latency, simulating the
+// cross-region Redis without leaving the test process.
+type slowStore struct {
+	inner ticketStore
+	delay time.Duration
+}
+
+func (s *slowStore) backend() string                  { return s.inner.backend() }
+func (s *slowStore) load() (map[string]Ticket, error) { return s.inner.load() }
+func (s *slowStore) persist(tickets map[string]Ticket) error {
+	time.Sleep(s.delay)
+	return s.inner.persist(tickets)
+}
+func (s *slowStore) close() error { return s.inner.close() }

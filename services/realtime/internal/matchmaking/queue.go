@@ -139,6 +139,18 @@ type Service struct {
 	pairingRecoveryTTL time.Duration
 	cancelledTicketTTL time.Duration
 	cleanupStopCh      chan struct{}
+	// flushMu serializes store writes across the background flusher and any
+	// synchronous drain (tests, Close), keeping the redis store's
+	// single-writer diff baseline safe.
+	flushMu sync.Mutex
+	// persistCh (capacity 1) coalesces flush requests: persistLocked only
+	// signals it, and flushLoop snapshots tickets under s.mu and performs
+	// the WAN store write OUTSIDE s.mu -- so queue reads and mutations
+	// never wait on the cross-region Redis roundtrip. Local stores
+	// (file/sqlite) bypass this path and stay write-through.
+	persistCh   chan struct{}
+	persistStop chan struct{}
+	persistDone chan struct{}
 }
 
 type MatchAssignment struct {
@@ -206,7 +218,12 @@ func NewRedisPersistentService(redisURL, key string) (*Service, error) {
 
 func newPersistentService(store ticketStore) (*Service, error) {
 	service := newService(store)
-	if err := service.loadLocked(); err != nil {
+	// Hold s.mu across the initial load: the flusher goroutine may already
+	// be running and reads s.tickets under the same lock.
+	service.mu.Lock()
+	err := service.loadLocked()
+	service.mu.Unlock()
+	if err != nil {
 		_ = store.close()
 		return nil, err
 	}
@@ -224,8 +241,12 @@ func newService(store ticketStore) *Service {
 		pairingRecoveryTTL: defaultPairingRecoveryTTL,
 		cancelledTicketTTL: defaultCancelledTicketTTL,
 		cleanupStopCh:      make(chan struct{}),
+		persistCh:          make(chan struct{}, 1),
+		persistStop:        make(chan struct{}),
+		persistDone:        make(chan struct{}),
 	}
 	s.startCleanupLoop()
+	go s.flushLoop()
 	return s
 }
 
@@ -267,6 +288,10 @@ func (s *Service) SetMatchCreator(creator MatchCreator) {
 
 func (s *Service) Close() error {
 	close(s.cleanupStopCh)
+	// Drain any pending flush before closing the store so a graceful
+	// shutdown never drops the last coalesced writes.
+	close(s.persistStop)
+	<-s.persistDone
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.store == nil {
@@ -929,7 +954,72 @@ func (s *Service) persistLocked() error {
 	if s.store == nil {
 		return nil
 	}
-	return s.store.persist(s.tickets)
+	if s.store.backend() != "redis" {
+		// Local stores are fast and callers rely on immediate error
+		// feedback: write through synchronously, as before.
+		return s.store.persist(s.tickets)
+	}
+	// The redis store is cross-region. Holding s.mu across that roundtrip
+	// convoyed every queue operation behind it -- at 200 concurrent guests
+	// every poll waited multiple seconds for its turn on the mutex and the
+	// web layer timed out at its 8s upstream budget. Signal the flusher
+	// instead: mutations stay in-memory, the WAN write happens off-lock,
+	// and a crash loses at most the last unflushed coalesced batch (queue
+	// state is TTL-recovered and guests simply re-enqueue after a restart).
+	select {
+	case s.persistCh <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// flushLoop drains persistCh and performs the actual store write outside
+// s.mu. A failed write is retried after a short backoff: the store's diff
+// baseline only advances on success, so the retry re-sends what is missing.
+func (s *Service) flushLoop() {
+	defer close(s.persistDone)
+	for {
+		select {
+		case <-s.persistStop:
+			s.flushPersist()
+			return
+		case <-s.persistCh:
+			s.flushPersist()
+		}
+	}
+}
+
+// flushPersist snapshots the tickets under s.mu, then writes with flushMu
+// held and s.mu released. Cloning while holding flushMu keeps write order
+// equal to snapshot order, so a drain can never land older state after
+// newer state.
+func (s *Service) flushPersist() {
+	if s.store == nil || s.store.backend() != "redis" {
+		return
+	}
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+	s.mu.Lock()
+	snapshot := make(map[string]Ticket, len(s.tickets))
+	for id, ticket := range s.tickets {
+		snapshot[id] = ticket
+	}
+	s.mu.Unlock()
+	if err := s.store.persist(snapshot); err != nil {
+		log.Printf("matchmaking: redis flush failed (retrying): %v", err)
+		time.AfterFunc(500*time.Millisecond, func() {
+			select {
+			case s.persistCh <- struct{}{}:
+			default:
+			}
+		})
+	}
+}
+
+// flushNow forces a synchronous flush. Used by tests and shutdown paths
+// that must observe persisted state immediately.
+func (s *Service) flushNow() {
+	s.flushPersist()
 }
 
 func normalizeModeID(modeID contracts.MatchModeID) contracts.MatchModeID {

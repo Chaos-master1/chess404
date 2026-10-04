@@ -65,3 +65,19 @@ The 2026-09-02 quick pass is superseded. Note: the workspace commit hook
 (`mimosa` L3) still hard-blocks commits on two of the triaged false positives
 (`pytrainer/network.py`, `anticheat/stockfish.go`) and has no suppression
 mechanism — commits go through the GitHub API until that is adjusted.
+
+## 6. Per-IP rate-limit keying — VERIFIED SAFE 2026-10-04
+
+`rate_limit.ClientIP` trusts forwarded headers on Railway (`RAILWAY_ENVIRONMENT`
+auto-enables trust via `trustForwardedHeaders()`), so the live risk was spoofed
+`X-Real-IP` / `X-Forwarded-For` values minting fresh per-IP limiter keys.
+Verified empirically: a direct request to match-service carrying
+`X-Forwarded-For: 6.6.6.6` arrived server-side as
+`ip="154.110.214.204, 152.233.13.166"` — the spoof was dropped and the real
+connecting IP is the first value. This matches Railway staff's documented edge
+behavior (edge strips and rewrites XFF; first value = real connecting IP;
+`X-Real-IP` overwritten as a single source of truth; see the employee reply in
+https://station.railway.com/questions/security-critical-questions-on-edge-prox-8fddd775).
+Leftmost-XFF parsing in `ClientIP` is therefore correct for Railway: no code
+change needed, and no `TRUST_FORWARDED_HEADERS` variable to set (the
+`RAILWAY_ENVIRONMENT` default already covers production).
