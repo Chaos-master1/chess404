@@ -46,6 +46,24 @@ jobs:
             exit 0
           fi
 
+      - name: Install pg_dump matching the server major (Postgres 18)
+        run: |
+          # ubuntu-latest ships postgresql-client 16, but the Railway Postgres
+          # server is 18.x and pg_dump refuses cross-major dumps ("server
+          # version mismatch"). Install the PGDG client for the server's major
+          # and put it first on PATH. When Railway bumps the server major,
+          # bump the package and the /usr/lib path below; the failure mode is
+          # an explicit pg_dump version-mismatch error.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version
+
       - name: Dump and upload
         run: |
           chmod +x deploy/postgres-backup.sh
