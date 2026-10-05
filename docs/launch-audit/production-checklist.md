@@ -17,22 +17,38 @@ Minimum: `ACCOUNT_EMAIL_DELIVERY_PROVIDER=smtp`, `ACCOUNT_EMAIL_SMTP_ADDRESS`,
 `ACCOUNT_EMAIL_SMTP_PASSWORD`, `ACCOUNT_EMAIL_SMTP_TLS=true`.
 Verify: request a password reset and confirm the mail arrives.
 
-## 2. No database backups
+## 2. No database backups — RESOLVED 2026-10-05 (verified end-to-end incl. restore)
 
-Nothing schedules `deploy/postgres-backup.sh` (verified 2026-09-02 — no cron,
-no CI reference), and production archive data has no backups.
+The daily dump now runs for real, and a restore has been proven:
 
-**Primary fix (recommended):** Railway dashboard → the `Postgres` service →
-Backups tab → **Enable PITR**. It is a dashboard action with a small billing
-cost — that decision is yours.
+- **Schedule:** `.github/workflows/backup.yml` → `deploy/postgres-backup.sh`
+  daily 06:00 UTC (+ `workflow_dispatch` for on-demand runs).
+- **Storage:** Cloudflare R2 bucket `chess404-backups` (WEUR). Endpoint
+  `https://136535a865013e08836f0ef4ae847fb7.r2.cloudflarestorage.com`, key
+  prefix `postgres/`, retention via the bucket lifecycle rule
+  `prune-postgres-30d` (deletes `postgres/*` after 30 days).
+- **Credentials:** all five GitHub secrets set (`BACKUP_DATABASE_URL`,
+  `BACKUP_AWS_S3_BUCKET`, `BACKUP_AWS_ACCESS_KEY_ID`,
+  `BACKUP_AWS_SECRET_ACCESS_KEY`, `BACKUP_AWS_ENDPOINT_URL`). The S3 pair is
+  an account-owned Cloudflare API token minted via the REST API, scoped to
+  exactly this bucket (`Workers R2 Storage Bucket Item Write`; Access Key ID
+  = token id, Secret = SHA-256 of the token value per R2's auth docs). No
+  expiry; revoke in the CF dashboard if it ever leaks.
+- **Server-version pin:** ubuntu-latest ships pg_dump 16, the Railway server
+  is 18.6 — the workflow installs `postgresql-client-18` from PGDG (PR #19)
+  and pins the major in one place for the next bump.
+- **Restore drill (in-job):** every run restores the fresh dump into a
+  throwaway `postgres:18` container with `ON_ERROR_STOP` and asserts ≥20
+  public tables and ≥1 row in `accounts` / `account_credentials` (PR #20).
+  First drill: run 37254716196 → `tables=21 accounts=18
+  account_credentials=18`. A dump that cannot be restored fails the job.
+- **First verified objects:** run 37251585752 uploaded 1.9 MB
+  (`chess404_railway_20261005T012911Z.sql.gz`), confirmed present via the R2
+  objects API.
 
-**Stopgap (code-side, already merged):** `.github/workflows/backup.yml` runs
-`deploy/postgres-backup.sh` daily at 06:00 UTC and no-ops until these
-repository secrets are set (GitHub → Settings → Secrets and variables →
-Actions): `BACKUP_DATABASE_URL`, `BACKUP_AWS_S3_BUCKET`,
-`BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`
-(`BACKUP_AWS_REGION` optional). The Postgres URL must be reachable from
-GitHub runners (Railway Postgres needs public networking enabled).
+Railway dashboard PITR remains the recommended *primary* mechanism (point-in-
+time recovery for accidental writes is something dumps cannot do) — still a
+dashboard/billing decision.
 
 ## 3. match-service deploy may be stale — RESOLVED 2026-09-06
 
@@ -42,15 +58,12 @@ deployed from current `main` via the Railway CLI (SUCCESS deployments at
 `main` since 2026-09-04; keep an eye on the dashboard after pushes, but the
 August failure mode has not recurred.
 
-## 4. Moderation admin (optional, quick)
+## 4. Moderation admin — RESOLVED 2026-10-05
 
-The handles-only admin bug is fixed in code (`views.go:292-309` accepts both
-`PLATFORM_ADMIN_ACCOUNT_IDS` and `PLATFORM_ADMIN_HANDLES`, with regression
-tests), but **neither variable is set in production**, so there is currently
-no moderation admin at all.
-
-**Action (if you want a moderator):** Railway → `platform-service` → set
-`PLATFORM_ADMIN_HANDLES=<your handle>` (or `PLATFORM_ADMIN_ACCOUNT_IDS`).
+`PLATFORM_ADMIN_HANDLES=lazy-to-move` is set on `platform-service` in
+production (Railway variables, auto-redeployed). Handle resolution was
+verified against the live DB: `account_credentials.email` join `accounts` on
+`account_id` → handle `lazy-to-move`. A moderation admin now exists.
 
 ## 5. Security scan triage — DONE 2026-09-06
 
