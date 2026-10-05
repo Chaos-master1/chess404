@@ -327,11 +327,21 @@ func (s *Service) GetMatchForViewer(matchID, playerID, playerSecret string) (con
 
 	viewerColor := ""
 	if strings.TrimSpace(playerID) != "" {
-		color, err := requireIntentColor(c.state, strings.TrimSpace(playerID), strings.TrimSpace(playerSecret))
-		if err != nil {
-			return contracts.MatchSnapshotResponse{}, err
+		// A FINISHED match is public record. Its archived copy is stored with
+		// seat secrets redacted, so seat proof can never succeed against a
+		// restored copy -- requiring it here turned every viewer fetch of an
+		// old game into an unmapped 400 (live: a tab left open on a finished
+		// room retried GET + seat-secret every ~15s forever, because the
+		// client only stops once it sees a finished snapshot it could never
+		// receive). Finished matches are served spectator-scoped, exactly
+		// like the history views; active matches still demand seat proof.
+		if c.state.Status != "finished" {
+			color, err := requireIntentColor(c.state, strings.TrimSpace(playerID), strings.TrimSpace(playerSecret))
+			if err != nil {
+				return contracts.MatchSnapshotResponse{}, err
+			}
+			viewerColor = color
 		}
-		viewerColor = color
 	}
 
 	now := time.Now().UTC()
