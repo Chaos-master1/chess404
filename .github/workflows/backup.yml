@@ -69,5 +69,31 @@ jobs:
           chmod +x deploy/postgres-backup.sh
           ./deploy/postgres-backup.sh
         # The script's local-dir prune is meaningless on an ephemeral runner;
-        # keep retention by setting a lifecycle rule on the bucket (or
-        # extend the script to list/delete remote objects).
+        # retention is enforced by the bucket's `prune-postgres-30d` lifecycle
+        # rule (R2: delete postgres/* after 30 days).
+
+      - name: Restore drill (restore the dump into a scratch Postgres 18)
+        run: |
+          # A backup that has never been restored is a hypothesis. Restore the
+          # freshest dump into a throwaway Postgres 18 (matching the server
+          # major) and sanity-check the core schema so a truncated or
+          # incompatible dump fails the job instead of hiding until disaster
+          # recovery. Run after upload so the backup is never lost to a drill
+          # failure.
+          FILE=$(ls -t backups/*.sql.gz | head -n1)
+          echo "restore drill: $FILE"
+          docker run -d --name restore-drill -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18 >/dev/null
+          for i in $(seq 1 60); do
+            docker exec restore-drill pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 1
+          done
+          gunzip -c "$FILE" | docker exec -i restore-drill psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q
+          TABLES=$(docker exec restore-drill psql -U postgres -d postgres -tAc "select count(*) from information_schema.tables where table_schema='public'")
+          ACCOUNTS=$(docker exec restore-drill psql -U postgres -d postgres -tAc "select count(*) from accounts")
+          CREDENTIALS=$(docker exec restore-drill psql -U postgres -d postgres -tAc "select count(*) from account_credentials")
+          echo "restore drill: tables=$TABLES accounts=$ACCOUNTS account_credentials=$CREDENTIALS"
+          if [ "${TABLES:-0}" -lt 20 ] || [ "${ACCOUNTS:-0}" -lt 1 ] || [ "${CREDENTIALS:-0}" -lt 1 ]; then
+            echo "::error::restore drill failed: core schema/rows missing after restore"
+            exit 1
+          fi
+          docker rm -f restore-drill >/dev/null
