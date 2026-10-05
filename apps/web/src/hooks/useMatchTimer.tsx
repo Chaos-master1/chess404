@@ -3,6 +3,7 @@
 import React from 'react';
 import type { PieceColor } from '@chess404/contracts';
 import { CLOCK_START } from '../constants';
+import { clampRunningClock } from '../lib/snapshot-tier';
 
 export interface UseMatchTimerProps {
   initialClockStart?: number;
@@ -40,8 +41,23 @@ export function useMatchTimer({
   const setTimeW = React.useCallback((valueOrFn: number | ((prev: number) => number)) => {
     setTimeWState(prev => {
       const next = typeof valueOrFn === 'function' ? valueOrFn(prev) : valueOrFn;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (clockActiveRef.current && tickingRef.current === 'white') {
+        // A running clock must never gain time: snapshot paths (WS tick, HTTP
+        // intent response, poll) are classified by seqNum alone, and
+        // same-seq frames are not ordered among themselves by build time —
+        // an older-built clock view can land after a newer one (live: the
+        // opponent's clock visibly ran down, then jumped back up). Clamp to
+        // what is currently displayed; genuinely newer (lower) values and
+        // non-running colors (increment credits) pass through untouched.
+        const displayed = Math.max(0, baseWRef.current - Math.max(0, now - lastSyncRef.current));
+        const clamped = clampRunningClock(next, displayed);
+        baseWRef.current = clamped;
+        lastSyncRef.current = now;
+        return clamped;
+      }
       baseWRef.current = next;
-      lastSyncRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      lastSyncRef.current = now;
       return next;
     });
   }, []);
@@ -50,8 +66,17 @@ export function useMatchTimer({
   const setTimeB = React.useCallback((valueOrFn: number | ((prev: number) => number)) => {
     setTimeBState(prev => {
       const next = typeof valueOrFn === 'function' ? valueOrFn(prev) : valueOrFn;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (clockActiveRef.current && tickingRef.current === 'black') {
+        // See the running-clock clamp note in setTimeW.
+        const displayed = Math.max(0, baseBRef.current - Math.max(0, now - lastSyncRef.current));
+        const clamped = clampRunningClock(next, displayed);
+        baseBRef.current = clamped;
+        lastSyncRef.current = now;
+        return clamped;
+      }
       baseBRef.current = next;
-      lastSyncRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      lastSyncRef.current = now;
       return next;
     });
   }, []);
