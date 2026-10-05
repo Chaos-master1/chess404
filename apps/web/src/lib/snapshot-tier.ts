@@ -29,6 +29,22 @@ export function classifySnapshotTier(
   return 'fresh';
 }
 
+// A chess clock that is currently RUNNING can never legitimately gain time:
+// the server only ever charges the running side, and per-move increment is
+// credited to the color that just moved (whose clock has stopped). But
+// snapshot paths (WS tick, HTTP intent response, poll) are classified by
+// seqNum alone, and same-seq (cosmetic) frames are not ordered among
+// themselves by build time — a frame built EARLIER can arrive AFTER one built
+// later. Live failure: the HTTP response for your own move still carried the
+// opponent's clock uncharged at your move's timestamp, landed after the
+// per-second tick that had already charged it, and the visible clock ran
+// down then jumped back up. Clamping the running color to its currently
+// displayed value makes the display monotonic regardless of arrival order.
+export function clampRunningClock(incomingMs: number, displayedMs: number): number {
+  if (incomingMs >= displayedMs) return displayedMs;
+  return incomingMs;
+}
+
 // Sliding-window event de-dup by stable event ID. Join and intent responses
 // replay the tail of the event log, so without this a resync re-fired draw
 // banners and sounds for already-applied events. IDs are trusted from the

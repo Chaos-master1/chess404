@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifySnapshotTier, filterUnseenEventIds } from './snapshot-tier';
+import { clampRunningClock, classifySnapshotTier, filterUnseenEventIds } from './snapshot-tier';
 
 describe('classifySnapshotTier', () => {
   it('treats seq-less snapshots as fresh (bootstraps, legacy payloads)', () => {
@@ -21,6 +21,26 @@ describe('classifySnapshotTier', () => {
   it('applies strictly newer snapshots fully', () => {
     expect(classifySnapshotTier(6, 5)).toBe('fresh');
     expect(classifySnapshotTier(1, 0)).toBe('fresh');
+  });
+});
+
+describe('clampRunningClock', () => {
+  // Live bug: the HTTP response for your own move still carried the
+  // opponent's clock uncharged at your move's timestamp (same seqNum as the
+  // per-second tick that had already charged it). If the tick's WS frame
+  // landed first, the late response re-applied the higher uncharged value and
+  // the visible clock ran down, then jumped back up.
+  it('rejects a higher value for a running clock (out-of-order older build)', () => {
+    const displayed = 295_000; // already interpolated ~5s down from 300s
+    expect(clampRunningClock(300_000, displayed)).toBe(displayed);
+  });
+
+  it('accepts genuinely newer (lower) charged values', () => {
+    expect(clampRunningClock(294_200, 295_000)).toBe(294_200);
+  });
+
+  it('keeps the display on an equal value', () => {
+    expect(clampRunningClock(295_000, 295_000)).toBe(295_000);
   });
 });
 

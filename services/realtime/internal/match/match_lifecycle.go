@@ -403,12 +403,18 @@ func (s *Service) ApplyIntent(intent contracts.PlayerIntent, now time.Time) (con
 		}
 	}
 
-	if intent.ExpectedSeqNum > 0 {
-		currentSeq := c.seqNum
-		if currentSeq > 0 && intent.ExpectedSeqNum < currentSeq {
-			return contracts.MatchSnapshotResponse{}, ErrStaleClientState
-		}
-	}
+	// NOTE: intents carrying an ExpectedSeqNum behind c.seqNum are no longer
+	// rejected as stale. That check fired constantly in vs-computer play: the
+	// human's move response carries seq N+1, the server immediately auto-plays
+	// the computer (seq N+2), and the human's next click — racing the WS
+	// delivery of the computer's move — still carried N+1 and was rejected
+	// with a 409 (live: repeated ".../intents 409" in the browser console).
+	// The check was a fail-fast optimization, not a correctness gate: every
+	// intent is fully revalidated below against the CURRENT state (seat auth,
+	// per-color intent rate limit, turn, move legality), and the
+	// ClientMoveID dedupe above already absorbs replayed intents. A stale-but-
+	// legal move is therefore applied; a stale-and-illegal one fails with the
+	// specific rule error instead of a generic 409.
 
 	presence := s.ensurePresenceStateLocked(c, now)
 
