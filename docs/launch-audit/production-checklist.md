@@ -47,8 +47,12 @@ The daily dump now runs for real, and a restore has been proven:
   objects API.
 
 Railway dashboard PITR remains the recommended *primary* mechanism (point-in-
-time recovery for accidental writes is something dumps cannot do) — still a
-dashboard/billing decision.
+time recovery for accidental writes is something dumps cannot do). Decision
+recorded 2026-10-05: the account is on a **trial plan where PITR is not
+available**, so the GitHub Actions dump pipeline above is the production
+backup mechanism for now — accepted worst case is losing up to ~24h of new
+writes (time of the last daily dump). Revisit PITR when the project moves to
+a paid plan.
 
 ## 3. match-service deploy may be stale — RESOLVED 2026-09-06
 
