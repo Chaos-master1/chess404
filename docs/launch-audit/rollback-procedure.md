@@ -1,8 +1,16 @@
 # Chess404 Rollback Procedure
 
 Status: written and verified against Railway's actual documented behavior and
-this project's live deployment history on 2026-08-11. **Not yet rehearsed as
-a live drill** — see "What's not yet verified" at the end.
+this project's live deployment history on 2026-08-11. Partially rehearsed
+2026-10-05 — see "What's not yet verified" at the end.
+
+**Drill note (2026-10-05):** the Railway CLI has **no `rollback` subcommand**
+(only `redeploy`, which re-runs the *current* deployment). A live drill was
+executed anyway: `railway redeploy -s match-service -y`, then post-redeploy
+`/healthz` OK and a burst-20 create probe returned 20×201 in ~1.6s. This
+validates the redeploy path and the post-action health checks, but a true
+restore of a *previous* image (dashboard Rollback / Redeploy-on-old-deploy)
+remains dashboard-only, exactly as described below.
 
 ## The one thing to unlearn first
 
@@ -90,13 +98,8 @@ fresh build from that record, not a manual git operation.
 
 - **The exact plan tier and its retention window** — confirm before trusting
   the table above for real incident timing.
-- **A live rehearsal.** Everything above is verified against Railway's
-  documented behavior and this project's actual deployment history, but
-  nobody has actually clicked through a real rollback on this project yet.
-  The one thing worth a deliberate, low-risk test: pick one non-critical
-  service, `git revert` a trivial no-op commit on `main`, let it auto-deploy,
-  then perform an actual dashboard rollback (or redeploy) back to the prior
-  state and confirm the service comes back healthy. This needs the
-  dashboard-click step above, so it needs either a human driving it or an
-  agent with browser access to the Railway dashboard — not something the
-  current Railway MCP tool set can complete standalone.
+- **Rollback to a *previous* image.** A CLI `redeploy` of the current
+deployment was drilled 2026-10-05 (see the drill note at the top: healthz OK,
+burst-20 probe 20×201 after). Restoring an *older* deployment (Rollback, or
+Redeploy on an old row) still needs the dashboard — either a human click or
+an agent with browser access to Railway.
