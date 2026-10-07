@@ -24,13 +24,13 @@ import (
 // can observe every persisted state via onSave.
 type gatedStore struct {
 	MemoryMatchStore
-	armed        atomic.Bool
-	entered      chan struct{}
-	release      chan struct{}
+	armed         atomic.Bool
+	entered       chan struct{}
+	release       chan struct{}
 	releaseOnceDo sync.Once
-	saves        atomic.Int64
-	onSaveMu     sync.Mutex
-	onSave       func(state []byte)
+	saves         atomic.Int64
+	onSaveMu      sync.Mutex
+	onSave        func(state []byte)
 }
 
 func newGatedStore() *gatedStore {
@@ -172,8 +172,8 @@ func TestPersistQueueCoalescesBurstIntoLatestState(t *testing.T) {
 
 	// e2e4 e7e5 g1f3 b8c6 -- every move legal at its turn.
 	opening := []struct {
-		player       string
-		from, to     contracts.Square
+		player   string
+		from, to contracts.Square
 	}{
 		{"white_player", contracts.Square{Row: 1, Col: 4}, contracts.Square{Row: 3, Col: 4}},
 		{"black_player", contracts.Square{Row: 6, Col: 4}, contracts.Square{Row: 4, Col: 4}},
@@ -258,7 +258,7 @@ func TestQueuedWritesCannotOvertakeTerminalFlush(t *testing.T) {
 	}
 	if _, err := applyTestIntent(svc, contracts.PlayerIntent{
 		Type: "resign", MatchID: "overtake_1", PlayerID: "white_player",
-	}, now.Add(60 * time.Second)); err != nil {
+	}, now.Add(60*time.Second)); err != nil {
 		t.Fatalf("resign: %v", err)
 	}
 	if !svc.persistQueueWait(5 * time.Second) {

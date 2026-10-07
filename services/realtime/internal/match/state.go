@@ -521,8 +521,16 @@ func (s *Service) Subscribe(matchID string, playerID string, playerSecret string
 
 	// Resolve the seat through the same constant-time secret check the intent
 	// path uses. Identity alone is not sufficient: guest IDs are public.
+	//
+	// A FINISHED match is public record, mirroring the GetMatchForViewer
+	// exemption (#24): its archived copy is stored with seat secrets redacted,
+	// so seat proof can never succeed against a restored copy -- requiring it
+	// here turned every WS subscribe of an old game into an unmapped 400 for
+	// the game's own owner. Finished matches subscribe spectator-scoped, the
+	// same scope the history views serve; ACTIVE matches keep demanding valid
+	// seat credentials.
 	playerColor := ""
-	if strings.TrimSpace(playerID) != "" {
+	if strings.TrimSpace(playerID) != "" && c.state.Status != "finished" {
 		color, err := requireIntentColor(c.state, strings.TrimSpace(playerID), strings.TrimSpace(playerSecret))
 		if err != nil {
 			return nil, nil, contracts.MatchSnapshotResponse{}, err
@@ -1034,8 +1042,8 @@ func deliverToSubscribersLocked(c *matchContainer, snapshot contracts.MatchSnaps
 	// unsubscribe() closed the already-closed channel, an unrecovered panic on
 	// a hijacked-connection goroutine that could take down the process).
 	type subPush struct {
-		ch    chan contracts.MatchSnapshotResponse
-		snap  contracts.MatchSnapshotResponse
+		ch   chan contracts.MatchSnapshotResponse
+		snap contracts.MatchSnapshotResponse
 	}
 	pushes := make([]subPush, 0, len(c.subs))
 	for ch, color := range c.subs {
@@ -1340,9 +1348,9 @@ func (s *Service) finalizeAbandonedMatch(matchID string, now time.Time) {
 	markMatchFinished(c.state, "draw", "abandon", now)
 	finishEvents := []contracts.ResolvedEvent{
 		makeEvent(matchID, "match_finished", now, "system", map[string]any{
-			"result":        "abandon",
-			"winner":        "draw",
-			"disconnected":  disconnectGraceBoth,
+			"result":       "abandon",
+			"winner":       "draw",
+			"disconnected": disconnectGraceBoth,
 		}),
 	}
 	c.events = append(c.events, finishEvents...)

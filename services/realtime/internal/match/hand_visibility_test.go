@@ -140,4 +140,3 @@ func TestFilterStateForColorRedactsFogVillagePiecesFromOpponent(t *testing.T) {
 		t.Fatalf("pieces outside fog zone must remain visible")
 	}
 }
-
