@@ -62,6 +62,7 @@ func main() {
 	}
 
 	totalRecords := 0
+	started := time.Now()
 	for g := 0; g < *games; g++ {
 		var records []search.SelfPlayRecord
 		if timed {
@@ -76,8 +77,15 @@ func main() {
 			}
 		}
 		totalRecords += len(records)
-		if (g+1)%10 == 0 || g+1 == *games {
-			fmt.Fprintf(os.Stderr, "nnue-selfplay: %d/%d games, %d positions recorded so far\n", g+1, *games, totalRecords)
+		// Flush after every game: generation runs for hours, and an
+		// interrupted run (OOM, host restart, kill) must keep every completed
+		// game on disk instead of losing the whole dataset still sitting in
+		// the bufio buffer. Costs one small write per game.
+		if err := bw.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "nnue-selfplay: flushing output:", err)
+			os.Exit(1)
 		}
+		fmt.Fprintf(os.Stderr, "nnue-selfplay: game %d/%d done: %d positions (total %d, elapsed %s)\n",
+			g+1, *games, len(records), totalRecords, time.Since(started).Round(time.Second))
 	}
 }
