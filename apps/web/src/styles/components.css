@@ -701,6 +701,13 @@ select option {
   gap: var(--space-3);
 }
 
+.player-bar__timecontrol {
+  color: var(--accent-hover);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .player-bar__rating {
   color: var(--accent-hover);
   font-size: var(--text-sm);

@@ -59,10 +59,9 @@ import {
   buildLiveMatchUrl,
   buildReplayPageUrl,
   copyTextToClipboard,
-} from '../lib/session-storage';
-import {
-  type SocialAlert,
+} from '../lib/session-storage';import { type SocialAlert,
 } from '../lib/match-labels';
+import { clockLabel } from '../lib/clock';
 import { useMatchTimer } from './useMatchTimer';
 import { useMatchReplay } from './useMatchReplay';
 import { usePlatformState } from './usePlatformState';
@@ -418,6 +417,10 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   const appliedSeqRef = React.useRef(0);
   const appliedEventIdsRef = React.useRef<Set<string>>(new Set());
 
+  // Time-control label (e.g. "10+0") derived from the authoritative snapshot's
+  // clock config; shown on the player bars next to the clocks.
+  const [timeControl, setTimeControl] = React.useState('');
+
   const applyAuthoritativeSnapshot = React.useCallback((snapshot: MatchSnapshotMessage) => {
     const match = snapshot.match;
     if (!match) return;
@@ -447,6 +450,13 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
         setTicking(match.turn);
       }
       return;
+    }
+
+    // clockSeconds is constant for the life of the match and only the fresh
+    // (non-cosmetic) path carries the full match state; guard against legacy
+    // snapshots that predate the field.
+    if (match.clockSeconds && match.clockSeconds > 0) {
+      setTimeControl(clockLabel(match.clockSeconds, match.clockIncrement));
     }
 
     const freshEvents = filterUnseenEventIds(snapshot.events, appliedEventIdsRef.current) as NonNullable<typeof snapshot.events>;
@@ -1254,7 +1264,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
   } = useMatchUIHelpers({
     displayedWhiteName, displayedBlackName, displayedWhiteRating, displayedBlackRating,
     whiteSeatBadge, blackSeatBadge, timeW, timeB, tickingState, clockActive, over,
-    jokerPicker, setJokerPicker, cancelCard, applyJokerTransform,
+    timeControl, jokerPicker, setJokerPicker, cancelCard, applyJokerTransform,
     authoritativeMatchIdRef, jokerRef,
   });
 

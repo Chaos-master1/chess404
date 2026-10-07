@@ -238,6 +238,9 @@ export interface MatchState {
   blackHand: GameCard[];
   moveHistory: string[];
   chatMessages: ChatMessage[];
+  /** Base seconds + increment the match clock was created with (serialized by the Go MatchState). */
+  clockSeconds?: number;
+  clockIncrement?: number;
   clock: MatchClock;
   whiteConnected: boolean;
   blackConnected: boolean;

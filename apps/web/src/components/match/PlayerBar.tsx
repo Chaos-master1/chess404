@@ -9,6 +9,8 @@ export interface PlayerBarProps {
   timeMs: number;
   isClockActive: boolean;
   seatBadge?: string;
+  /** Match time control label (e.g. "10+0"); empty/undefined hides the chip. */
+  timeControl?: string;
 }
 
 export function formatClock(ms: number): string {
@@ -25,7 +27,8 @@ export function PlayerBar({
   ratingHidden = false,
   timeMs,
   isClockActive,
-  seatBadge
+  seatBadge,
+  timeControl
 }: PlayerBarProps) {
   const isWhite = seat === 'white';
   const timeUrgent = timeMs <= 30000;
@@ -41,6 +44,7 @@ export function PlayerBar({
         <div className="player-bar__name-row">
           <span className="player-bar__name">{playerName}</span>
           {seatBadge && <span className={`badge ${seatBadge === 'You' ? 'badge--success' : ''}`}>{seatBadge}</span>}
+          {timeControl && <span className="player-bar__timecontrol mono" title="Time control">⏱ {timeControl}</span>}
         </div>
         <div className="player-bar__stats">
           {!ratingHidden && <span className="player-bar__rating">♟ {rating}</span>}

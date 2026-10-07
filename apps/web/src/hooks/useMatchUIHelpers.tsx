@@ -20,6 +20,8 @@ export interface UseMatchUIHelpersProps {
   tickingState: PieceColor | null;
   clockActive: boolean;
   over: boolean;
+  /** Match time control label (e.g. "10+0") derived from the authoritative snapshot. */
+  timeControl?: string;
   jokerPicker: {
     card: GameCard;
     playerColor: PieceColor;
@@ -41,7 +43,7 @@ export interface UseMatchUIHelpersProps {
 export function useMatchUIHelpers(props: UseMatchUIHelpersProps) {
   const {
     displayedWhiteName, displayedBlackName, displayedWhiteRating, displayedBlackRating,
-    whiteSeatBadge, blackSeatBadge, timeW, timeB, tickingState, clockActive, over,
+    whiteSeatBadge, blackSeatBadge, timeW, timeB, tickingState, clockActive, over, timeControl,
     jokerPicker, setJokerPicker, cancelCard, applyJokerTransform,
     authoritativeMatchIdRef, jokerRef,
   } = props;
@@ -83,9 +85,10 @@ export function useMatchUIHelpers(props: UseMatchUIHelpersProps) {
         timeMs={seatTime}
         isClockActive={seatTicking}
         seatBadge={seatBadge ?? undefined}
+        timeControl={timeControl || undefined}
       />
     );
-  }, [displayedWhiteName, displayedBlackName, displayedWhiteRating, displayedBlackRating, timeW, timeB, whiteSeatBadge, blackSeatBadge, tickingState, clockActive, over]);
+  }, [displayedWhiteName, displayedBlackName, displayedWhiteRating, displayedBlackRating, timeW, timeB, whiteSeatBadge, blackSeatBadge, tickingState, clockActive, over, timeControl]);
 
   const renderJokerPicker = React.useCallback(() => {
     if (!jokerPicker) return null;

@@ -13,6 +13,7 @@ import { readStoredGuestIdentity } from './lib/session-storage';
 import { formatDateTime, normalizeModeId } from './lib/display';
 import { modeLabel } from './lib/match-labels';
 import { displayTicketStatus, isSeekingStatus } from './lib/queue-ticket-status';
+import { clockLabel } from './lib/clock';
 
 interface QueuePageProps {
   whiteProfile: GuestProfile | null;
@@ -53,13 +54,6 @@ export const QUEUE_CLOCK_OPTIONS: QueueClockOption[] = [
 ];
 
 const DEFAULT_CLOCK_OPTION = QUEUE_CLOCK_OPTIONS[1];
-
-export function clockLabel(seconds?: number, increment?: number): string {
-  if (!seconds || seconds <= 0) {
-    return '10+0';
-  }
-  return `${seconds}+${increment ?? 0}`;
-}
 
 function readStoredClockSelection(): QueueClockOption {
   if (typeof window === 'undefined') {
