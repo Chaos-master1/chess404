@@ -125,6 +125,18 @@ Full-platform pass per the approved 5-phase plan; evidence in
 - **Documented, not patched:** v1 engine occasionally submits an illegal
   first-double-move (xgauntlet flake, CI 37660412272, audit F1) — the
   service-side rejection (defense in depth) works; the rebuild supersedes.
+- **Computer-reply hang (audit F6, fixed 2026-10-07 evening):** a rare
+  indefinite hang inside a computer engine call wedged vs-computer matches
+  (client saw 400 "cannot move out of turn" on every click). Shipped a 10s
+  watchdog around `MakeMove`/`HandleSelectTarget`
+  (`runComputerEngineCall`, commit `e43c797`): goroutine-stack dump into
+  prod logs on expiry + fallback legal move via
+  `ensureComputerMadeProgressLocked`, so the match can never wedge; engine
+  panics are contained instead of killing the worker. Regression guard:
+  `internal/match/computer_reply_hang_test.go` (12-seed hunt — the hang did
+  NOT reproduce locally). Post-deploy prod verification: 4/4 fresh matches
+  replied in 1.0–1.9s, zero watchdog firings. If it recurs, grep prod logs
+  for `exceeded deadline -- engine HANG` — the dump names the loop.
 - **NNUE Phase 4 in flight:** selfplay dataset regenerating detached
   (per-game flush fix `5f462bd` — the old dataset died in a bufio buffer);
   then train v3 → probe (queen ≥500) → 40-game gauntlet; replace

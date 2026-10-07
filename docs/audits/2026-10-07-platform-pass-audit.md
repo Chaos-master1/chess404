@@ -141,6 +141,39 @@ Recommend doing this with a dual-accept code change later
   `railway up -s <svc>`; GitHub auto-deploy still not firing (worth a
   Railway support ticket / webhook re-auth as follow-up).
 
+### F6. v1/search engine call HANG wedged vs-computer matches — WATCHDOG SHIPPED (commit e43c797), root loop still unnamed
+
+- **Incident (2026-10-07, prod):** in a vs-computer game the computer never
+  replied; every client click returned 400 `"cannot move out of turn"` (the
+  0ms 400s in the user's console were the SYMPTOM — the turn was stuck on
+  black). Worker logs showed `computer move task received ... wait_ms=0` and
+  then NOTHING: no return, no >10s search warning (that warning only fires
+  after MakeMove returns), for 10+ minutes. `Match_1791409578301_55d9e8d9`
+  reproduced it on the instrumented build. This is a true hang inside a
+  computer engine call (`MakeMove` / `HandleSelectTarget`), not queue backlog
+  (48 workers, empty channel) and not a slow search (medium budget 600ms).
+- **Repro status:** NOT reproducible locally — the 12-seed regression guard
+  (`TestComputerFirstMoveRepliesAcrossSeeds` in
+  `internal/match/computer_reply_hang_test.go`, committed in e43c797) plays
+  the first move of 12 fresh matches with random hands and all pass in ~0.2s
+  each. The hang is hand/position-dependent or prod-specific.
+- **Shipped safety net (e43c797):** both engine calls in
+  `autoPlayComputerDepthLimited` now run under a 10s watchdog
+  (`runComputerEngineCall`): on expiry it dumps ALL goroutine stacks into the
+  logs (the hung loop names itself), abandons the call, and
+  `ensureComputerMadeProgressLocked` plays a fallback legal move so a
+  vs-computer match can NEVER wedge, whatever the engine does. Engine panics
+  are also contained (a panic in the worker goroutine previously killed the
+  whole process). Both calls receive state clones, so an abandoned goroutine
+  can never touch live match state. Deployed to prod 2026-10-07 22:15 UTC.
+- **Post-deploy verification:** 4/4 fresh prod vs-computer matches: computer
+  replied in 1.0–1.9s, zero watchdog firings (no false positives under load).
+- **Follow-up:** if the hang recurs, grep prod logs for `exceeded deadline --
+  engine HANG` — the goroutine dump names the exact loop (suspects: v1 card
+  decision or the v1 chess-search fallback path in `searchopp.go`; both
+  search deadlines are deadline-driven so a pure search overrun is unlikely).
+  Then pin the position in a regression test and fix the loop for real.
+
 ## Coverage-driven test plan (next gaps, measured)
 
 Baseline before this pass (full-repo docker coverage): httputil 6.3%,
