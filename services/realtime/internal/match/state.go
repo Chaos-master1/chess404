@@ -81,6 +81,11 @@ func newMatchContainer(state *contracts.MatchState, events []contracts.ResolvedE
 type computerMoveTask struct {
 	c   *matchContainer
 	now time.Time
+	// queuedAt is stamped by autoPlayComputer when the task enters the
+	// channel, so the worker can distinguish "the search itself is slow"
+	// from "the task waited behind other matches' searches" -- the two
+	// stall classes behind "the computer never moved" reports.
+	queuedAt time.Time
 }
 
 type matchMap struct {
@@ -1198,6 +1203,9 @@ func (s *Service) computerWorker() {
 			return
 		case task := <-s.computerCh:
 			task.c.mu.Lock()
+			if wait := time.Since(task.queuedAt); wait > 5*time.Second {
+				s.Log.Warn("computer move task waited in queue", "matchID", task.c.state.MatchID, "wait_ms", wait.Milliseconds())
+			}
 			s.autoPlayComputerDepthLimited(task.c, task.now, 0)
 			s.ensureComputerMadeProgressLocked(task.c, task.now)
 			task.c.mu.Unlock()

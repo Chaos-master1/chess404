@@ -547,11 +547,12 @@ func (s *Service) autoPlayComputer(c *matchContainer, now time.Time) {
 	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
 		return
 	}
+	task := computerMoveTask{c: c, now: now, queuedAt: time.Now()}
 	select {
-	case s.computerCh <- computerMoveTask{c: c, now: now}:
+	case s.computerCh <- task:
 	default:
 		go func() {
-			s.computerCh <- computerMoveTask{c: c, now: now}
+			s.computerCh <- task
 		}()
 	}
 }
@@ -570,7 +571,16 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 	computer := c.computer
 
 	c.mu.Unlock()
+	searchStart := time.Now()
 	computerIntent := computer.MakeMove(stateCopy)
+	if spent := time.Since(searchStart); spent > 10*time.Second {
+		// The v1 search budget for "medium" is 750ms (up to ~2.2s with the
+		// complexity scaling). Anything past 10s means CPU starvation, a
+		// runaway search path, or a worker stuck on something else entirely --
+		// exactly what "the computer never moved" reports look like from the
+		// client. Surface the duration so the next occurrence names itself.
+		s.Log.Warn("computer move search exceeded 10s", "matchID", c.state.MatchID, "search_ms", spent.Milliseconds())
+	}
 	c.mu.Lock()
 
 	compColor = computerColor(c.state)
