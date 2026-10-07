@@ -17,6 +17,10 @@ client/build/
 redis-unstable/
 services/realtime/data/
 
+# Local runtime state (file-backed platform stores when a service runs from
+# the repo root during E2E; prod is Postgres-backed)
+/data/
+
 # Stockfish wasm (fetched at build time)
 apps/web/public/stockfish-18-single.wasm
 apps/web/public/stockfish-18.wasm

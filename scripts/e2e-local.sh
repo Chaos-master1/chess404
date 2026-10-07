@@ -13,8 +13,13 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/services/realtime/bin"
 LOGS=/tmp/chess404-e2e-logs
-PGURL="postgres://test:test@127.0.0.1:55432/chess404_e2e?sslmode=disable"
-REDIS="redis://127.0.0.1:6379/0"
+# Store URLs are overridable: on hosts where docker's host->container port
+# forwarding is broken (userland proxy resets connections), point these at
+# host-networked containers instead, e.g.
+#   E2E_PG_URL=postgres://test:test@127.0.0.1:5543/chess404_e2e?sslmode=disable \
+#   E2E_REDIS_URL=redis://127.0.0.1:6390/0
+PGURL="${E2E_PG_URL:-postgres://test:test@127.0.0.1:55432/chess404_e2e?sslmode=disable}"
+REDIS="${E2E_REDIS_URL:-redis://127.0.0.1:6379/0}"
 TOKEN="local-e2e-token"
 # Hosted-runtime detection on the web client keys off the page hostname not
 # being localhost/127.0.0.1, so E2E runs hit the app over the LAN IP. Backends
