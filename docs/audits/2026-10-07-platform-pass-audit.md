@@ -114,17 +114,21 @@ Rollback: set the old value back per service (redeploys are instant).
 Recommend doing this with a dual-accept code change later
 (accept old OR new for one deploy cycle) to make it zero-outage.
 
-### F4. Backups: both paths currently no-op (owner action required)
+### F4. Backups: RESOLVED 2026-10-05, REGRESSED by 2026-10-07 (owner action required)
 
-- Railway PITR: declined on the trial plan (pre-existing decision).
-- The new `postgres-backup` scheduled workflow (daily 06:00 UTC) **no-ops**:
-  run `37623044600` logged *"postgres-backup is not configured. Set the
-  BACKUP_* repository secrets…"*. Green checkmark ≠ a backup.
-- Owner steps to arm it: set repo secrets `BACKUP_DATABASE_URL`
-  (Postgres connection string), `BACKUP_AWS_S3_BUCKET`,
+- The `postgres-backup` workflow was fully armed and verified on 2026-10-05
+  (R2 bucket, restore drill, first verified objects — see production
+  checklist §2). **Today's scheduled run (`37623044600`, 2026-10-07 06:00
+  UTC) no-ops:** it logged *"postgres-backup is not configured. Set the
+  BACKUP_* repository secrets…"* — i.e. at least one of the five
+  `BACKUP_*` repo secrets is now empty/absent. Green checkmark ≠ a backup.
+- Railway PITR remains unavailable on the trial plan (recorded decision).
+- Owner steps: re-set `BACKUP_DATABASE_URL`, `BACKUP_AWS_S3_BUCKET`,
   `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`,
-  optional `BACKUP_AWS_REGION`/`BACKUP_AWS_ENDPOINT_URL` (R2/B2 supported),
-  then `workflow_dispatch` once and verify an object lands in the bucket.
+  `BACKUP_AWS_ENDPOINT_URL` (values/notes in checklist §2), then
+  `workflow_dispatch` once and verify an object lands in the bucket + the
+  restore drill passes. Worth checking whether the Cloudflare API token or
+  a GitHub org secret policy change removed them.
 
 ### F5. Ops verified clean this pass
 

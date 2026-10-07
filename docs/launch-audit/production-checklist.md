@@ -54,13 +54,30 @@ backup mechanism for now — accepted worst case is losing up to ~24h of new
 writes (time of the last daily dump). Revisit PITR when the project moves to
 a paid plan.
 
-## 3. match-service deploy may be stale — RESOLVED 2026-09-06
+**REGRESSION 2026-10-07:** the scheduled run `37623044600` (06:00 UTC) no-
+opped with *"postgres-backup is not configured. Set the BACKUP_* repository
+secrets"* — at least one of the five secrets is empty/absent again two days
+after the verified setup. Re-set the `BACKUP_*` secrets (contents above),
+then `workflow_dispatch` once and confirm an object lands in R2 and the
+in-job restore drill passes. Watch the job logs, not the green checkmark:
+the no-op path also exits green.
+
+## 3. match-service deploy may be stale — RESOLVED 2026-09-06, RECURRED 2026-10-07 (resolved via CLI)
 
 All four services (web, gateway, match-service, platform-service) verified
 deployed from current `main` via the Railway CLI (SUCCESS deployments at
 2026-09-06 02:22 on commit `5812b67`). Auto-deploy has fired on every push to
 `main` since 2026-09-04; keep an eye on the dashboard after pushes, but the
 August failure mode has not recurred.
+
+**Recurrence 2026-10-07:** auto-deploy produced zero deployments for pushes
+`cef8289..e46c3ac` (last deploys predated the push by 2+ days; match-service
+also had FAILED deploys on Oct 5 sitting on top of its last success). Every
+service was shipped explicitly with `railway up -s <service>` from the repo
+root and verified SUCCESS + healthz/readyz. GitHub auto-deploy still did not
+fire on subsequent pushes — treat `railway up` as the deploy mechanism of
+record until the Railway webhook is re-authorized (dashboard → service →
+Settings → Source → re-connect repo).
 
 ## 4. Moderation admin — RESOLVED 2026-10-05
 

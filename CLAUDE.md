@@ -90,7 +90,45 @@ node packages/game-core/scripts/sync-cards-json.mjs
 
 **Dual dev environments.** The repo was developed Windows-first; the primary working machine is now Linux (Fedora, Go at `~/sdk/go1.25.6/bin`). Ops scripts are PowerShell under `scripts/windows/`; the Linux equivalent of the local stack is manual startup (see README / RUNBOOK.md). Match whichever environment you are actually on rather than assuming one.
 
-## Current status (2026-10-02)
+## Current status (2026-10-07)
+
+### Platform pass — 2026-10-07 (security, E2E, a11y, perf, audit)
+
+Full-platform pass per the approved 5-phase plan; evidence in
+[docs/audits/2026-10-07-platform-pass-audit.md](docs/audits/2026-10-07-platform-pass-audit.md)
+(SCORES SPEC 8.5 / DESIGN 8 / CORRECTNESS 7.5 / QUALITY 8, findings F1–F5).
+
+- **Security:** next 15.5.27 (2 CRITICAL RCEs patched), overrides sharp
+  0.35.5 / fast-uri 3.1.8 / brace-expansion 2.1.7 / source-map-js 1.2.2;
+  turbo range bumped to ^2.11.7 (clears its advisories). pnpm audit --prod:
+  23 → 8 vulns (remaining: braces HIGH — no upstream fix; 7 OTEL moderates
+  via Sentry — clears with Sentry major). tinypool ×2 CRITICAL are dev-only
+  (vitest 4 bump recipe in the audit).
+- **fix(match):** WS subscribe of finished matches no longer demands seat
+  proof (finished = public record, mirrors #24's GET fix); regression tests
+  in `subscribe_finished_match_test.go`.
+- **fix(httputil):** CircuitBreaker half-open admitted unlimited probes
+  (halfOpenMax was dead config) — fixed; package tests 6.3% → 96.3%.
+- **feat(web):** match player bars now label the time control ("10+0"-style);
+  TS contracts declare clockSeconds/clockIncrement; shared clockLabel in
+  `src/lib/clock.ts`.
+- **Verified on prod:** Playwright 46/46; multiplayer 3/3 × 3 runs;
+  unauthenticated matrix 105 requests clean (`scripts/unauth-matrix.sh`);
+  handoff soaks 20 pairs 6.2s / 100 pairs 18s, 0 stuck/leaks/429s; axe
+  WCAG A/AA smoke on all 16 routes — 0 critical, 1 serious finding
+  (/cards scrollable-region-focusable, sole a11y backlog item).
+- **Ops:** Railway GitHub auto-deploy is DEAD since Oct 5 — ship with
+  `railway up -s <service>` and verify `railway deployment list` (see
+  checklist §3 recurrence note). The daily backup workflow REGRESSED:
+  run 37623044600 no-opped with secrets empty again — owner must re-set
+  the five BACKUP_* secrets (checklist §2 regression note).
+- **Documented, not patched:** v1 engine occasionally submits an illegal
+  first-double-move (xgauntlet flake, CI 37660412272, audit F1) — the
+  service-side rejection (defense in depth) works; the rebuild supersedes.
+- **NNUE Phase 4 in flight:** selfplay dataset regenerating detached
+  (per-game flush fix `5f462bd` — the old dataset died in a bufio buffer);
+  then train v3 → probe (queen ≥500) → 40-game gauntlet; replace
+  `trained.bin` only if v3 beats placeholder >50%.
 
 ### Realtime & Vs-Computer Hardening Pass — 2026-10-02
 
