@@ -20,13 +20,13 @@ map_route() {
     -e 's|\[requestId\]|matrix-request-0000|g'
 }
 
-ROUTES="$(find "$REPO/apps/web/app/api" -name route.ts | sort | while read -r f; do map_route "$f"; done)"
+ROUTES="$(cd "$REPO" && find apps/web/app/api -name route.ts | sort | while read -r f; do map_route "$f"; done)"
 
 echo "matrix base: $BASE"
 echo "method	path	http	status-class"
 fail=0; review=0; total=0
 hit() {
-  local method="$1" path="$2" body="$3" out code
+  local method="$1" path="$2" body="${3:-}" out code
   if [ "$method" = "POST" ]; then
     code="$(curl -s -o /tmp/matrix-body.$$ -w '%{http_code}' -X POST --max-time 20 \
       -H 'Content-Type: application/json' --data "$body" "$BASE$path")"
