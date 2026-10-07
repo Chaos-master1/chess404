@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -542,6 +543,62 @@ func cloneMatchStateForEngine(state *contracts.MatchState) *contracts.MatchState
 	return &cp
 }
 
+// computerEngineDeadline is the hard ceiling on any single engine call made
+// by the computer-move worker. The search paths are all deadline-driven, so a
+// well-behaved engine call returns in well under this; exceeding it means the
+// call is HUNG (the 2026-10-07 prod incident: the worker picked the task up
+// and never returned, the client saw only 400 "cannot move out of turn" on
+// every click, and no >10s search warning ever fired because the call never
+// came back to time itself).
+//
+// On expiry the wrapper dumps every goroutine's stack into the logs (the
+// hung loop names itself), abandons the call, and lets the caller fall
+// through to ensureComputerMadeProgressLocked's fallback legal move -- a
+// vs-computer match can therefore never deadlock waiting on the engine,
+// whatever the engine does. The abandoned goroutine (if the call ever
+// unwakes) leaks, but it touches nothing but the state CLONE it was given.
+const computerEngineDeadline = 10 * time.Second
+
+// runComputerEngineCall invokes call() on a watchdog: returns (result, false)
+// on normal completion (panics are converted to the zero result with an
+// error log -- a panic inside the worker goroutine would otherwise kill the
+// whole match-service process), or (zero, true) once the deadline passes.
+func runComputerEngineCall[T any](s *Service, matchID, callName string, call func() T) (T, bool) {
+	type outcome struct {
+		value    T
+		panicv   any
+		panicked bool
+	}
+	ch := make(chan outcome, 1)
+	go func() {
+		defer func() {
+			r := recover()
+			ch <- outcome{panicv: r, panicked: r != nil}
+		}()
+		ch <- outcome{value: call()}
+	}()
+	timer := time.NewTimer(computerEngineDeadline)
+	defer timer.Stop()
+	select {
+	case o := <-ch:
+		if o.panicked {
+			s.Log.Error("computer engine call panicked", "matchID", matchID, "call", callName, "panic", o.panicv)
+			var zero T
+			return zero, true
+		}
+		return o.value, false
+	case <-timer.C:
+		stacks := make([]byte, 1<<20)
+		stacks = stacks[:runtime.Stack(stacks, true)]
+		s.Log.Error("computer engine call exceeded deadline -- engine HANG, goroutine dump follows",
+			"matchID", matchID, "call", callName,
+			"deadline_s", computerEngineDeadline.Seconds(),
+			"goroutines", strings.Count(string(stacks), "\n\ngoroutine "))
+		var zero T
+		return zero, true
+	}
+}
+
 func (s *Service) autoPlayComputer(c *matchContainer, now time.Time) {
 	compColor := computerColor(c.state)
 	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
@@ -580,7 +637,20 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 
 	c.mu.Unlock()
 	searchStart := time.Now()
-	computerIntent := computer.MakeMove(stateCopy)
+	computerIntent, engineTimedOut := runComputerEngineCall(s, c.state.MatchID, "MakeMove", func() *contracts.PlayerIntent {
+		return computer.MakeMove(stateCopy)
+	})
+	if engineTimedOut {
+		// The engine call is hung (or panicked). Abandon this turn: the
+		// worker's ensureComputerMadeProgressLocked applies a fallback legal
+		// move so the match continues, and the stack dump above names the
+		// loop for the engine fix. Do NOT recurse into further engine calls
+		// on the same opponent instance -- v1 serializes them behind its own
+		// mutex, which the abandoned call still holds.
+		c.mu.Lock()
+		s.Log.Warn("computer turn abandoned after engine deadline", "matchID", c.state.MatchID, "depth", depth)
+		return
+	}
 	if spent := time.Since(searchStart); spent > 10*time.Second {
 		// The v1 search budget for "medium" is 750ms (up to ~2.2s with the
 		// complexity scaling). Anything past 10s means CPU starvation, a
@@ -664,7 +734,21 @@ func (s *Service) autoPlayComputerDepthLimited(c *matchContainer, now time.Time,
 
 	// If the card requires target selection, have the computer pick a target
 	if c.state.PendingCard != nil && c.computer != nil {
-		targetIntent := c.computer.HandleSelectTarget(c.state)
+		// A clone for the same reason as MakeMove's stateCopy above: the
+		// watchdog may abandon the call while it still runs, and the abandoned
+		// goroutine must never touch the live state under the lock.
+		targetState := cloneMatchStateForEngine(c.state)
+		targetIntent, targetTimedOut := runComputerEngineCall(s, c.state.MatchID, "HandleSelectTarget", func() *contracts.PlayerIntent {
+			return c.computer.HandleSelectTarget(targetState)
+		})
+		if targetTimedOut {
+			// Same watchdog rule as MakeMove above: abandon the card (the
+			// dangling-PendingCard cleanup below already handles that) and
+			// let ensureComputerMadeProgressLocked finish the turn.
+			c.state.PendingCard = nil
+			s.Log.Warn("computer turn abandoned after target-selection deadline", "matchID", c.state.MatchID, "depth", depth)
+			return
+		}
 		if targetIntent != nil {
 			targetIntent.PlayerID = compGuestID
 			targetIntent.PlayerSecret = compPlayerSecret
