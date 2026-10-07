@@ -1202,10 +1202,11 @@ func (s *Service) computerWorker() {
 		case <-s.stopCh:
 			return
 		case task := <-s.computerCh:
-			task.c.mu.Lock()
 			if wait := time.Since(task.queuedAt); wait > 5*time.Second {
 				s.Log.Warn("computer move task waited in queue", "matchID", task.c.state.MatchID, "wait_ms", wait.Milliseconds())
 			}
+			task.c.mu.Lock()
+			s.Log.Info("computer move task received", "matchID", task.c.state.MatchID, "turn", task.c.state.Turn, "wait_ms", time.Since(task.queuedAt).Milliseconds())
 			s.autoPlayComputerDepthLimited(task.c, task.now, 0)
 			s.ensureComputerMadeProgressLocked(task.c, task.now)
 			task.c.mu.Unlock()

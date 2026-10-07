@@ -545,6 +545,14 @@ func cloneMatchStateForEngine(state *contracts.MatchState) *contracts.MatchState
 func (s *Service) autoPlayComputer(c *matchContainer, now time.Time) {
 	compColor := computerColor(c.state)
 	if c.computer == nil || c.state.Status != "active" || c.state.Turn != compColor {
+		// A computer match declining to enqueue its own reply is the exact
+		// "the computer never moved" bug, so the decline reason is logged
+		// whenever this IS a live computer match (non-computer matches hit
+		// this return constantly and must stay silent).
+		if c.computer != nil && c.state.Status == "active" && compColor != "" {
+			s.Log.Warn("computer reply not enqueued", "matchID", c.state.MatchID,
+				"turn", c.state.Turn, "expectedTurn", compColor)
+		}
 		return
 	}
 	task := computerMoveTask{c: c, now: now, queuedAt: time.Now()}
