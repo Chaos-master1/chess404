@@ -89,7 +89,14 @@ func (cb *CircuitBreaker) Allow() bool {
 		}
 		return false
 	case "half-open":
-		return cb.halfOpenCount < cb.halfOpenMax
+		// Admit at most halfOpenMax probes so a recovering dependency sees a
+		// trickle, not the full request stream; extra callers stay rejected
+		// until the breaker closes (or re-opens on a failed probe).
+		if cb.halfOpenCount < cb.halfOpenMax {
+			cb.halfOpenCount++
+			return true
+		}
+		return false
 	default:
 		return true
 	}
@@ -106,6 +113,7 @@ func (cb *CircuitBreaker) RecordSuccess() {
 			cb.state = "closed"
 			cb.failureCount = 0
 			cb.successCount = 0
+			cb.halfOpenCount = 0
 		}
 	case "closed":
 		cb.failureCount = 0
