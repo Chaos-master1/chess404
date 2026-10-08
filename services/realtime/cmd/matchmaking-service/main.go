@@ -23,9 +23,11 @@ import (
 	"github.com/chess404/realtime/internal/matchmaking"
 	"github.com/chess404/realtime/internal/metrics"
 	"github.com/chess404/realtime/internal/rate_limit"
+	"github.com/chess404/realtime/internal/sentryx"
 )
 
 func main() {
+	sentryx.Init(sentryx.Config{Service: "matchmaking-service"})
 	internalToken := matchmakingInternalServiceToken()
 	envutil.WarnSharedInternalToken("matchmaking-service",
 		os.Getenv("MATCHMAKING_INTERNAL_SERVICE_TOKEN"), "MATCHMAKING_INTERNAL_SERVICE_TOKEN",

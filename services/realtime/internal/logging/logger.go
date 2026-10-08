@@ -1,9 +1,14 @@
 package logging
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/chess404/realtime/internal/sentryx"
 )
 
 type Logger struct {
@@ -17,6 +22,23 @@ func New(service string) *Logger {
 	})
 	slogger := slog.New(handler).With("service", service)
 	return &Logger{slogger: slogger}
+}
+
+// sentryTags extracts string key/value pairs from slog fields so log
+// context (e.g. "match_id") becomes Sentry tags.
+func (l *Logger) sentryTags(fields []any) map[string]string {
+	tags := map[string]string{}
+	for i := 0; i+1 < len(fields); i += 2 {
+		if k, ok := fields[i].(string); ok {
+			switch v := fields[i+1].(type) {
+			case string:
+				tags[k] = v
+			case fmt.Stringer:
+				tags[k] = v.String()
+			}
+		}
+	}
+	return tags
 }
 
 func parseLevel() slog.Level {
@@ -46,9 +68,16 @@ func (l *Logger) Warn(msg string, fields ...any) {
 
 func (l *Logger) Error(msg string, fields ...any) {
 	l.slogger.Error(msg, fields...)
+	// Mirror error-level logs to Sentry so backend failures surface in the
+	// chess404 org. No-op unless sentryx.Init ran with a DSN.
+	sentryx.CaptureError(errors.New(msg), l.sentryTags(fields))
 }
 
 func (l *Logger) Fatal(msg string, fields ...any) {
 	l.slogger.Error(msg, fields...)
+	sentryx.CaptureError(errors.New(msg), l.sentryTags(fields))
+	// Give queued Sentry events a moment to reach the server before the
+	// process dies, otherwise shutdown reports are silently dropped.
+	sentryx.Flush(2 * time.Second)
 	os.Exit(1)
 }

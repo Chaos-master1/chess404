@@ -189,6 +189,40 @@ ACCOUNT_EMAIL_SMTP_REPLY_TO=support@chess404.example
 ACCOUNT_EMAIL_SMTP_MESSAGE_DOMAIN=chess404.example
 ```
 
+## Sentry (error reporting)
+
+Sentry is live for the web app and the four Go services (org `chess404` on
+sentry.io; projects `web` = Next.js, `backend` = Go).
+
+### `web`
+
+```env
+NEXT_PUBLIC_SENTRY_DSN=<web project DSN>   # build-time: set before web builds
+SENTRY_DSN=<web project DSN>
+SENTRY_ORG=chess404
+SENTRY_PROJECT=web
+# Optional, enables source-map upload at build time:
+SENTRY_AUTH_TOKEN=<sentry user auth token with project:write>
+```
+
+Client errors ship through the `/monitoring` tunnel route (no ad-blocker
+losses); server/edge init reads `SENTRY_DSN`.
+
+### `gateway`, `match-service`, `platform-service`
+
+```env
+SENTRY_DSN=<backend project DSN>
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=<git sha, optional>
+```
+
+The SDK boots via `services/realtime/internal/sentryx` (`sentryx.Init` in
+each main). Unset `SENTRY_DSN` disables reporting entirely with a single
+boot log line — safe for local dev. Error-level logs are mirrored to Sentry
+by `internal/logging`, and HTTP panics are reported by
+`httputil.WithRecovery`. `matchmaking-service` (when deployed standalone)
+uses the same pair of variables.
+
 ## First staging checklist
 
 After the first deploy:

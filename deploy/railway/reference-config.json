@@ -82,7 +82,7 @@
         "restartPolicyMaxRetries": 3,
         "numReplicas": 1
       },
-      "_note": "NEXT_PUBLIC_SENTRY_DSN: ${{Sentry.DSN}} was never live -- no Sentry service exists in this project. Remove or provision Sentry before relying on this."
+      "_note": "NEXT_PUBLIC_SENTRY_DSN: provisioned 2026-10-08 on Sentry (sentry.io) org chess404, project web (javascript-nextjs). Set on the web service via Railway CLI: NEXT_PUBLIC_SENTRY_DSN, SENTRY_DSN, SENTRY_ORG=chess404, SENTRY_PROJECT=web. The four Go services use SENTRY_DSN + SENTRY_ENVIRONMENT=production against the backend (go) project."
     }
   },
   "_notImplemented": {

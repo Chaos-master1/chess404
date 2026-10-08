@@ -12,11 +12,13 @@ import (
 	"github.com/chess404/realtime/internal/envutil"
 	"github.com/chess404/realtime/internal/httputil"
 	"github.com/chess404/realtime/internal/rate_limit"
+	"github.com/chess404/realtime/internal/sentryx"
 )
 
 // Service startup and HTTP server wiring.
 
 func main() {
+	sentryx.Init(sentryx.Config{Service: "gateway"})
 	envutil.Require("MATCH_SERVICE_INTERNAL_URL", "PLATFORM_SERVICE_INTERNAL_URL", "MATCHMAKING_SERVICE_INTERNAL_URL", "ALLOWED_ORIGINS")
 	config := gatewayConfigFromEnv()
 	// HTTP client used to call sibling backend services. The 10s

@@ -137,6 +137,32 @@ Full-platform pass per the approved 5-phase plan; evidence in
   NOT reproduce locally). Post-deploy prod verification: 4/4 fresh matches
   replied in 1.0–1.9s, zero watchdog firings. If it recurs, grep prod logs
   for `exceeded deadline -- engine HANG` — the dump names the loop.
+### Sentry live (2026-10-08)
+
+Error reporting is now end-to-end for web + Go backends (org `chess404` on
+sentry.io; projects `web` = Next.js, `backend` = Go):
+
+- **Go:** new `services/realtime/internal/sentryx` (env-gated `sentryx.Init`
+  in all four service mains — unset `SENTRY_DSN` = disabled + one boot log
+  line). `internal/logging` mirrors Error/Fatal to Sentry (Fatal flushes 2s
+  before `os.Exit(1)`); `httputil.WithRecovery` reports HTTP panics with
+  method/path tags. Deployed to gateway/match-service/platform-service via
+  `railway up` (all SUCCESS); verified end-to-end — local capture with the
+  production DSN produced issue `BACKEND-1` in the backend project.
+- **Web:** `NEXT_PUBLIC_SENTRY_DSN`/`SENTRY_DSN`/`SENTRY_ORG`/`SENTRY_PROJECT`
+  set on the `web` service; DSN confirmed baked into the served HTML; client
+  errors ship via the `/monitoring` tunnel route. No web errors captured yet
+  (quiet site) — expect first events on next real error.
+- **Ops:** `SENTRY_AUTH_TOKEN` (source-map upload) is NOT set — add it to the
+  web service if un-symbolicated stack traces bother anyone. `@sentry/nextjs`
+  is still 8.55.2 (7 OTEL moderates clear with a major bump, per the Oct 7
+  audit). The Sentry MCP server (`https://mcp.sentry.dev/mcp/chess404`) is in
+  `.mcp.json`; it needs a browser OAuth login on first use.
+- **Backups:** the Oct 7 "backup regression" was a misdiagnosis — run
+  `37623044600` dumped, uploaded to R2, and passed the restore drill; the
+  scary log line was echoed script text. The workflow's skip branch now fails
+  loudly on missing `BACKUP_*` secrets instead of exiting green.
+
 - **NNUE Phase 4 in flight:** selfplay dataset regenerating detached
   (per-game flush fix `5f462bd` — the old dataset died in a bufio buffer);
   then train v3 → probe (queen ≥500) → 40-game gauntlet; replace

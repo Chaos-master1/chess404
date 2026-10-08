@@ -19,6 +19,7 @@ import (
 	"github.com/chess404/realtime/internal/httputil"
 	"github.com/chess404/realtime/internal/platform"
 	"github.com/chess404/realtime/internal/rate_limit"
+	"github.com/chess404/realtime/internal/sentryx"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -46,6 +47,7 @@ func initPostgresPool() {
 var accountsCache = platform.NewLeaderboardCache(10 * time.Second)
 
 func main() {
+	sentryx.Init(sentryx.Config{Service: "platform-service"})
 	envutil.Require("ALLOWED_ORIGINS")
 	initPostgresPool()
 	archive, err := openArchiveStore()

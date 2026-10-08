@@ -54,13 +54,19 @@ backup mechanism for now — accepted worst case is losing up to ~24h of new
 writes (time of the last daily dump). Revisit PITR when the project moves to
 a paid plan.
 
-**REGRESSION 2026-10-07:** the scheduled run `37623044600` (06:00 UTC) no-
-opped with *"postgres-backup is not configured. Set the BACKUP_* repository
-secrets"* — at least one of the five secrets is empty/absent again two days
-after the verified setup. Re-set the `BACKUP_*` secrets (contents above),
-then `workflow_dispatch` once and confirm an object lands in R2 and the
-in-job restore drill passes. Watch the job logs, not the green checkmark:
-the no-op path also exits green.
+**RESOLVED 2026-10-08:** the "REGRESSION 2026-10-07" note below was a
+misdiagnosis — run `37623044600` actually performed a full dump, R2 upload,
+and passing restore drill (drill: tables=21 accounts=18
+account_credentials=18). The alarming "not configured" text in the log was
+the *echoed script text* of the skip branch, not an emitted notice. The skip
+branch was still a footgun (a green no-op is indistinguishable from success
+when backups are the production mechanism), so the workflow now **fails
+loudly** if any `BACKUP_*` secret is missing instead of exiting 0.
+
+**Historical note (2026-10-07):** the scheduled run `37623044600` (06:00 UTC)
+appeared to no-op with *"postgres-backup is not configured. Set the BACKUP_*
+repository secrets"* — see the resolved note above: the secrets were intact
+and the run was healthy.
 
 ## 3. match-service deploy may be stale — RESOLVED 2026-09-06, RECURRED 2026-10-07 (resolved via CLI)
 

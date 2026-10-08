@@ -1,6 +1,7 @@
 # Scheduled Postgres backups via deploy/postgres-backup.sh.
 #
-# No-ops with a clear notice until these repository secrets are configured:
+# These repository secrets are required; a missing one fails the job (red),
+# it must never silently no-op:
 #   BACKUP_DATABASE_URL          — Postgres connection string (pg_dump target)
 #   BACKUP_AWS_S3_BUCKET         — S3-compatible bucket for uploads
 #   BACKUP_AWS_ACCESS_KEY_ID     — upload credentials
@@ -39,11 +40,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Skip unless backup target is configured
+      - name: Fail unless backup target is configured
         run: |
-          if [ -z "$DATABASE_URL" ] || [ -z "$AWS_S3_BUCKET" ] || [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
-            echo "::notice::postgres-backup is not configured. Set the BACKUP_* repository secrets to enable daily dumps. Skipping."
-            exit 0
+          # Backups are the production backup mechanism (no Railway PITR on
+          # the current plan), so an unconfigured pipeline must be visible as
+          # a failure, not a green no-op. List every missing secret.
+          missing=""
+          [ -z "$DATABASE_URL" ] && missing="$missing BACKUP_DATABASE_URL"
+          [ -z "$AWS_S3_BUCKET" ] && missing="$missing BACKUP_AWS_S3_BUCKET"
+          [ -z "$AWS_ACCESS_KEY_ID" ] && missing="$missing BACKUP_AWS_ACCESS_KEY_ID"
+          [ -z "$AWS_SECRET_ACCESS_KEY" ] && missing="$missing BACKUP_AWS_SECRET_ACCESS_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::postgres-backup is not configured. Missing repository secret(s):$missing"
+            exit 1
           fi
 
       - name: Install pg_dump matching the server major (Postgres 18)

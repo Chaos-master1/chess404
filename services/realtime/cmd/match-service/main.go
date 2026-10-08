@@ -25,6 +25,7 @@ import (
 	"github.com/chess404/realtime/internal/metrics"
 	"github.com/chess404/realtime/internal/platform"
 	"github.com/chess404/realtime/internal/rate_limit"
+	"github.com/chess404/realtime/internal/sentryx"
 	"github.com/gorilla/websocket"
 )
 
@@ -35,6 +36,7 @@ func redactToken(s string) string {
 }
 
 func main() {
+	sentryx.Init(sentryx.Config{Service: "match-service"})
 	envutil.Require("PLATFORM_SERVICE_INTERNAL_URL", "ALLOWED_ORIGINS")
 	// INTERNAL_SERVICE_TOKEN used to be a hard boot requirement; the token
 	// migration now prefers per-service tokens, so any accepted token env
