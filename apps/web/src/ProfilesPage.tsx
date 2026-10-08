@@ -459,7 +459,7 @@ export default function ProfilesPage({
                   color: '#fff2c8',
                   fontSize: '12px',
                   fontWeight: 700,
-                  outline: 'none',
+                  
                 }}
               />
               <button

@@ -27,13 +27,13 @@ const ROUTES = [
 // Routes that must NOT be reachable in production.
 const BLOCKED_ROUTES = ['/dashboard'];
 
-// Accessibility smoke (WCAG 2.0/2.1 A+AA). A CRITICAL violation means a page
-// is broken for assistive technology at the structural level (missing page
-// language, unlabeled form controls, empty buttons) and blocks this gate;
-// lower-impact findings are logged with the route so the report shows the
-// debt without failing the run -- the gate hardens to them once the backlog
-// is triaged. Auth-gated routes (/account, /friends, /inbox) render their
-// signed-out states here, which is still the structure users first see.
+// Accessibility smoke (WCAG 2.0/2.1 A+AA). CRITICAL and SERIOUS violations
+// block this gate; the sole serious finding (/cards scrollable-region-focusable)
+// was fixed 2026-10-08, so the gate hardened from critical-only as planned.
+// Moderate/minor findings are logged with the route so the report shows the
+// debt without failing the run. Auth-gated routes (/account, /friends, /inbox)
+// render their signed-out states here, which is still the structure users
+// first see.
 test.describe('accessibility axe smoke', () => {
   for (const route of ROUTES) {
     test(`${route} has no critical WCAG A/AA violations`, async ({ page }) => {
@@ -47,15 +47,15 @@ test.describe('accessibility axe smoke', () => {
         .withTags(['wcag2a', 'wcag2aa'])
         .analyze();
 
-      const critical = results.violations.filter(v => v.impact === 'critical');
-      const lower = results.violations.filter(v => v.impact && v.impact !== 'critical');
+      const blocking = results.violations.filter(v => v.impact === 'critical' || v.impact === 'serious');
+      const lower = results.violations.filter(v => v.impact && v.impact !== 'critical' && v.impact !== 'serious');
       if (lower.length > 0) {
         const summary = lower
           .map(v => `${v.impact}/${v.id}: ${v.nodes.length} node(s)`)
           .join(', ');
         console.log(`[axe] ${route} non-critical findings -> ${summary}`);
       }
-      expect(critical, `${route} critical a11y violations`).toEqual([]);
+      expect(blocking, `${route} blocking a11y violations (critical/serious)`).toEqual([]);
     });
   }
 });

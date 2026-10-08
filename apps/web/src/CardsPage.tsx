@@ -515,7 +515,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
         <div style={{flex:1}}/>
         <div style={{position:'relative'}}>
           <span style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',fontSize:13,opacity:0.35}}>🔍</span>
-          <input aria-label="Search cards" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search..." style={{padding:'8px 14px 8px 32px',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:8,color:'#fff',fontSize:13,outline:'none',width:170,fontFamily:'inherit'}}/>
+          <input aria-label="Search cards" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" style={{padding:'8px 14px 8px 32px',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:8,color:'#fff',fontSize:13,width:170,fontFamily:'inherit'}}/>
         </div>
       </div>
 
@@ -552,7 +552,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
 
           {/* CARD GRID */}
           {/* CARD GRID */}
-          <div className="cards-grid-wrap" style={{flex:1, overflowY:'auto', padding:embedded?'28px 24px':'36px 48px'}}>
+          <div className="cards-grid-wrap" role="region" aria-label="Card gallery" tabIndex={0} style={{flex:1, overflowY:'auto', padding:embedded?'28px 24px':'36px 48px'}}>
             <div style={{maxWidth:1400, margin:'0 auto'}}>
               {filterRarity!=='All'
                 ? <RaritySection rarity={filterRarity} cards={filtered} selectedId={selected?.mechanic??null} onSelect={handleSelectCard} filterType={filterType}/>
@@ -567,7 +567,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
       {showPreview && selected && (
         <>
           <div className="cards-mobile-preview-backdrop" onClick={()=>setShowPreview(false)}/>
-          <div className="cards-mobile-preview-sheet">
+          <div className="cards-mobile-preview-sheet" role="region" aria-label="Card details" tabIndex={0}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 18px',borderBottom:'1px solid rgba(255,165,40,0.15)',flexShrink:0}}>
               <div style={{color:'#ffcf72',fontSize:13,fontWeight:800,letterSpacing:'1px',textTransform:'uppercase'}}>Card Details</div>
               <button onClick={()=>setShowPreview(false)} style={{

@@ -1593,7 +1593,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                   background: 'rgba(8,10,18,0.92)',
                   color: '#fff6df',
                   fontSize: '14px',
-                  outline: 'none',
+                  
                 }}
               />
             </label>
@@ -1614,7 +1614,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                   background: 'rgba(8,10,18,0.92)',
                   color: '#fff6df',
                   fontSize: '14px',
-                  outline: 'none',
+                  
                 }}
               />
             </label>
@@ -1715,7 +1715,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                   background: 'rgba(8,10,18,0.92)',
                   color: '#fff6df',
                   fontSize: '14px',
-                  outline: 'none',
+                  
                 }}
               />
             </label>
@@ -1782,7 +1782,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                   background: 'rgba(8,10,18,0.92)',
                   color: '#fff6df',
                   fontSize: '14px',
-                  outline: 'none',
+                  
                 }}
               />
             </label>
@@ -1803,7 +1803,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                   background: 'rgba(8,10,18,0.92)',
                   color: '#fff6df',
                   fontSize: '14px',
-                  outline: 'none',
+                  
                 }}
               />
             </label>
@@ -1899,7 +1899,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                     background: 'rgba(8,10,18,0.92)',
                     color: '#fff6df',
                     fontSize: '14px',
-                    outline: 'none',
+                    
                   }}
                 />
               </label>
@@ -1919,7 +1919,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                     background: 'rgba(8,10,18,0.92)',
                     color: '#fff6df',
                     fontSize: '14px',
-                    outline: 'none',
+                    
                   }}
                 />
               </label>
@@ -1940,7 +1940,7 @@ function AccountSeatPanel({ side, label, accent, guestProfile = null, externalNo
                     background: 'rgba(8,10,18,0.92)',
                     color: '#fff6df',
                     fontSize: '14px',
-                    outline: 'none',
+                    
                   }}
                 />
               </label>

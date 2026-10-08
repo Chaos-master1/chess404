@@ -337,7 +337,7 @@ const selectStyle: React.CSSProperties = {
   color: '#eef4ff',
   colorScheme: 'dark',
   fontSize: '13px',
-  outline: 'none',
+  
   cursor: 'pointer',
 };
 

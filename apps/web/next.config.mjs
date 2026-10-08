@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { withSentryConfig } from '@sentry/nextjs';
+import { withSentryConfig } from '@sentry/nextjs/config';
 
 const nextConfig = {
   transpilePackages: ['@chess404/contracts', '@chess404/game-core'],

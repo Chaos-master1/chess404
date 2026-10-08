@@ -493,7 +493,7 @@ export default function FriendsPage({
                   color: '#fff2c8',
                   fontSize: '12px',
                   fontWeight: 700,
-                  outline: 'none',
+                  
                 }}
               />
               <button
@@ -870,7 +870,7 @@ function ChallengeModal({
     colorScheme: 'dark',
     fontSize: '12px',
     fontWeight: 700,
-    outline: 'none',
+    
     cursor: 'pointer',
   };
 
