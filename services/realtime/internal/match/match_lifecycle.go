@@ -439,6 +439,7 @@ func (s *Service) ApplyIntent(intent contracts.PlayerIntent, now time.Time) (con
 				s.saveToRedis(persistSnap, presence)
 			}
 			s.broadcastLocked(c, snapshot)
+			snapshot.SeqNum = c.seqNum
 			return snapshot, nil
 		}
 		c.events = append(c.events, timeoutEvents...)
@@ -451,6 +452,7 @@ func (s *Service) ApplyIntent(intent contracts.PlayerIntent, now time.Time) (con
 			s.saveToRedis(persistSnap, presence)
 		}
 		s.broadcastLocked(c, snapshot)
+		snapshot.SeqNum = c.seqNum
 		return snapshot, nil
 	}
 
@@ -494,6 +496,7 @@ func (s *Service) ApplyIntent(intent contracts.PlayerIntent, now time.Time) (con
 		s.saveToRedis(persistSnap, presence)
 	}
 	s.broadcastLocked(c, snapshot)
+	snapshot.SeqNum = c.seqNum
 
 	s.autoPlayComputer(c, now)
 

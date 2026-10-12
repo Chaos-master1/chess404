@@ -310,7 +310,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
 
   const {
     timeW, setTimeW, timeB, setTimeB, tickingState, setTicking, clockActive, setClockActive,
-    resetTimer,
+    syncClocks, resetTimer,
   } = useMatchTimer({ over: Boolean(over), authoritativeLive: Boolean(hostedRuntime) });
 
   const {
@@ -439,17 +439,18 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       // carries -- clocks and (defensively) terminal state. Never board,
       // turn, hands, pending cards or identity, and never event side effects.
       if (match.clock) {
-        setTimeW(match.clock.whiteMs);
-        setTimeB(match.clock.blackMs);
+        syncClocks({
+          whiteMs: match.clock.whiteMs,
+          blackMs: match.clock.blackMs,
+          turn: match.status === 'active' ? match.turn : null,
+          active: match.status === 'active',
+        });
       }
       if (match.status === 'finished') {
         setOver(true);
         setWinner(match.winner ?? null);
         setClockActive(false);
         setTicking(null);
-      } else if (match.status === 'active') {
-        setClockActive(true);
-        setTicking(match.turn);
       }
       return;
     }
@@ -724,8 +725,20 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     setOver(isGameOver);
     setWinner(match.winner ?? null);
     if (match.clock) {
-      setTimeW(match.clock.whiteMs);
-      setTimeB(match.clock.blackMs);
+      syncClocks({
+        whiteMs: match.clock.whiteMs,
+        blackMs: match.clock.blackMs,
+        turn: isGameOver ? null : match.turn,
+        active: !isGameOver && match.status === 'active',
+      });
+    } else {
+      if (isGameOver) {
+        setClockActive(false);
+        setTicking(null);
+      } else if (match.status === 'active') {
+        setClockActive(true);
+        setTicking(match.turn);
+      }
     }
 
     if (match.whiteHand) setWhiteHand(match.whiteHand as GameCard[]);
@@ -751,15 +764,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     setBombPieces((match.bombPieces as any) ?? []);
     setGhostPiece((match.invisiblePiece as any) ?? null);
     setDoubleMove((match.doubleMove as any) ?? null);
-
-    if (isGameOver) {
-      setClockActive(false);
-      setTicking(null);
-    } else if (match.status === 'active') {
-      setClockActive(true);
-      setTicking(match.turn);
-    }
-  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setLavaExploding, setFogZones, setFortressZones, setBombPieces, setBombExploding, setGhostPiece, setDoubleMove, setViewerSeat, setMatchSeatMeta, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, triggerTeleportAnim, triggerJumpAnim, triggerSwapAnim, triggerMindControlAnim, triggerSacrificeAnim, triggerFuseAnim, triggerReverseAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
+  }, [authoritativeMatchIdRef, authoritativeSeatIdsRef, authoritativeSeatSecretsRef, authoritativeClaimTokensRef, authoritativeClaimExpiresAtRef, blackProfileRef, hostedRuntime, setBoard, setTurn, setMoved, setLm, setHmc, setFmn, setOver, setWinner, setTimeW, setTimeB, syncClocks, setWhiteHand, setBlackHand, setCardPending, setRadarActive, setLavaSquares, setLavaExploding, setFogZones, setFortressZones, setBombPieces, setBombExploding, setGhostPiece, setDoubleMove, setViewerSeat, setMatchSeatMeta, setClockActive, setTicking, viewerSeatRef, whiteProfileRef, setMovHist, fireCardAnim, triggerSniperAnim, triggerTeleportAnim, triggerJumpAnim, triggerSwapAnim, triggerMindControlAnim, triggerSacrificeAnim, triggerFuseAnim, triggerReverseAnim, playCardSound, setCardMsg, setLastDrawAnim, authoritativeActorForColor]);
 
   const submitAuthoritativeIntent = React.useCallback(async (intent: any) => {
     if (!authoritativeMatchIdRef.current) return;
@@ -1362,7 +1367,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     reverseAnim, triggerReverseAnim,
     cloneAnim, triggerCloneAnim, blackHoleAnim, triggerBlackHoleAnim, poofAnim, triggerPoofAnim,
     timeW, setTimeW, timeB, setTimeB, tickingState, setTicking,
-    clockActive, setClockActive, resetTimer,
+    clockActive, setClockActive, resetTimer, syncClocks,
     authoritativeLive, authoritativeStatus,
     authoritativeWhiteConnected, authoritativeBlackConnected,
     authoritativeDisconnectGraceFor, authoritativeDisconnectGraceDeadline,

@@ -309,7 +309,9 @@ func (s *Service) GetMatch(matchID string) (contracts.MatchSnapshotResponse, err
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := time.Now().UTC()
-	return buildSnapshotWithPresence(c.state, s.ensurePresenceStateLocked(c, now), len(c.events), nil, now), nil
+	resp := buildSnapshotWithPresence(c.state, s.ensurePresenceStateLocked(c, now), len(c.events), nil, now)
+	resp.SeqNum = c.seqNum
+	return resp, nil
 }
 
 // GetMatchForViewer returns the snapshot as a specific viewer is allowed to
@@ -351,11 +353,13 @@ func (s *Service) GetMatchForViewer(matchID, playerID, playerSecret string) (con
 
 	now := time.Now().UTC()
 	base := buildSnapshotWithPresence(c.state, s.ensurePresenceStateLocked(c, now), len(c.events), nil, now)
+	base.SeqNum = c.seqNum
 	return contracts.MatchSnapshotResponse{
 		Match:        filterStateForColor(base.Match, viewerColor),
 		ReplayHead:   base.ReplayHead,
 		ReplayFrames: base.ReplayFrames,
 		Events:       filterEventsForColor(base.Events, viewerColor),
+		SeqNum:       base.SeqNum,
 	}, nil
 }
 

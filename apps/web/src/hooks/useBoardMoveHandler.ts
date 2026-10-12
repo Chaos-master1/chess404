@@ -333,9 +333,14 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
           setLm({ from: { row: fr, col: fc }, to: { row: tr, col: tc } });
         }
 
+        const currentTurnColor = turnRef.current;
+        const nextColor = currentTurnColor === 'white' ? 'black' : 'white';
+        setTurn(nextColor);
+        setTicking(nextColor);
+
         const backendMoveIntent: Omit<Extract<PlayerIntent, { type: 'make_move' }>, 'matchId'> = {
           type: 'make_move',
-          ...authoritativeActorForColor(turnRef.current),
+          ...authoritativeActorForColor(currentTurnColor),
           from: { row: fr, col: fc },
           to: { row: tr, col: tc },
           promotion: forcePromo,
@@ -651,7 +656,11 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
   const doPromo = React.useCallback((type: PieceType) => {
     if (!promo) return;
     if (promo.authoritativeMatchId && promo.from && promo.to) {
-      const actor = authoritativeActorForColor(promo.turn ?? turn);
+      const actorColor = promo.turn ?? turn;
+      const nextColor = actorColor === 'white' ? 'black' : 'white';
+      setTurn(nextColor);
+      setTicking(nextColor);
+      const actor = authoritativeActorForColor(actorColor);
       if (hostedRuntime && (!actor.playerId || (!actor.playerSecret && !actor.playerClaimToken))) return;
       const backendMoveIntent: Omit<Extract<PlayerIntent, { type: 'make_move' }>, 'matchId'> = {
         type: 'make_move',

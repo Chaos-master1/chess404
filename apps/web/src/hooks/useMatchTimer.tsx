@@ -28,10 +28,11 @@ export function useMatchTimer({
   const tickingRef = React.useRef<PieceColor | null>(null);
   const [tickingState, setTickingState] = React.useState<PieceColor | null>(null);
 
-  // Authoritative base times and timestamp when the base was synchronized
+  // Authoritative base times and independent timestamps when each base was synchronized
   const baseWRef = React.useRef(initialMs);
   const baseBRef = React.useRef(initialMs);
-  const lastSyncRef = React.useRef(typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const syncWRef = React.useRef(typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const syncBRef = React.useRef(typeof performance !== 'undefined' ? performance.now() : Date.now());
   const clockActiveRef = React.useRef(false);
 
   const onTimeoutRef = React.useRef(onTimeout);
@@ -43,21 +44,14 @@ export function useMatchTimer({
       const next = typeof valueOrFn === 'function' ? valueOrFn(prev) : valueOrFn;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       if (clockActiveRef.current && tickingRef.current === 'white') {
-        // A running clock must never gain time: snapshot paths (WS tick, HTTP
-        // intent response, poll) are classified by seqNum alone, and
-        // same-seq frames are not ordered among themselves by build time —
-        // an older-built clock view can land after a newer one (live: the
-        // opponent's clock visibly ran down, then jumped back up). Clamp to
-        // what is currently displayed; genuinely newer (lower) values and
-        // non-running colors (increment credits) pass through untouched.
-        const displayed = Math.max(0, baseWRef.current - Math.max(0, now - lastSyncRef.current));
+        const displayed = Math.max(0, baseWRef.current - Math.max(0, now - syncWRef.current));
         const clamped = clampRunningClock(next, displayed);
         baseWRef.current = clamped;
-        lastSyncRef.current = now;
+        syncWRef.current = now;
         return clamped;
       }
       baseWRef.current = next;
-      lastSyncRef.current = now;
+      syncWRef.current = now;
       return next;
     });
   }, []);
@@ -68,33 +62,91 @@ export function useMatchTimer({
       const next = typeof valueOrFn === 'function' ? valueOrFn(prev) : valueOrFn;
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       if (clockActiveRef.current && tickingRef.current === 'black') {
-        // See the running-clock clamp note in setTimeW.
-        const displayed = Math.max(0, baseBRef.current - Math.max(0, now - lastSyncRef.current));
+        const displayed = Math.max(0, baseBRef.current - Math.max(0, now - syncBRef.current));
         const clamped = clampRunningClock(next, displayed);
         baseBRef.current = clamped;
-        lastSyncRef.current = now;
+        syncBRef.current = now;
         return clamped;
       }
       baseBRef.current = next;
-      lastSyncRef.current = now;
+      syncBRef.current = now;
       return next;
     });
+  }, []);
+
+  // syncClocks: atomic synchronization of both clocks, turn, and active state from authoritative snapshots
+  const syncClocks = React.useCallback(({
+    whiteMs,
+    blackMs,
+    turn,
+    active,
+  }: {
+    whiteMs?: number | null;
+    blackMs?: number | null;
+    turn?: PieceColor | null;
+    active?: boolean;
+  }) => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const nextActive = active !== undefined ? active : clockActiveRef.current;
+    const nextTurn = turn !== undefined ? turn : tickingRef.current;
+    const currentRunning = clockActiveRef.current ? tickingRef.current : null;
+
+    if (typeof whiteMs === 'number') {
+      if (currentRunning === 'white' && nextTurn === 'white' && nextActive) {
+        const displayed = Math.max(0, baseWRef.current - Math.max(0, now - syncWRef.current));
+        const clamped = clampRunningClock(whiteMs, displayed);
+        baseWRef.current = clamped;
+        syncWRef.current = now;
+        setTimeWState(clamped);
+      } else {
+        baseWRef.current = whiteMs;
+        syncWRef.current = now;
+        setTimeWState(whiteMs);
+      }
+    }
+
+    if (typeof blackMs === 'number') {
+      if (currentRunning === 'black' && nextTurn === 'black' && nextActive) {
+        const displayed = Math.max(0, baseBRef.current - Math.max(0, now - syncBRef.current));
+        const clamped = clampRunningClock(blackMs, displayed);
+        baseBRef.current = clamped;
+        syncBRef.current = now;
+        setTimeBState(clamped);
+      } else {
+        baseBRef.current = blackMs;
+        syncBRef.current = now;
+        setTimeBState(blackMs);
+      }
+    }
+
+    clockActiveRef.current = nextActive;
+    setClockActiveState(nextActive);
+    tickingRef.current = nextTurn;
+    setTickingState(nextTurn);
   }, []);
 
   const setClockActive = React.useCallback((active: boolean) => {
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     // If stopping the clock, freeze the active color at current elapsed time
     if (!active && clockActiveRef.current && tickingRef.current) {
-      const elapsed = Math.max(0, now - lastSyncRef.current);
       if (tickingRef.current === 'white') {
+        const elapsed = Math.max(0, now - syncWRef.current);
         baseWRef.current = Math.max(0, baseWRef.current - elapsed);
+        syncWRef.current = now;
         setTimeWState(baseWRef.current);
       } else if (tickingRef.current === 'black') {
+        const elapsed = Math.max(0, now - syncBRef.current);
         baseBRef.current = Math.max(0, baseBRef.current - elapsed);
+        syncBRef.current = now;
         setTimeBState(baseBRef.current);
       }
+    } else if (active && !clockActiveRef.current && tickingRef.current) {
+      if (tickingRef.current === 'white') {
+        syncWRef.current = now;
+      } else if (tickingRef.current === 'black') {
+        syncBRef.current = now;
+      }
     }
-    lastSyncRef.current = now;
     clockActiveRef.current = active;
     setClockActiveState(active);
   }, []);
@@ -103,25 +155,34 @@ export function useMatchTimer({
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     // When switching active turns, freeze the outgoing color's base time
     if (clockActiveRef.current && tickingRef.current && tickingRef.current !== v) {
-      const elapsed = Math.max(0, now - lastSyncRef.current);
       if (tickingRef.current === 'white') {
+        const elapsed = Math.max(0, now - syncWRef.current);
         baseWRef.current = Math.max(0, baseWRef.current - elapsed);
+        syncWRef.current = now;
         setTimeWState(baseWRef.current);
       } else if (tickingRef.current === 'black') {
+        const elapsed = Math.max(0, now - syncBRef.current);
         baseBRef.current = Math.max(0, baseBRef.current - elapsed);
+        syncBRef.current = now;
         setTimeBState(baseBRef.current);
       }
     }
-    lastSyncRef.current = now;
+    if (v === 'white') {
+      syncWRef.current = now;
+    } else if (v === 'black') {
+      syncBRef.current = now;
+    }
     tickingRef.current = v;
     setTickingState(v);
   }, []);
 
   const resetTimer = React.useCallback(() => {
     const init = initialClockStart * 1000;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     baseWRef.current = init;
     baseBRef.current = init;
-    lastSyncRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    syncWRef.current = now;
+    syncBRef.current = now;
     clockActiveRef.current = false;
     setTimeWState(init);
     setTimeBState(init);
@@ -138,15 +199,16 @@ export function useMatchTimer({
 
     const interval = window.setInterval(() => {
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const elapsed = Math.max(0, now - lastSyncRef.current);
 
       if (tickingRef.current === 'white') {
+        const elapsed = Math.max(0, now - syncWRef.current);
         const remaining = Math.max(0, baseWRef.current - elapsed);
         setTimeWState(remaining);
         if (remaining === 0 && !isAuthoritative) {
           onTimeoutRef.current?.('white');
         }
       } else if (tickingRef.current === 'black') {
+        const elapsed = Math.max(0, now - syncBRef.current);
         const remaining = Math.max(0, baseBRef.current - elapsed);
         setTimeBState(remaining);
         if (remaining === 0 && !isAuthoritative) {
@@ -165,6 +227,7 @@ export function useMatchTimer({
     timeB, setTimeB,
     clockActive, setClockActive,
     tickingState, tickingRef, setTicking,
+    syncClocks,
     resetTimer,
   };
 }
