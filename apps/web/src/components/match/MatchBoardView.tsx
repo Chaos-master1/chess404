@@ -1102,7 +1102,16 @@ export function MatchBoardView() {
       </div>
 
       {/* ── Right panel ── */}
-      <div className={`match-layout__right${mobilePanel === 'right' ? ' is-open' : ''}`}>
+      <div className={`match-layout__right${mobilePanel === 'right' ? ' is-open' : ''}`} style={{
+        flex:1, minWidth:0,
+        background:'rgba(20,8,45,0.45)',
+        backdropFilter:'blur(24px)', WebkitBackdropFilter:'blur(24px)',
+        border:'1px solid rgba(255,165,40,0.3)',
+        borderRadius:'16px', padding:'12px',
+        display:'flex', flexDirection:'column', gap:'8px',
+        boxShadow:'0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,165,40,0.12), 0 0 40px rgba(200,80,10,0.12)',
+        overflow:'auto', margin:'10px 0',
+      }}>
         <div className="match-drawer__header">
           <div className="match-drawer__title">💬 Chat & Move History</div>
           <button

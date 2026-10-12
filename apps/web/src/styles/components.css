@@ -370,11 +370,13 @@ select option {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   align-items: center;
+  justify-content: center;
+  align-self: center;
   min-width: 0;
   max-width: 80vh;
-  margin: 0 auto;
+  margin: auto;
 }
 
 .match-layout__board-wrapper {
@@ -391,8 +393,8 @@ select option {
 }
 
 .match-layout__right {
-  width: 280px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
