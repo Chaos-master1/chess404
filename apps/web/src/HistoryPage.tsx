@@ -188,6 +188,9 @@ export default function HistoryPage({
       }
       setMatches(nextMatches);
       setSelectedMatchId(currentSelected => {
+        if (focusMatchId) {
+          return focusMatchId;
+        }
         if (preserveSelection && currentSelected && nextMatches.some(match => match.matchId === currentSelected)) {
           return currentSelected;
         }
@@ -232,6 +235,10 @@ export default function HistoryPage({
       .then(match => {
         if (!cancelled) {
           setSelectedMatch(match);
+          setMatches(current => {
+            if (current.some(m => m.matchId === match.matchId)) return current;
+            return [match, ...current];
+          });
         }
       })
       .catch(err => {
@@ -313,7 +320,7 @@ export default function HistoryPage({
     ? new URLSearchParams(window.location.search)
     : null;
   const hasUrlFocus = Boolean(urlFocus && (urlFocus.get('replay')?.trim() || urlFocus.get('guest')?.trim() || urlFocus.get('match')?.trim()));
-  const showHistoryGate = !focusGuestId && !hasUrlFocus && !hasAccountSession;
+  const showHistoryGate = !focusGuestId && !focusMatchId && !hasUrlFocus && !hasAccountSession;
   const router = useRouter();
 
   if (showHistoryGate) {

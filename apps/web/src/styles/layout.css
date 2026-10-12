@@ -1,6 +1,7 @@
 .app-root {
   display: flex;
   flex: 1;
+  width: 100%;
   height: 100%;
   min-height: 0;
   background:
@@ -12,6 +13,7 @@
 .app-shell {
   display: flex;
   flex: 1;
+  width: 100%;
   min-height: 0;
   /* Without this, a wide fixed-min-content descendant (e.g. the cards
      page's nowrap filter bar) inflates the shell to its content width and
@@ -233,6 +235,7 @@
 .app-shell__content {
   display: flex;
   flex: 1;
+  width: 100%;
   min-width: 0;
   min-height: 0;
   flex-direction: column;

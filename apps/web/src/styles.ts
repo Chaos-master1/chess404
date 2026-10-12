@@ -190,6 +190,12 @@ export const GLOBAL_STYLES = `
     #main-content div[style*="overflow-y"]:not(.chat-log):not(.moves-log):not(.match-layout__left):not(.match-layout__right) {
       padding-bottom: 96px !important;
     }
+    .app-shell__unfinished-banner {
+      padding: 10px 16px !important;
+    }
+    .play-hub-scroll {
+      padding: 16px 16px 96px !important;
+    }
   }
 `;
 

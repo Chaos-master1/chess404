@@ -174,7 +174,7 @@ export default function AppShell({
 
         <div className="app-shell__content">
           {showReturnToMatch && onReturnToMatch ? (
-            <div style={{
+            <div className="app-shell__unfinished-banner" style={{
               background: 'linear-gradient(90deg, rgba(200, 134, 10, 0.28) 0%, rgba(30, 20, 10, 0.85) 100%)',
               borderBottom: '1px solid rgba(255, 170, 40, 0.4)',
               padding: '10px 24px',

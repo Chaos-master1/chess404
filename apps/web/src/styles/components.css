@@ -395,7 +395,16 @@ select option {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 8px;
+  background: rgba(20, 8, 45, 0.45);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 165, 40, 0.3);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 165, 40, 0.12), 0 0 40px rgba(200, 80, 10, 0.12);
+  overflow: auto;
+  margin: 10px 0;
 }
 
 .match-layout__controls {
@@ -463,11 +472,11 @@ select option {
   }
   .match-layout__left,
   .match-layout__right {
-    display: none;
+    display: none !important;
   }
   .match-layout__left.is-open,
   .match-layout__right.is-open {
-    display: flex;
+    display: flex !important;
     flex-direction: column;
     position: fixed;
     bottom: 0;

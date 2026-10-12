@@ -266,7 +266,9 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     if (!normalizedMatchId) return;
     setHistoryFocusMatchId(normalizedMatchId);
     setHistoryFocusGuestId(guestId);
-    router.push('/history');
+    const params = new URLSearchParams({ replay: normalizedMatchId });
+    if (guestId?.trim()) params.set('guest', guestId.trim());
+    router.push(`/history?${params.toString()}`);
   }, [router, setHistoryFocusGuestId, setHistoryFocusMatchId]);
 
   const openGuestHistory = React.useCallback((guestId: string) => {
@@ -274,7 +276,7 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     if (!normalizedGuestId) return;
     setHistoryFocusGuestId(normalizedGuestId);
     setHistoryFocusMatchId(null);
-    router.push('/history');
+    router.push(`/history?guest=${encodeURIComponent(normalizedGuestId)}`);
   }, [router, setHistoryFocusGuestId, setHistoryFocusMatchId]);
 
   const openLiveMatch = React.useCallback((matchId: string) => {

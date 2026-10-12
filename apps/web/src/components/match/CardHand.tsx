@@ -42,7 +42,7 @@ export default function CardHand({ hand = [], playerColor, position }: CardHandP
 
   return (
     <div ref={fanRef} style={{
-      position:'relative', height: isBottom ? '100px' : '88px', width:'min(580px, 100%)',
+      position:'relative', height: isBottom ? '100px' : '88px', width:'min(544px, 100%)',
       display:'flex', alignItems: isBottom ? 'flex-end' : 'flex-start',
       justifyContent:'center',
       marginTop: isBottom ? '4px' : 0, marginBottom: isBottom ? 0 : '4px',
