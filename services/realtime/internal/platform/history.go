@@ -373,8 +373,7 @@ func (s *MatchArchiveStore) Upsert(snapshot contracts.MatchSnapshotResponse) err
 	}
 
 	match := snapshot.Match
-	// Aborted games (early abort before black's first reply, or both players
-	// vanishing with zero moves) are not real games: they must not persist to
+	// Aborted games are not completed games: they must not persist to
 	// the archive at all, so they never appear in history, watch, or replays,
 	// and can never be misread as a timeout win for the other seat. The
 	// match may have been archived earlier while it was live, so the abort

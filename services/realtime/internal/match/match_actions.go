@@ -633,10 +633,6 @@ func applyAbort(state *contracts.MatchState, intent contracts.PlayerIntent, now 
 	if _, err := requireIntentColor(state, intent.PlayerID, intent.PlayerSecret); err != nil {
 		return nil, err
 	}
-	if len(state.MoveHistory) > 1 {
-		return nil, errors.New("abort is only allowed before black completes the first reply")
-	}
-
 	markMatchFinished(state, "aborted", "abort", now)
 
 	return []contracts.ResolvedEvent{

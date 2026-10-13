@@ -564,7 +564,7 @@ func TestAbortFinishesEarlyMatch(t *testing.T) {
 	}
 }
 
-func TestAbortRejectedAfterBlackFirstReply(t *testing.T) {
+func TestAbortAllowedAfterMoves(t *testing.T) {
 	service := NewService()
 	now := time.Date(2026, 5, 5, 8, 0, 0, 0, time.UTC)
 	createTestMatch(service, contracts.CreateMatchRequest{MatchID: "abort_late"}, now)
@@ -589,13 +589,16 @@ func TestAbortRejectedAfterBlackFirstReply(t *testing.T) {
 		t.Fatalf("expected black reply to succeed, got %v", err)
 	}
 
-	_, err := applyTestIntent(service, contracts.PlayerIntent{
+	snapshot, err := applyTestIntent(service, contracts.PlayerIntent{
 		Type:     "abort",
 		MatchID:  "abort_late",
 		PlayerID: "white_player",
 	}, now.Add(3*time.Second))
-	if err == nil || !strings.Contains(err.Error(), "only allowed") {
-		t.Fatalf("expected late abort rejection, got %v", err)
+	if err != nil {
+		t.Fatalf("expected abort after moves to succeed, got %v", err)
+	}
+	if snapshot.Match.Status != "finished" || snapshot.Match.Winner != "aborted" || snapshot.Match.FinishReason != "abort" {
+		t.Fatalf("expected aborted finished match, got status=%q winner=%q reason=%q", snapshot.Match.Status, snapshot.Match.Winner, snapshot.Match.FinishReason)
 	}
 }
 

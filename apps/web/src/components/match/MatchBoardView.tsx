@@ -221,7 +221,6 @@ export function MatchBoardView() {
   // that would otherwise toggle is swallowed by the post-drop 80ms window.
   // Remember the press intent so onDrop can apply the toggle.
   const pressToggleRef = React.useRef(false);
-  const canAbortMatch = fmn === 1 && (movHist.length === 0 || (movHist.length === 1 && !movHist[0].b));
 
   React.useEffect(() => {
     if (!mobilePanel) return;
@@ -1022,42 +1021,39 @@ export function MatchBoardView() {
               </>
             ) : (
               <>
-                {canAbortMatch ? (
-                  <button
-                    disabled={hostedActionLocked}
-                    className="match-mobile-btn"
-                    onClick={() => {
-                      if (hostedActionLocked) return;
-                      if (authoritativeMatchIdRef.current) {
-                        void submitAuthoritativeIntent({ type: 'abort', ...authoritativeActorForColor(controlSender) });
-                        return;
-                      }
-                      setWinner('aborted');
-                      setOver(true);
-                    }}
-                  >
-                    ✕ Abort
-                  </button>
-                ) : (
-                  <button
-                    className="match-mobile-btn match-mobile-btn--danger"
-                    onClick={() => {
-                      if (confirmResign === 'idle') {
-                        setConfirmResign('prompting');
-                        setTimeout(() => setConfirmResign('idle'), 4000);
-                        return;
-                      }
-                      if (authoritativeMatchIdRef.current) {
-                        void submitAuthoritativeIntent({ type: 'resign', ...authoritativeActorForColor(controlSender) });
-                        return;
-                      }
-                      setWinner(turn === 'white' ? 'black' : 'white');
-                      setOver(true);
-                    }}
-                  >
-                    {confirmResign === 'prompting' ? 'Resign?' : '🏳 Resign'}
-                  </button>
-                )}
+                <button
+                  disabled={hostedActionLocked}
+                  className="match-mobile-btn"
+                  onClick={() => {
+                    if (hostedActionLocked) return;
+                    if (authoritativeMatchIdRef.current) {
+                      void submitAuthoritativeIntent({ type: 'abort', ...authoritativeActorForColor(controlSender) });
+                      return;
+                    }
+                    setWinner('aborted');
+                    setOver(true);
+                  }}
+                >
+                  ✕ Abort
+                </button>
+                <button
+                  className="match-mobile-btn match-mobile-btn--danger"
+                  onClick={() => {
+                    if (confirmResign === 'idle') {
+                      setConfirmResign('prompting');
+                      setTimeout(() => setConfirmResign('idle'), 4000);
+                      return;
+                    }
+                    if (authoritativeMatchIdRef.current) {
+                      void submitAuthoritativeIntent({ type: 'resign', ...authoritativeActorForColor(controlSender) });
+                      return;
+                    }
+                    setWinner(turn === 'white' ? 'black' : 'white');
+                    setOver(true);
+                  }}
+                >
+                  {confirmResign === 'prompting' ? 'Resign?' : '🏳 Resign'}
+                </button>
                 <button
                   className="match-mobile-btn"
                   onClick={() => {
@@ -1345,22 +1341,18 @@ export function MatchBoardView() {
               </>
             ) : (
               <>
-                {canAbortMatch ? (
-                  <button disabled={hostedActionLocked} onClick={() => {
-                    if (hostedActionLocked) {
-                      return;
-                    }
-                    if (authoritativeMatchIdRef.current) {
-                      void submitAuthoritativeIntent({ type: 'abort', ...authoritativeActorForColor(controlSender) });
-                      return;
-                    }
-                    setWinner('aborted');
-                    setOver(true);
-                  }}
-                    style={{ flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px', background:'linear-gradient(180deg,#3a4055,#222638)', color:'#ccc', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold' }}>✕ Abort</button>
-                ) : (
-                  <button onClick={newGame} style={{ flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px', background:'linear-gradient(180deg,#1a8a40,#0f5a28)', color:'#fff', border:'1px solid rgba(46,204,113,0.4)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold', boxShadow:'0 2px 12px rgba(30,140,70,0.4)' }}>♟ New Game</button>
-                )}
+                <button disabled={hostedActionLocked} onClick={() => {
+                  if (hostedActionLocked) {
+                    return;
+                  }
+                  if (authoritativeMatchIdRef.current) {
+                    void submitAuthoritativeIntent({ type: 'abort', ...authoritativeActorForColor(controlSender) });
+                    return;
+                  }
+                  setWinner('aborted');
+                  setOver(true);
+                }}
+                  style={{ flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px', background:'linear-gradient(180deg,#3a4055,#222638)', color:'#ccc', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold' }}>✕ Abort</button>
           <button data-testid="btn-resign" disabled={hostedActionLocked} onClick={() => {
             if (hostedActionLocked) {
               return;
