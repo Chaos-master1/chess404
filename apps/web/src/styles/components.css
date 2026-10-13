@@ -906,9 +906,9 @@ select option {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 100%;
-  padding: 48px 24px;
+  padding: 36px 24px 64px;
   text-align: center;
   gap: 48px;
   min-width: 0;
@@ -918,6 +918,13 @@ select option {
   margin: 0 auto;
   position: relative;
   box-sizing: border-box;
+}
+
+@media (min-height: 850px) and (min-width: 769px) {
+  .landing-page {
+    justify-content: center;
+    padding: 48px 24px;
+  }
 }
 
 /* Soft gold aura behind the hero — pure CSS, no image payload. */
@@ -1106,16 +1113,76 @@ select option {
 
 @media (max-width: 640px) {
   .landing-page {
-    padding: 40px 18px 48px;
-    gap: 44px;
+    padding: 24px 16px 40px;
+    gap: 28px;
+    justify-content: flex-start;
+  }
+
+  .landing-hero {
+    gap: 16px;
+  }
+
+  .hero-eyebrow {
+    padding: 5px 12px;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  .hero-title {
+    font-size: clamp(38px, 11vw, 64px);
+    line-height: 1.02;
+  }
+
+  .hero-subtitle {
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 0 4px;
+  }
+
+  .hero-actions {
+    gap: 10px;
+    width: 100%;
   }
 
   .hero-actions .btn-primary,
   .hero-actions .btn-secondary {
     width: 100%;
-    max-width: 340px;
+    max-width: 320px;
+    padding: 13px 20px;
+    font-size: 14px;
+  }
+
+  .hero-stats {
+    font-size: 12px;
+    gap: 8px;
+  }
+
+  .features {
+    gap: 16px;
+  }
+
+  .feature-card {
+    padding: 20px 18px;
+  }
+
+  .feature-card__icon {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 12px;
+    border-radius: 12px;
+  }
+
+  .feature-card h3 {
+    font-size: 16px;
+    margin: 0 0 6px 0;
+  }
+
+  .feature-card p {
+    font-size: 13px;
+    line-height: 1.55;
   }
 }
+
 
 @media (prefers-reduced-motion: reduce) {
   *,

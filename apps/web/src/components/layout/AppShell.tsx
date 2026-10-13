@@ -209,7 +209,7 @@ export default function AppShell({
 
           {topNotice}
 
-          <main className="app-shell__main">
+          <main className={`app-shell__main${hideBottomNav ? ' app-shell__main--no-bottom-nav' : ''}`}>
             {children}
           </main>
         </div>

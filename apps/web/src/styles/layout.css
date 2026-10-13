@@ -353,6 +353,10 @@
     display: flex;
   }
 
+  .app-shell__main:not(.app-shell__main--no-bottom-nav) {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  }
+
   .app-shell__bottom-nav {
     position: fixed;
     left: 0;
