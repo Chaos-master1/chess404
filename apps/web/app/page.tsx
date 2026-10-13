@@ -124,7 +124,7 @@ export default async function HomePage({
         ))}
       </section>
       <footer style={{
-        maxWidth: '1080px', margin: '0 auto', padding: '32px 20px 48px',
+        maxWidth: '1040px', width: '100%', margin: '0 auto', padding: '32px 20px 48px',
         display: 'flex', gap: '20px', alignItems: 'center', justifyContent: 'center',
         flexWrap: 'wrap', color: 'rgba(243,230,191,0.55)', fontSize: '13px',
         borderTop: '1px solid rgba(255,190,90,0.12)', marginTop: '24px',

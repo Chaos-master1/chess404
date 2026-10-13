@@ -390,7 +390,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
   },[filterType,filterRarity,search]);
 
   return (
-    <div className="cards-page-root" style={{height:embedded?'100%':'100vh',minHeight:0,flex:embedded?1:undefined,display:'flex',flexDirection:'column',fontFamily:"var(--font-sans),'Segoe UI',sans-serif",overflow:'hidden'}}>
+    <div className="cards-page-root" style={{width:'100%',height:embedded?'100%':'100vh',minHeight:0,flex:embedded?1:undefined,display:'flex',flexDirection:'column',fontFamily:"var(--font-sans),'Segoe UI',sans-serif",overflow:'hidden'}}>
       {!embedded && <FixedBackground overlay overlayOpacity={0.55} />}
       <style>{`
         @keyframes float   {0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)}}

@@ -2362,6 +2362,8 @@ export default function AccountPage({
       ];
   return (
     <div style={{
+      width: '100%',
+      boxSizing: 'border-box',
       flex: 1,
       minHeight: 0,
       overflowY: 'auto',

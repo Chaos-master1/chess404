@@ -97,7 +97,7 @@ export default function WatchPage({ onWatchMatch, onOpenReplay }: WatchPageProps
   }, [modeId, status]);
 
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0, padding: '22px 28px 26px', gap: '18px' }}>
+    <div style={{ display: 'flex', width: '100%', boxSizing: 'border-box', flex: 1, minHeight: 0, padding: '22px 28px 26px', gap: '18px' }}>
       <div
         style={{
           flex: 1,

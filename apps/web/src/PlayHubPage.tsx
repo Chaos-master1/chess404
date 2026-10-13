@@ -145,7 +145,7 @@ export default function PlayHubPage({
   }, [identity, router, computerMatchState]);
 
   return (
-    <div className="play-hub-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px 28px 32px', color: '#f4e8c8' }}>
+    <div className="play-hub-scroll" style={{ width: '100%', boxSizing: 'border-box', flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px 28px 32px', color: '#f4e8c8' }}>
       <div style={{ maxWidth: '1380px', margin: '0 auto', display: 'grid', gap: '18px' }}>
         <div className="stat-card">
           <div style={{ color: '#ffcf72', fontSize: '12px', fontWeight: 800, letterSpacing: '1.4px', textTransform: 'uppercase', marginBottom: '8px' }}>

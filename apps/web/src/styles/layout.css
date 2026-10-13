@@ -282,12 +282,17 @@
 
 .app-shell__main {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   /* Flex-item min-width:auto would otherwise propagate descendants'
      min-content width (e.g. the landing features grid) past the viewport,
      clipping content on phones. Keep the shrink chain unbroken. */
   min-width: 0;
+  width: 100%;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .app-shell__mobile-tools,
