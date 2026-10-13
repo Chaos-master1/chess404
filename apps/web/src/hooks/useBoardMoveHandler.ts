@@ -244,8 +244,8 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     // Shielded pieces may move: the shield only absorbs a capture
     // (applyMove consumes it via shield_blocked_capture), and moving drops
     // it server-side. Freezing is the mechanic that blocks movement.
-    if (piece.fusedWith || piece.invisible || piece.frozen) return false;
-    if (target?.fusedWith || target?.shielded || target?.invisible) return false;
+    if (piece.invisible || piece.frozen) return false;
+    if (target?.invisible) return false;
     return true;
   }, [cardPending, promo, promoPicker, cardPromo, jokerPicker, hostedRuntime, authoritativeActorForColor, authoritativeMatchIdRef, boardRef, ghostRef, turnRef, viewerSeatRef]);
 
@@ -327,8 +327,12 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
           if (livePiece.type === 'pawn' && fc !== tc && !liveBoard[tr]?.[tc]) {
             nextBoard[fr][tc] = null;
           }
-          nextBoard[tr][tc] = forcePromo ? { ...livePiece, type: forcePromo } : { ...livePiece };
-          nextBoard[fr][fc] = null;
+          if (liveBoard[tr]?.[tc]?.shielded) {
+            nextBoard[tr][tc] = { ...liveBoard[tr][tc]!, shielded: false, shieldTurn: undefined };
+          } else {
+            nextBoard[tr][tc] = forcePromo ? { ...livePiece, type: forcePromo } : { ...livePiece };
+            nextBoard[fr][fc] = null;
+          }
           setBoard(nextBoard);
           setLm({ from: { row: fr, col: fc }, to: { row: tr, col: tc } });
         }
@@ -817,13 +821,13 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
     const p = board[r][c];
     const ghost = ghostRef.current;
     const isGhostSq = ghost && canActWithColor(ghost.ownerColor) && ghost.row === r && ghost.col === c;
-    const myColor = viewerSeatRef.current ?? (hostedRuntime ? 'white' : turnRef.current);
-    const isMyTurn = turnRef.current === myColor;
+    const myColor = viewerSeatRef.current ?? (hostedRuntime ? null : turnRef.current);
+    const isMyTurn = myColor !== null && turnRef.current === myColor;
     if (isMyTurn && premoveRef.current) {
       setPremove(null);
       premoveRef.current = null;
     }
-    const canPremove = (hostedRuntime || authoritativeMatchIdRef.current) && myColor && !isMyTurn && !overRef.current;
+    const canPremove = (hostedRuntime || authoritativeMatchIdRef.current) && myColor !== null && !isMyTurn && !overRef.current;
 
     if (canPremove) {
       if (p && p.color === myColor) {

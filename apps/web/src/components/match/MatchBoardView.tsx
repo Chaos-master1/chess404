@@ -213,8 +213,17 @@ export function MatchBoardView() {
   const promoRef = React.useRef<HTMLDivElement>(null);
   const promoFullRef = React.useRef<HTMLDivElement>(null);
   const cardPromoRef = React.useRef<HTMLDivElement>(null);
-  const [confirmResign, setConfirmResign] = React.useState<'idle' | 'prompting'>('idle');
+  const [isMobile, setIsMobile] = React.useState(false);
   const [mobilePanel, setMobilePanel] = React.useState<'left' | 'right' | null>(null);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 900px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
   const lastDrawOfferTime = React.useRef(0);
   // A press on an ALREADY-selected square is a toggle-off gesture, but the
   // paired mouseup on the same square runs onDrop(origin) and the real click
@@ -1037,35 +1046,53 @@ export function MatchBoardView() {
                   ✕ Abort
                 </button>
                 <button
+                  data-testid={isMobile ? 'btn-resign' : undefined}
+                  disabled={hostedActionLocked}
                   className="match-mobile-btn match-mobile-btn--danger"
                   onClick={() => {
-                    if (confirmResign === 'idle') {
-                      setConfirmResign('prompting');
-                      setTimeout(() => setConfirmResign('idle'), 4000);
+                    if (hostedActionLocked) {
                       return;
                     }
-                    if (authoritativeMatchIdRef.current) {
-                      void submitAuthoritativeIntent({ type: 'resign', ...authoritativeActorForColor(controlSender) });
-                      return;
+                    if (window.confirm("Are you sure you want to resign?")) {
+                      if (authoritativeMatchIdRef.current) {
+                        void submitAuthoritativeIntent({ type: 'resign', ...authoritativeActorForColor(controlSender) });
+                        return;
+                      }
+                      finalPositionRef.current = { fen: toFEN(board, turn, moved, lm, hmc, fmn), turn };
+                      setOver(true);
+                      setWinner(OPP[turn]);
                     }
-                    setWinner(turn === 'white' ? 'black' : 'white');
-                    setOver(true);
                   }}
                 >
-                  {confirmResign === 'prompting' ? 'Resign?' : '🏳 Resign'}
+                  🏳 Resign
                 </button>
-                <button
-                  className="match-mobile-btn"
-                  onClick={() => {
-                    if (authoritativeMatchIdRef.current) {
-                      void submitAuthoritativeIntent({ type: 'offer_draw', ...authoritativeActorForColor(controlSender) });
-                      return;
-                    }
-                    setDrawOffer(turn);
-                  }}
-                >
-                  🤝 Draw
-                </button>
+                {!drawOffer ? (
+                  <button
+                    disabled={hostedActionLocked}
+                    className="match-mobile-btn"
+                    onClick={() => {
+                      if (hostedActionLocked) return;
+                      const now = Date.now();
+                      if (now - lastDrawOfferTime.current < DRAW_COOLDOWN_MS) return;
+                      lastDrawOfferTime.current = now;
+                      if (authoritativeMatchIdRef.current) {
+                        void submitAuthoritativeIntent({ type: 'offer_draw', ...authoritativeActorForColor(controlSender) });
+                        return;
+                      }
+                      setDrawOffer(turn);
+                    }}
+                  >
+                    🤝 Draw
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className="match-mobile-btn"
+                    style={{ opacity: 0.5, cursor: 'not-allowed' }}
+                  >
+                    Draw sent…
+                  </button>
+                )}
                 <button
                   type="button"
                   className="match-mobile-btn match-mobile-btn--icon"
@@ -1353,7 +1380,7 @@ export function MatchBoardView() {
                   setOver(true);
                 }}
                   style={{ flex:1, padding:'10px 14px', minHeight:'42px', fontSize:'13px', background:'linear-gradient(180deg,#3a4055,#222638)', color:'#ccc', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'7px', cursor:'pointer', fontWeight:'bold' }}>✕ Abort</button>
-          <button data-testid="btn-resign" disabled={hostedActionLocked} onClick={() => {
+          <button data-testid={!isMobile ? "btn-resign" : undefined} disabled={hostedActionLocked} onClick={() => {
             if (hostedActionLocked) {
               return;
             }

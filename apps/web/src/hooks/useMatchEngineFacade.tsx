@@ -545,6 +545,9 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       blackName: nextRoomMeta.blackName,
     });
 
+    const isNewMatch = authoritativeMatchIdRef.current !== match.matchId;
+    const isTurnChange = turnRef.current !== match.turn;
+
     setAuthoritativeMatchId(match.matchId);
     authoritativeMatchIdRef.current = match.matchId;
     setAuthoritativeLive(match.status === 'active' || match.status === 'waiting');
@@ -563,11 +566,10 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
     fmnRef.current = match.fullMoveNumber;
 
     setBoard(match.board as Board);
-    const isNewMatch = authoritativeMatchIdRef.current !== match.matchId;
     if (isNewMatch) {
       resetCardUsed('white');
       resetCardUsed('black');
-    } else if (turnRef.current !== match.turn) {
+    } else if (isTurnChange) {
       resetCardUsed(match.turn as PieceColor);
     }
     // The server is the source of truth for the one-card-per-turn slot
@@ -842,8 +844,8 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       premoveRef.current = null;
       return;
     }
-    const myColor = viewerSeatRef.current ?? (hostedRuntime ? 'white' : turn);
-    if (turn !== myColor || !premoveRef.current) return;
+    const myColor = viewerSeatRef.current ?? (hostedRuntime ? null : turn);
+    if (!myColor || turn !== myColor || !premoveRef.current) return;
 
     const pm = premoveRef.current;
 
@@ -857,8 +859,8 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
       if (overRef.current) return;
       const pm2 = premoveRef.current;
       if (!pm2) return;
-      const currentMyColor = viewerSeatRef.current ?? (hostedRuntime ? 'white' : turnRef.current);
-      if (turnRef.current !== currentMyColor) return;
+      const currentMyColor = viewerSeatRef.current ?? (hostedRuntime ? null : turnRef.current);
+      if (!currentMyColor || turnRef.current !== currentMyColor) return;
 
       // Only clear premove once we are confident the move will be submitted.
       // canSubmitAuthoritativeMove checks credentials — if not ready yet, keep
