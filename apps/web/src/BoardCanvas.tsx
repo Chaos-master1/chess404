@@ -679,9 +679,17 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
             ctx.shadowColor = '#38bdf8';
             ctx.shadowBlur = 18 + Math.sin(now / 380) * 8;
           } else if (p.poisoned) {
-            ctx.filter = 'sepia(80%) hue-rotate(85deg) brightness(0.9) saturate(2.6)';
-            ctx.shadowColor = '#22c55e';
-            ctx.shadowBlur = 18 + Math.sin(now / 350) * 8;
+            ctx.filter = 'hue-rotate(85deg) saturate(2.8) brightness(0.92) contrast(1.15)';
+            if (p.poisonRounds === 1) {
+              const twitchX = (Math.sin(now / 35) + Math.cos(now / 48)) * 1.3;
+              const twitchY = Math.sin(now / 42) * 1.0;
+              ctx.translate(twitchX, twitchY);
+              ctx.shadowColor = Math.sin(now / 140) > 0 ? '#ef4444' : '#22c55e';
+              ctx.shadowBlur = 24 + Math.sin(now / 140) * 8;
+            } else {
+              ctx.shadowColor = '#22c55e';
+              ctx.shadowBlur = 18 + Math.sin(now / 300) * 8;
+            }
           } else if (p.shielded) {
             ctx.shadowColor = '#4ade80';
             ctx.shadowBlur = 16 + Math.sin(now / 400) * 8;
@@ -1055,80 +1063,203 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
             ctx.restore();
           }
 
-          // ── POISONED overlay: toxic emerald aura, bubbling vapor, and skull countdown badge ──
+          // ── POISONED overlay: organic bubbling acid sludge, dripping venom, rising fumes, and toxic skull badge ──
           if (p.poisoned) {
-            const cxP = x + SQ / 2, cyP = y + SQ / 2;
-            const RP = SQ * 0.46;
+            const cxP = x + SQ / 2;
+            const rounds = p.poisonRounds ?? 1;
+            const isCritical = rounds === 1;
 
-            // 1. Pulsating toxic pool aura at base of piece
-            const glowP = 0.22 + Math.sin(now / 350) * 0.10;
-            const gradP = ctx.createRadialGradient(cxP, cyP, RP * 0.2, cxP, cyP, RP * 1.15);
-            gradP.addColorStop(0, 'rgba(34,197,94,0)');
-            gradP.addColorStop(0.5, `rgba(34,197,94,${glowP})`);
-            gradP.addColorStop(1, 'rgba(34,197,94,0)');
-            ctx.fillStyle = gradP;
+            // 1. Organic Undulating Toxic Acid Slime Puddle at piece base
+            const poolCy = y + SQ * 0.83;
+            const poolRx = SQ * 0.44;
+            const poolRy = SQ * 0.16;
+
+            ctx.save();
             ctx.beginPath();
-            ctx.arc(cxP, cyP, RP * 1.15, 0, Math.PI * 2);
+            const segments = 16;
+            for (let i = 0; i < segments; i++) {
+              const th = (i / segments) * Math.PI * 2;
+              const wobble = 1 + 0.15 * Math.sin(th * 3 + now / 260) + 0.08 * Math.cos(th * 5 - now / 190);
+              const px = cxP + Math.cos(th) * poolRx * wobble;
+              const py = poolCy + Math.sin(th) * poolRy * wobble;
+              if (i === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+
+            const poolGrad = ctx.createRadialGradient(cxP, poolCy, poolRy * 0.2, cxP, poolCy, poolRx * 1.1);
+            poolGrad.addColorStop(0, 'rgba(6, 78, 59, 0.95)');
+            poolGrad.addColorStop(0.5, 'rgba(34, 197, 94, 0.85)');
+            poolGrad.addColorStop(0.85, 'rgba(163, 230, 53, 0.9)');
+            poolGrad.addColorStop(1, 'rgba(163, 230, 53, 0)');
+            ctx.fillStyle = poolGrad;
+            ctx.shadowColor = isCritical ? '#ef4444' : '#22c55e';
+            ctx.shadowBlur = 14 + Math.sin(now / 200) * 6;
             ctx.fill();
 
-            // 2. Rising toxic bubbles
-            for (let bi = 0; bi < 3; bi++) {
-              const cycle = 1600;
-              const seed = (now + (ri * 8 + ci) * 500 + bi * 530) % cycle;
-              const progress = seed / cycle;
-              const bubbleY = y + SQ * 0.8 - progress * (SQ * 0.65);
-              const drift = Math.sin(now / 200 + bi * 2.1) * 6;
-              const bubbleX = x + SQ * 0.3 + bi * (SQ * 0.2) + drift;
-              const bubbleAlpha = Math.sin(progress * Math.PI) * 0.75;
-              const bubbleRadius = 2 + (bi % 2) * 1.2;
-
-              ctx.beginPath();
-              ctx.arc(bubbleX, bubbleY, bubbleRadius, 0, Math.PI * 2);
-              ctx.fillStyle = `rgba(134,239,172,${bubbleAlpha})`;
-              ctx.shadowColor = '#22c55e';
-              ctx.shadowBlur = 6;
-              ctx.fill();
-              ctx.shadowBlur = 0;
-            }
-
-            // 3. Toxic rotating mist ring
-            ctx.save();
-            ctx.strokeStyle = `rgba(74,222,128,${0.5 + Math.sin(now / 400) * 0.25})`;
-            ctx.lineWidth = 1.5;
-            ctx.shadowColor = '#22c55e';
-            ctx.shadowBlur = 8;
-            ctx.setLineDash([3, 5]);
-            ctx.beginPath();
-            ctx.arc(cxP, cyP, RP * 0.95, (now / 1500) % (Math.PI * 2), (now / 1500) % (Math.PI * 2) + Math.PI * 2);
+            ctx.strokeStyle = `rgba(187, 247, 208, ${0.5 + Math.sin(now / 240) * 0.3})`;
+            ctx.lineWidth = 1.2;
             ctx.stroke();
+
+            // Satellite bubbling sludge droplets around pool
+            for (let si = 0; si < 3; si++) {
+              const sAngle = (si / 3) * Math.PI * 2 + (now / 1200);
+              const sDist = poolRx * (0.8 + 0.18 * Math.sin(now / 300 + si));
+              const sx = cxP + Math.cos(sAngle) * sDist;
+              const sy = poolCy + Math.sin(sAngle) * poolRy * 0.9;
+              ctx.beginPath();
+              ctx.arc(sx, sy, 2 + Math.sin(now / 220 + si) * 0.8, 0, Math.PI * 2);
+              ctx.fillStyle = 'rgba(163, 230, 53, 0.75)';
+              ctx.fill();
+            }
             ctx.restore();
 
-            // 4. Skull Countdown Badge: sleek glowing pill in top-right
-            const rounds = p.poisonRounds ?? 1;
-            const badgeW = 28;
-            const badgeH = 16;
+            // 2. Animated Dripping Venom Droplets running down the piece
+            const dripColumns = [
+              { xRel: 0.35, cycle: 1500, offset: 0 },
+              { xRel: 0.65, cycle: 2000, offset: 750 },
+            ];
+            for (const col of dripColumns) {
+              const dripSeed = (now + (ri * 8 + ci) * 370 + col.offset) % col.cycle;
+              const dripProg = dripSeed / col.cycle;
+              const dropX = x + SQ * col.xRel;
+
+              if (dripProg < 0.7) {
+                const fallProg = dripProg / 0.7;
+                const dropY = y + SQ * 0.28 + fallProg * (SQ * 0.52);
+                const dropH = 3.5 + fallProg * 3;
+                const dropW = 2.2 + fallProg * 0.8;
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.ellipse(dropX, dropY, dropW, dropH, 0, 0, Math.PI * 2);
+                const dropGrad = ctx.createLinearGradient(dropX, dropY - dropH, dropX, dropY + dropH);
+                dropGrad.addColorStop(0, '#15803d');
+                dropGrad.addColorStop(0.7, '#4ade80');
+                dropGrad.addColorStop(1, '#a3e635');
+                ctx.fillStyle = dropGrad;
+                ctx.shadowColor = '#22c55e';
+                ctx.shadowBlur = 6;
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(dropX - dropW * 0.35, dropY - dropH * 0.3, 0.8, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+                ctx.fill();
+                ctx.restore();
+              } else {
+                const splashProg = (dripProg - 0.7) / 0.3;
+                const rippleR = splashProg * 7;
+                const rippleAlpha = (1 - splashProg) * 0.75;
+                ctx.save();
+                ctx.beginPath();
+                ctx.ellipse(dropX, poolCy, rippleR, rippleR * 0.4, 0, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(163, 230, 53, ${rippleAlpha})`;
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+                ctx.restore();
+              }
+            }
+
+            // 3. Sinuous Noxious Vapor Plumes (Curling smoke fumes)
+            ctx.save();
+            ctx.lineWidth = 1.8;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#22c55e';
+            for (let side = -1; side <= 1; side += 2) {
+              const startX = cxP + side * (SQ * 0.22);
+              const startY = y + SQ * 0.75;
+              const ctrl1X = cxP + side * (SQ * 0.32) + Math.sin(now / 350 + side) * 6;
+              const ctrl1Y = y + SQ * 0.50;
+              const ctrl2X = cxP + side * (SQ * 0.15) - Math.cos(now / 300 + side) * 7;
+              const ctrl2Y = y + SQ * 0.30;
+              const endX = cxP + side * (SQ * 0.24) + Math.sin(now / 220 + side) * 8;
+              const endY = y + SQ * 0.12;
+
+              ctx.beginPath();
+              ctx.moveTo(startX, startY);
+              ctx.bezierCurveTo(ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY);
+              const plumeAlpha = 0.45 + Math.sin(now / 300 + side) * 0.2;
+              ctx.strokeStyle = `rgba(74, 222, 128, ${plumeAlpha})`;
+              ctx.stroke();
+            }
+            ctx.restore();
+
+            // 4. Boiling Translucent Acid Bubbles with Specular Highlights
+            for (let bi = 0; bi < 5; bi++) {
+              const cycle = 1500;
+              const seed = (now + (ri * 8 + ci) * 450 + bi * 420) % cycle;
+              const progress = seed / cycle;
+              const bubbleY = y + SQ * 0.82 - progress * (SQ * 0.70);
+              const drift = Math.sin(now / 190 + bi * 1.8) * 6;
+              const bubbleX = x + SQ * 0.22 + bi * (SQ * 0.14) + drift;
+              const bubbleRadius = 2.2 + (bi % 3) * 1.2;
+
+              if (progress < 0.85) {
+                const bubbleAlpha = Math.sin(progress * Math.PI) * 0.85;
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(bubbleX, bubbleY, bubbleRadius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(74, 222, 128, ${bubbleAlpha * 0.5})`;
+                ctx.fill();
+                ctx.strokeStyle = `rgba(163, 230, 53, ${bubbleAlpha})`;
+                ctx.lineWidth = 1;
+                ctx.shadowColor = '#22c55e';
+                ctx.shadowBlur = 6;
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(bubbleX - bubbleRadius * 0.35, bubbleY - bubbleRadius * 0.35, bubbleRadius * 0.35, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${bubbleAlpha * 0.85})`;
+                ctx.fill();
+                ctx.restore();
+              } else {
+                const popProg = (progress - 0.85) / 0.15;
+                const popAlpha = (1 - popProg) * 0.8;
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(bubbleX, bubbleY, bubbleRadius * (1 + popProg * 1.8), 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(163, 230, 53, ${popAlpha})`;
+                ctx.lineWidth = 0.8;
+                ctx.stroke();
+                ctx.restore();
+              }
+            }
+
+            // 5. Menacing Lethal Countdown Seal: Toxic Biohazard Crest in Top-Right
+            const badgeW = 34;
+            const badgeH = 18;
             const badgeX = x + SQ - badgeW - 3;
             const badgeY = y + 3;
 
             ctx.save();
-            // Background pill
             ctx.beginPath();
-            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 8);
-            ctx.fillStyle = 'rgba(6, 78, 59, 0.9)';
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+            ctx.fillStyle = isCritical
+              ? 'rgba(45, 10, 10, 0.95)'
+              : 'rgba(3, 40, 20, 0.95)';
             ctx.fill();
-            ctx.strokeStyle = 'rgba(74, 222, 128, 0.8)';
-            ctx.lineWidth = 1.2;
-            ctx.shadowColor = '#22c55e';
-            ctx.shadowBlur = 8;
+
+            ctx.lineWidth = 1.4;
+            if (isCritical) {
+              const warnFlash = 0.6 + Math.sin(now / 110) * 0.4;
+              ctx.strokeStyle = `rgba(239, 68, 68, ${warnFlash})`;
+              ctx.shadowColor = '#ef4444';
+              ctx.shadowBlur = 10;
+            } else {
+              ctx.strokeStyle = `rgba(74, 222, 128, ${0.7 + Math.sin(now / 300) * 0.25})`;
+              ctx.shadowColor = '#22c55e';
+              ctx.shadowBlur = 8;
+            }
             ctx.stroke();
 
-            // Text inside badge: ☠ 3
-            ctx.font = 'bold 9px system-ui, sans-serif';
-            ctx.fillStyle = '#a7f3d0';
+            ctx.font = 'bold 10px system-ui, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            ctx.fillStyle = isCritical ? '#fecaca' : '#a7f3d0';
             ctx.shadowBlur = 4;
-            ctx.fillText(`☠${rounds}`, badgeX + badgeW / 2, badgeY + badgeH / 2 + 0.5);
+            ctx.fillText(`☠ ${rounds}`, badgeX + badgeW / 2, badgeY + badgeH / 2 + 0.5);
+
             ctx.restore();
           }
 

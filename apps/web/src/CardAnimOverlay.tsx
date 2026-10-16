@@ -257,66 +257,259 @@ function paintPoison(ctx: CanvasRenderingContext2D, W: number, H: number, t: num
   const cx = W / 2, cy = H / 2;
   const ease = easeOut(Math.min(t * 2, 1));
 
-  // Toxic green vignette
-  const vign = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.7);
-  vign.addColorStop(0, `rgba(6, 78, 59, ${0.75 * ease})`);
-  vign.addColorStop(0.6, `rgba(4, 47, 46, ${0.4 * ease})`);
-  vign.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  // 1. Noxious venomous atmosphere vignette (virulent purple edges + toxic bile core)
+  const vign = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.75);
+  vign.addColorStop(0, `rgba(6, 78, 59, ${0.85 * ease})`);
+  vign.addColorStop(0.45, `rgba(20, 83, 45, ${0.65 * ease})`);
+  vign.addColorStop(0.8, `rgba(24, 4, 38, ${0.75 * ease})`);
+  vign.addColorStop(1, `rgba(10, 2, 18, ${0.92 * ease})`);
   ctx.fillStyle = vign;
   ctx.fillRect(0, 0, W, H);
 
-  // Toxic bubbling ripples / caustic shockwaves
-  for (let r = 0; r < 4; r++) {
-    const rt = clamp((t - r * 0.08) / 0.55, 0, 1);
-    if (rt <= 0) continue;
-    const radius = lerp(15, 230 + r * 45, easeOut(rt));
-    const fade = (1 - rt) * 0.6;
+  // 2. Creeping infection veins from corners
+  const veinAlpha = (1 - Math.abs(t - 0.5) * 1.8) * 0.6;
+  if (veinAlpha > 0) {
+    ctx.save();
+    ctx.strokeStyle = `rgba(74, 222, 128, ${veinAlpha})`;
+    ctx.lineWidth = 1.6;
+    ctx.shadowColor = '#22c55e';
+    ctx.shadowBlur = 10;
+    const corners = [
+      { x: 0, y: 0, dx: 1, dy: 1 },
+      { x: W, y: 0, dx: -1, dy: 1 },
+      { x: 0, y: H, dx: 1, dy: -1 },
+      { x: W, y: H, dx: -1, dy: -1 },
+    ];
+    for (const c of corners) {
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      let px = c.x, py = c.y;
+      for (let s = 0; s < 6; s++) {
+        px += c.dx * (25 + Math.sin(s * 1.7) * 15);
+        py += c.dy * (25 + Math.cos(s * 1.9) * 15);
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // 3. Swirling Miasma Vortex (6 rotating noxious fume arms)
+  const numArms = 6;
+  for (let arm = 0; arm < numArms; arm++) {
+    const armAngle = (arm / numArms) * Math.PI * 2 + t * Math.PI * 2.2;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(74, 222, 128, ${fade})`;
-    ctx.lineWidth = 2.5;
+    for (let i = 0; i < 40; i++) {
+      const a = armAngle + (i / 40) * Math.PI * 1.8;
+      const r = (i / 40) * (W * 0.38);
+      const px = Math.cos(a) * r, py = Math.sin(a) * r * 0.75;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    const armFade = (1 - t) * 0.35;
+    ctx.strokeStyle = arm % 2 === 0
+      ? `rgba(74, 222, 128, ${armFade})`
+      : `rgba(168, 85, 247, ${armFade * 0.7})`;
+    ctx.lineWidth = 2.2;
     ctx.shadowColor = '#22c55e';
     ctx.shadowBlur = 12;
     ctx.stroke();
     ctx.restore();
   }
 
-  // Central skull & bubbling cauldron icon bloom
-  const burstT = easeOut(Math.min(t * 2.2, 1));
-  if (burstT > 0) {
-    const fade = t > 0.65 ? 1 - (t - 0.65) / 0.35 : 1;
+  // 4. Boiling Toxic Acid Lake at bottom of screen
+  const seaY = H * 0.82;
+  const seaGrad = ctx.createLinearGradient(0, seaY, 0, H);
+  seaGrad.addColorStop(0, 'rgba(34, 197, 94, 0.4)');
+  seaGrad.addColorStop(0.3, 'rgba(6, 78, 59, 0.7)');
+  seaGrad.addColorStop(1, 'rgba(4, 47, 46, 0.95)');
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  ctx.lineTo(0, seaY);
+  for (let x = 0; x <= W; x += 25) {
+    const wave = Math.sin(x * 0.015 + t * 14) * 8 + Math.cos(x * 0.03 - t * 10) * 4;
+    ctx.lineTo(x, seaY + wave);
+  }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.fillStyle = seaGrad;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(163, 230, 53, 0.6)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+
+  // 5. Caustic Undulating Shockwaves expanding outward
+  for (let r = 0; r < 4; r++) {
+    const rt = clamp((t - r * 0.09) / 0.58, 0, 1);
+    if (rt <= 0) continue;
+    const radius = lerp(20, 240 + r * 55, easeOut(rt));
+    const fade = (1 - rt) * 0.65;
     ctx.save();
-    ctx.translate(cx, cy);
-    ctx.font = `${Math.floor(82 * burstT)}px serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.translate(cx, cy - 20);
+    ctx.beginPath();
+    const shockPts = 16;
+    for (let si = 0; si <= shockPts; si++) {
+      const sa = (si / shockPts) * Math.PI * 2;
+      const sw = 1 + 0.12 * Math.sin(sa * 4 + t * 8);
+      const sx = Math.cos(sa) * radius * sw;
+      const sy = Math.sin(sa) * radius * sw * 0.85;
+      if (si === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = `rgba(134, 239, 172, ${fade})`;
+    ctx.lineWidth = 2.5;
     ctx.shadowColor = '#22c55e';
-    ctx.shadowBlur = 45;
-    ctx.globalAlpha = fade;
-    ctx.fillText('🧪', 0, -20);
+    ctx.shadowBlur = 14;
+    ctx.stroke();
     ctx.restore();
   }
 
+  // 6. Vector Illustrated Poison Alchemy Flask & Dissolving Skull
+  const flaskT = easeOut(Math.min(t * 2.2, 1));
+  if (flaskT > 0) {
+    const fade = t > 0.65 ? 1 - (t - 0.65) / 0.35 : 1;
+    ctx.save();
+    ctx.translate(cx, cy - 35);
+    ctx.scale(flaskT, flaskT);
+    ctx.globalAlpha = fade;
+
+    // Erlenmeyer Flask Glass Body
+    ctx.beginPath();
+    // Lip
+    ctx.roundRect(-22, -88, 44, 8, 4);
+    // Neck
+    ctx.moveTo(-14, -80);
+    ctx.lineTo(-14, -45);
+    // Body flare
+    ctx.lineTo(-58, 25);
+    // Base curve
+    ctx.quadraticCurveTo(0, 42, 58, 25);
+    // Right side
+    ctx.lineTo(14, -45);
+    ctx.lineTo(14, -80);
+    ctx.closePath();
+
+    // Dark liquid backdrop
+    ctx.fillStyle = 'rgba(6, 78, 59, 0.85)';
+    ctx.fill();
+
+    // Glowing Toxic Liquid interior (with sloshing surface)
+    ctx.save();
+    ctx.clip(); // Clip to flask interior
+    const liqY = -25;
+    const liqGrad = ctx.createLinearGradient(0, liqY, 0, 40);
+    liqGrad.addColorStop(0, '#4ade80');
+    liqGrad.addColorStop(0.5, '#22c55e');
+    liqGrad.addColorStop(1, '#15803d');
+    ctx.beginPath();
+    ctx.moveTo(-65, 45);
+    ctx.lineTo(-65, liqY);
+    for (let lx = -65; lx <= 65; lx += 10) {
+      const slosh = Math.sin(lx * 0.08 + t * 15) * 5;
+      ctx.lineTo(lx, liqY + slosh);
+    }
+    ctx.lineTo(65, 45);
+    ctx.closePath();
+    ctx.fillStyle = liqGrad;
+    ctx.shadowColor = '#22c55e';
+    ctx.shadowBlur = 20;
+    ctx.fill();
+
+    // Internal boiling bubbles inside the flask
+    for (let bi = 0; bi < 4; bi++) {
+      const bProg = ((t * 4 + bi * 0.3) % 1);
+      const bx = -25 + bi * 16 + Math.sin(t * 8 + bi) * 4;
+      const by = 28 - bProg * 45;
+      ctx.beginPath();
+      ctx.arc(bx, by, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.fill();
+    }
+
+    // Glowing Skull & Crossbones Emblem on the flask
+    ctx.fillStyle = '#ecfdf5';
+    ctx.shadowColor = '#86efac';
+    ctx.shadowBlur = 12;
+
+    // Skull Cranium
+    ctx.beginPath();
+    ctx.arc(0, 0, 16, Math.PI, 0, false);
+    ctx.lineTo(10, 10);
+    ctx.lineTo(-10, 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Eye sockets (dark hollows)
+    ctx.fillStyle = '#064e3b';
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(-5.5, 2, 3.5, 0, Math.PI * 2);
+    ctx.arc(5.5, 2, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Teeth slits
+    ctx.fillStyle = '#064e3b';
+    ctx.fillRect(-6, 7, 3, 4);
+    ctx.fillRect(-1, 7, 2, 4);
+    ctx.fillRect(3, 7, 3, 4);
+
+    // Crossbones behind skull
+    ctx.strokeStyle = '#ecfdf5';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-16, -10); ctx.lineTo(16, 16);
+    ctx.moveTo(16, -10); ctx.lineTo(-16, 16);
+    ctx.stroke();
+
+    ctx.restore(); // end liquid clip
+
+    // Glowing Glass Outline of the Flask
+    ctx.strokeStyle = 'rgba(167, 243, 208, 0.9)';
+    ctx.lineWidth = 3.5;
+    ctx.shadowColor = '#4ade80';
+    ctx.shadowBlur = 24;
+    ctx.stroke();
+
+    // Acid cascading over the lip
+    ctx.beginPath();
+    ctx.moveTo(-18, -80);
+    ctx.quadraticCurveTo(-26, -50, -22, -10);
+    ctx.strokeStyle = 'rgba(163, 230, 53, 0.9)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#a3e635';
+    ctx.shadowBlur = 10;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Draw particle effects (rising bubbles & splashing acid)
   ps.forEach(p => drawParticle(ctx, p));
 
-  // Banner text
-  if (t > 0.15 && t < 0.88) {
-    const tt = (t - 0.15) / 0.73;
-    const ta = tt < 0.25 ? tt / 0.25 : 1 - (tt - 0.25) / 0.75;
+  // 7. Sinister Dripping Banner Text
+  if (t > 0.12 && t < 0.90) {
+    const tt = (t - 0.12) / 0.78;
+    const ta = tt < 0.22 ? tt / 0.22 : 1 - (tt - 0.22) / 0.78;
     ctx.save();
-    ctx.font = 'bold 42px "Segoe UI", sans-serif';
+    ctx.font = 'bold 44px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = '#22c55e';
-    ctx.shadowBlur = 30;
-    ctx.fillStyle = `rgba(167, 243, 208, ${ta})`;
-    ctx.fillText('POISONED!', cx, cy + 85);
-    ctx.font = 'bold 17px "Segoe UI", sans-serif';
-    ctx.fillStyle = `rgba(74, 222, 128, ${ta})`;
-    ctx.shadowBlur = 12;
-    ctx.fillText(label || 'Dies based on piece value (pawns 1, knights 3, fused combined)', cx, cy + 125);
+    ctx.shadowBlur = 35;
+    ctx.fillStyle = `rgba(236, 253, 245, ${ta})`;
+    ctx.fillText('☠ POISONED! ☠', cx, cy + 85);
+
+    // Subtitle with acid yellow-green glow
+    ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    ctx.fillStyle = `rgba(163, 230, 53, ${ta})`;
+    ctx.shadowColor = '#a3e635';
+    ctx.shadowBlur = 14;
+    ctx.fillText(label || 'FATAL TOXIN • DISSOLVES BASED ON PIECE VALUE', cx, cy + 124);
     ctx.restore();
   }
 }
@@ -1078,8 +1271,40 @@ function seedParticles(anim: CardAnimType, W: number, H: number): Particle[] {
     burst(60,cx,cy-20,['#4ade80','#f0fdf4'],['star','circle'],1.5,5.5);
   else if (anim==='freeze')
     burst(50,cx,cy,['#93c5fd','#e0f2fe','#bfdbfe'],['hex','circle','star'],2,7,0.08);
-  else if (anim==='poison')
-    burst(65,cx,cy-20,['#22c55e','#86efac','#4ade80','#15803d','#facc15'],['circle','hex','star'],2,8,0.12);
+  else if (anim==='poison') {
+    // 1. Rising boiling toxic bubbles with negative gravity
+    for (let i = 0; i < 40; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const dist = rand(30, 220);
+      ps.push(spawnParticle({
+        x: cx + Math.cos(a) * dist,
+        y: cy + rand(30, 160),
+        vx: (Math.random() - 0.5) * 2,
+        vy: -rand(2.5, 6.5),
+        size: rand(4, 11),
+        color: Math.random() > 0.4 ? '#4ade80' : (Math.random() > 0.5 ? '#a3e635' : '#86efac'),
+        shape: 'circle',
+        alpha: rand(0.6, 0.95),
+        gravity: -0.06,
+        spin: (Math.random() - 0.5) * 0.1,
+      }));
+    }
+    // 2. Corrosive acid droplets splashing outward & dripping down
+    for (let i = 0; i < 45; i++) {
+      const a = (Math.random() * 0.8 + 0.1) * -Math.PI;
+      ps.push(spawnParticle({
+        x: cx + (Math.random() - 0.5) * 50,
+        y: cy - 20,
+        vx: Math.cos(a) * rand(3, 8),
+        vy: Math.sin(a) * rand(3, 8),
+        size: rand(3, 7),
+        color: Math.random() > 0.5 ? '#22c55e' : (Math.random() > 0.5 ? '#15803d' : '#facc15'),
+        shape: 'circle',
+        alpha: rand(0.75, 1),
+        gravity: 0.22,
+      }));
+    }
+  }
   else if (anim==='gambler_win'||anim==='gambler_lose') {
     const isW=anim==='gambler_win';
     burst(80,cx,cy-20,isW?['#2ecc71','#f1c40f']:['#e74c3c','#e67e22'],['star','card','circle'],2,8);

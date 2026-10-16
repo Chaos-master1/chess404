@@ -1361,12 +1361,14 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     if (mechanic === 'poison') {
       if (!piece || piece.type === 'king') return;
       const rounds = (PIECE_VALUE[piece.type] ?? 1) + (piece.fusedWith ? (PIECE_VALUE[piece.fusedWith] ?? 0) : 0);
+      const pieceLabel = piece.fusedWith ? `${piece.type}+${piece.fusedWith}` : piece.type;
+      const animLabel = `${pieceLabel.toUpperCase()} POISONED • ${rounds} ${rounds === 1 ? 'ROUND' : 'ROUNDS'} UNTIL DISSOLUTION`;
       if (authoritativeMatchIdRef.current) {
         void sendAuthoritativeTarget({ row, col }).then(() => {
           setCardPending(null);
           setSelectedCard(null);
-          setCardMsg(`🧪 Poisoned ${piece.type} at ${FILES[col]}${RANKS[row]}! (${rounds} ${rounds === 1 ? 'round' : 'rounds'} to die)`);
-          fireCardAnim('poison', `${piece.type} poisoned`);
+          setCardMsg(`🧪 Poisoned ${pieceLabel} at ${FILES[col]}${RANKS[row]}! (${rounds} ${rounds === 1 ? 'round' : 'rounds'} to die)`);
+          fireCardAnim('poison', animLabel);
           playCardSound('poison');
           setTimeout(() => setCardMsg(''), 3000);
         }).catch(err => {
@@ -1381,8 +1383,8 @@ export function useCardInteraction(props: UseCardInteractionProps) {
         });
         setCardPending(null);
         setSelectedCard(null);
-        setCardMsg(`🧪 Poisoned ${piece.type} at ${FILES[col]}${RANKS[row]}! (${rounds} ${rounds === 1 ? 'round' : 'rounds'} to die)`);
-        fireCardAnim('poison', `${piece.type} poisoned`);
+        setCardMsg(`🧪 Poisoned ${pieceLabel} at ${FILES[col]}${RANKS[row]}! (${rounds} ${rounds === 1 ? 'round' : 'rounds'} to die)`);
+        fireCardAnim('poison', animLabel);
         playCardSound('poison');
         setTimeout(() => setCardMsg(''), 3000);
         finishCardUse(card, playerColor);
