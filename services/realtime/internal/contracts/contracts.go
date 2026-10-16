@@ -48,7 +48,9 @@ type Piece struct {
 	// in the 8-pawn promotion budget, and disappear if an enemy piece lands
 	// on them (they are removed without giving the opponent a normal
 	// pawn-capture event).
-	Fake bool `json:"fake,omitempty"`
+	Fake         bool `json:"fake,omitempty"`
+	Poisoned     bool `json:"poisoned,omitempty"`
+	PoisonRounds int  `json:"poisonRounds,omitempty"`
 }
 
 type GameCard struct {

@@ -28,6 +28,21 @@ func applySelectTarget(state *contracts.MatchState, intent contracts.PlayerInten
 	}
 
 	switch pending.Mechanic {
+	case "poison":
+		if intent.Target == nil {
+			return nil, errors.New("target selection requires a target square")
+		}
+		targetPiece := pieceAt(state.Board, *intent.Target)
+		if targetPiece == nil {
+			return nil, errors.New("target square has no piece")
+		}
+		if targetPiece.Type == "king" {
+			return nil, errors.New("poison cannot target king")
+		}
+		rounds := totalPieceValue(targetPiece)
+		targetPiece.Poisoned = true
+		targetPiece.PoisonRounds = rounds
+		replaceLastHistorySnapshot(state)
 	case "freeze":
 		if intent.Target == nil {
 			return nil, errors.New("target selection requires a target square")

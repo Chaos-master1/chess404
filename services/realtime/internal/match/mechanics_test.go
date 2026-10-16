@@ -44,6 +44,93 @@ func TestCardFreeze(t *testing.T) {
 	}
 }
 
+func TestCardPoison(t *testing.T) {
+	t.Parallel()
+	service := NewService()
+	now := time.Date(2026, 5, 5, 8, 0, 0, 0, time.UTC)
+	createTestMatch(service, contracts.CreateMatchRequest{MatchID: "test_poison"}, now)
+	state := service.getMatchContainer("test_poison").state
+	state.WhiteHand = []contracts.GameCard{cardTemplateByMechanic("poison")}
+
+	// 1. King rejection
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "play_card", MatchID: "test_poison", PlayerID: "white_player", CardID: state.WhiteHand[0].ID,
+	}, now.Add(time.Second)); err != nil {
+		t.Fatalf("play_card poison: %v", err)
+	}
+
+	// Try targeting enemy king at (7, 4)
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "select_target", MatchID: "test_poison", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 7, Col: 4},
+	}, now.Add(2*time.Second)); err == nil {
+		t.Fatal("expected error targeting king with poison, got nil")
+	}
+
+	// 2. Fused piece targeting: bishop + pawn = 3 + 1 = 4 rounds
+	state.Board[5][5] = &contracts.Piece{Type: "bishop", Color: "black", FusedWith: "pawn"}
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "select_target", MatchID: "test_poison", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 5, Col: 5},
+	}, now.Add(3*time.Second)); err != nil {
+		t.Fatalf("select_target poison fused piece: %v", err)
+	}
+	fusedPiece := state.Board[5][5]
+	if fusedPiece == nil || !fusedPiece.Poisoned || fusedPiece.PoisonRounds != 4 {
+		t.Fatalf("expected fused bishop+pawn to have 4 poison rounds, got %#v", fusedPiece)
+	}
+
+	// 3. Pawn countdown & death: 1 round
+	state.WhiteHand = []contracts.GameCard{cardTemplateByMechanic("poison")}
+	state.CardUsedThisTurn = map[string]bool{}
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "play_card", MatchID: "test_poison", PlayerID: "white_player", CardID: state.WhiteHand[0].ID,
+	}, now.Add(4*time.Second)); err != nil {
+		t.Fatalf("play_card poison 2: %v", err)
+	}
+	// Target black pawn at (6, 0) (a7 pawn)
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "select_target", MatchID: "test_poison", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 6, Col: 0},
+	}, now.Add(5*time.Second)); err != nil {
+		t.Fatalf("select_target poison pawn: %v", err)
+	}
+	pawnPiece := state.Board[6][0]
+	if pawnPiece == nil || !pawnPiece.Poisoned || pawnPiece.PoisonRounds != 1 {
+		t.Fatalf("expected pawn to have 1 poison round, got %#v", pawnPiece)
+	}
+
+	// White moves a piece (e.g. pawn a2-a3: (1,0) to (2,0))
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "move", MatchID: "test_poison", PlayerID: "white_player",
+		From: &contracts.Square{Row: 1, Col: 0}, To: &contracts.Square{Row: 2, Col: 0},
+	}, now.Add(6*time.Second)); err != nil {
+		t.Fatalf("white move: %v", err)
+	}
+
+	// Black pawn is still alive before black finishes their turn
+	if state.Board[6][0] == nil {
+		t.Fatal("expected poisoned black pawn to still be alive during black's turn")
+	}
+
+	// Black moves another pawn (b7-b6: (6,1) to (5,1))
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "move", MatchID: "test_poison", PlayerID: "black_player",
+		From: &contracts.Square{Row: 6, Col: 1}, To: &contracts.Square{Row: 5, Col: 1},
+	}, now.Add(7*time.Second)); err != nil {
+		t.Fatalf("black move: %v", err)
+	}
+
+	// After black's turn completes, the poisoned pawn (which had 1 round) must be dead!
+	if state.Board[6][0] != nil {
+		t.Fatalf("expected poisoned black pawn to die after 1 round, got %#v", state.Board[6][0])
+	}
+	// And fused piece (which had 4 rounds) must have ticked down to 3 rounds!
+	if state.Board[5][5] == nil || state.Board[5][5].PoisonRounds != 3 {
+		t.Fatalf("expected fused piece to have 3 rounds left, got %#v", state.Board[5][5])
+	}
+}
+
 func TestCardBadsniper(t *testing.T) {
 	t.Parallel()
 	service := NewService()

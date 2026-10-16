@@ -49,6 +49,8 @@ describe('boardSignature', () => {
     ['invisibleTurn countdown', { invisible: true, invisibleTurn: 2 }],
     ['invisibleOver', { invisible: true, invisibleOver: true }],
     ['parasiteTarget', { parasiteTarget: 'e4' }],
+    ['poisoned', { poisoned: true }],
+    ['poisonRounds countdown', { poisoned: true, poisonRounds: 3 }],
   ])('distinguishes %s', (_label, extra) => {
     const plain = boardWith({ type: 'queen', color: 'black' });
     const decorated = boardWith({ type: 'queen', color: 'black', ...extra });

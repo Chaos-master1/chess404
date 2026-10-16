@@ -174,6 +174,19 @@ func cleanupTemporaryEffects(state *contracts.MatchState, justMovedColor string)
 					piece.Borrowed = false
 				}
 			}
+			if piece.Poisoned && piece.Color == justMovedColor {
+				piece.PoisonRounds--
+				if piece.PoisonRounds <= 0 {
+					if piece.Shielded {
+						piece.Shielded = false
+						piece.ShieldTurn = nil
+						piece.Poisoned = false
+						piece.PoisonRounds = 0
+					} else {
+						state.Board[r][c] = nil
+					}
+				}
+			}
 		}
 	}
 	if state.InvisiblePiece != nil {

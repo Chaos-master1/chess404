@@ -677,6 +677,8 @@ func clonePieceAsType(piece *contracts.Piece, pieceType string) *contracts.Piece
 		InvisibleTurn:  piece.InvisibleTurn,
 		InvisibleOver:  piece.InvisibleOver,
 		FusedWith:      piece.FusedWith,
+		Poisoned:       piece.Poisoned,
+		PoisonRounds:   piece.PoisonRounds,
 	}
 }
 

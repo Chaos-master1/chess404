@@ -43,7 +43,7 @@ export const AUTHORITATIVE_JOKER_MECHANICS = new Set<CardMechanic>([
   'borrow', 'mindcontrol', 'parasite', 'clone', 'fakepiece', 'lavaground', 'blackhole',
   'fortress',
   'fog_village', 'invisible', 'unabomber', 'halffuse', 'fullfusion', 'reverse', 'undo',
-  'mirror', 'smallsacrifice', 'bigsacrifice', 'gambler', 'radar', 'cheater'
+  'mirror', 'smallsacrifice', 'bigsacrifice', 'gambler', 'radar', 'cheater', 'poison'
 ]);
 
 export interface UseCardInteractionProps {
@@ -1357,6 +1357,39 @@ export function useCardInteraction(props: UseCardInteractionProps) {
       return;
     }
 
+    // ─── POISON ───
+    if (mechanic === 'poison') {
+      if (!piece || piece.type === 'king') return;
+      const rounds = (PIECE_VALUE[piece.type] ?? 1) + (piece.fusedWith ? (PIECE_VALUE[piece.fusedWith] ?? 0) : 0);
+      if (authoritativeMatchIdRef.current) {
+        void sendAuthoritativeTarget({ row, col }).then(() => {
+          setCardPending(null);
+          setSelectedCard(null);
+          setCardMsg(`🧪 Poisoned ${piece.type} at ${FILES[col]}${RANKS[row]}! (${rounds} ${rounds === 1 ? 'round' : 'rounds'} to die)`);
+          fireCardAnim('poison', `${piece.type} poisoned`);
+          playCardSound('poison');
+          setTimeout(() => setCardMsg(''), 3000);
+        }).catch(err => {
+          const message = err instanceof Error ? err.message : 'Poison failed';
+          setCardMsg(message);
+        });
+      } else {
+        setBoard(prev => {
+          const nb: Board = prev.map(r => r.map(p => p ? { ...p } : null));
+          nb[row][col] = { ...piece, poisoned: true, poisonRounds: rounds };
+          return nb;
+        });
+        setCardPending(null);
+        setSelectedCard(null);
+        setCardMsg(`🧪 Poisoned ${piece.type} at ${FILES[col]}${RANKS[row]}! (${rounds} ${rounds === 1 ? 'round' : 'rounds'} to die)`);
+        fireCardAnim('poison', `${piece.type} poisoned`);
+        playCardSound('poison');
+        setTimeout(() => setCardMsg(''), 3000);
+        finishCardUse(card, playerColor);
+      }
+      return;
+    }
+
     // ─── FREEZE ───
     if (mechanic === 'freeze') {
       if (!piece || piece.color !== opp || piece.type === 'king') return;
@@ -1653,7 +1686,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
 
     pendingCardUseRef.current.add(card.id);
 
-    if (authoritativeMatchIdRef.current && (card.mechanic === 'freeze' || card.mechanic === 'shield' || card.mechanic === 'sniper' || card.mechanic === 'badsniper' || card.mechanic === 'promote' || card.mechanic === 'demote' || card.mechanic === 'promotehim' || card.mechanic === 'demotehim' || card.mechanic === 'teleport' || card.mechanic === 'jump' || card.mechanic === 'doublemove_diff' || card.mechanic === 'doublemove_same' || card.mechanic === 'swapme' || card.mechanic === 'swapus' || card.mechanic === 'swaphim' || card.mechanic === 'borrow' || card.mechanic === 'mindcontrol' || card.mechanic === 'parasite' || card.mechanic === 'clone' || card.mechanic === 'fakepiece' || card.mechanic === 'smallsacrifice' || card.mechanic === 'bigsacrifice' || card.mechanic === 'gambler' || card.mechanic === 'radar' || card.mechanic === 'cheater' || card.mechanic === 'lavaground' || card.mechanic === 'blackhole' || card.mechanic === 'fortress' || card.mechanic === 'fog_village' || card.mechanic === 'invisible' || card.mechanic === 'unabomber' || card.mechanic === 'halffuse' || card.mechanic === 'fullfusion' || card.mechanic === 'reverse' || card.mechanic === 'undo' || card.mechanic === 'mirror')) {
+    if (authoritativeMatchIdRef.current && (card.mechanic === 'freeze' || card.mechanic === 'poison' || card.mechanic === 'shield' || card.mechanic === 'sniper' || card.mechanic === 'badsniper' || card.mechanic === 'promote' || card.mechanic === 'demote' || card.mechanic === 'promotehim' || card.mechanic === 'demotehim' || card.mechanic === 'teleport' || card.mechanic === 'jump' || card.mechanic === 'doublemove_diff' || card.mechanic === 'doublemove_same' || card.mechanic === 'swapme' || card.mechanic === 'swapus' || card.mechanic === 'swaphim' || card.mechanic === 'borrow' || card.mechanic === 'mindcontrol' || card.mechanic === 'parasite' || card.mechanic === 'clone' || card.mechanic === 'fakepiece' || card.mechanic === 'smallsacrifice' || card.mechanic === 'bigsacrifice' || card.mechanic === 'gambler' || card.mechanic === 'radar' || card.mechanic === 'cheater' || card.mechanic === 'lavaground' || card.mechanic === 'blackhole' || card.mechanic === 'fortress' || card.mechanic === 'fog_village' || card.mechanic === 'invisible' || card.mechanic === 'unabomber' || card.mechanic === 'halffuse' || card.mechanic === 'fullfusion' || card.mechanic === 'reverse' || card.mechanic === 'undo' || card.mechanic === 'mirror')) {
       const playCardIntent: Omit<Extract<PlayerIntent, { type: 'play_card' }>, 'matchId'> = {
         type: 'play_card',
         ...authoritativeActorForColor(playerColor),
@@ -1772,6 +1805,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
     const piece = board[row][col];
     const opp   = OPP[playerColor];
     switch (mechanic) {
+      case 'poison':     return piece && piece.type !== 'king' ? 'rgba(34,197,94,0.55)' : null;
       case 'freeze':     return piece?.color === opp && piece.type !== 'king' ? 'rgba(96,165,250,0.55)' : null;
       case 'shield':     return piece?.color === playerColor && piece.type !== 'king' ? 'rgba(74,222,128,0.55)' : null;
       case 'sniper':     return piece && piece.type !== 'king' ? 'rgba(192,132,252,0.55)' : null;

@@ -22,6 +22,7 @@ const FLAGS: Array<[keyof Piece, string]> = [
   ['fake', 'K'],
   ['bomb', 'B'],
   ['borrowed', 'R'],
+  ['poisoned', 'P'],
 ];
 
 function cellToken(piece: Piece | null): string {
@@ -34,7 +35,8 @@ function cellToken(piece: Piece | null): string {
   const invisibleTurn = piece.invisibleTurn ? `i${piece.invisibleTurn}` : '';
   const invisibleOver = piece.invisibleOver ? 'o' : '';
   const parasite = piece.parasiteTarget ? `p${piece.parasiteTarget}` : '';
-  const rest = `${flags}${fused}${shieldTurn}${invisibleTurn}${invisibleOver}${parasite}`;
+  const poisonRounds = piece.poisonRounds ? `d${piece.poisonRounds}` : '';
+  const rest = `${flags}${fused}${shieldTurn}${invisibleTurn}${invisibleOver}${parasite}${poisonRounds}`;
   return `${type}${color}${rest || '-'}`;
 }
 

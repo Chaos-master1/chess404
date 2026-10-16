@@ -62,10 +62,11 @@ export const TARGETING_CARDS = new Set<CardMechanic>([
   'smallsacrifice', 'bigsacrifice',
   'lavaground', 'blackhole', 'unabomber',
   'fakepiece', 'parasite', 'fog_village',
-  'halffuse', 'fullfusion'
+  'halffuse', 'fullfusion', 'poison'
 ]);
 
 export const CARD_TARGET_MESSAGES: Partial<Record<CardMechanic, string>> = {
+  poison: 'Click a piece to poison (not king)',
   freeze: 'Click an enemy piece (not king) to freeze it',
   shield: 'Click your piece (not king) to shield it',
   sniper: 'Click any piece (not king) to remove it',

@@ -47,6 +47,8 @@ export interface Piece {
   invisibleTurn?: number;
   invisibleOver?: boolean;
   fusedWith?: PieceType;
+  poisoned?: boolean;
+  poisonRounds?: number;
 }
 
 export interface Sq {
@@ -63,7 +65,8 @@ export type CardMechanic =
   | 'freeze' | 'jump' | 'teleport' | 'clone' | 'demotehim' | 'promotehim'
   | 'borrow' | 'mindcontrol' | 'parasite' | 'lavaground' | 'blackhole'
   | 'fakepiece' | 'gambler' | 'bigsacrifice' | 'smallsacrifice'
-  | 'mirror' | 'radar' | 'undo' | 'joker' | 'reverse' | 'cheater' | 'unabomber' | 'invisible';
+  | 'mirror' | 'radar' | 'undo' | 'joker' | 'reverse' | 'cheater' | 'unabomber' | 'invisible'
+  | 'poison';
 
 export interface CardDefinition {
   name: string;
@@ -177,6 +180,7 @@ export type CardAnimType =
   | 'smallsacrifice'
   | 'blackhole'
   | 'fullfusion'
+  | 'poison'
   | null;
 
 export interface MatchClock {

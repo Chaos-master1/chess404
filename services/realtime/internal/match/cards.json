@@ -405,5 +405,16 @@
     "accent": "#f59e0b",
     "icon": "🃏",
     "desc": "Choose any card from the full card pool — the Joker becomes it instantly."
+  },
+  {
+    "id": "poison",
+    "name": "Poison",
+    "mechanic": "poison",
+    "type": "spell",
+    "rarity": "common",
+    "color": "#1a2e1a",
+    "accent": "#22c55e",
+    "icon": "🧪",
+    "desc": "Poison any piece (except king). It dies after rounds equal to its value (pawn 1, knight 3, fused combined)."
   }
 ]

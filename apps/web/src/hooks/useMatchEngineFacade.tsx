@@ -694,6 +694,9 @@ export function useMatchEngineFacade(props: UseMatchEngineProps) {
             } else if (mechanic === 'blackhole') {
               triggerBlackHoleAnim(target);
               playSound('capture');
+            } else if (mechanic === 'poison' && target) {
+              fireCardAnim('poison', `${piece?.type ?? 'Piece'} poisoned`);
+              playSound('card_play');
             }
           }
         } else if (ev.type === 'card_drawn') {

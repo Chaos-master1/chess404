@@ -614,6 +614,18 @@ export function useBoardMoveHandler(props: UseBoardMoveHandlerProps) {
         if (p?.borrowed && p.color === t) {
           nb[r][c] = { ...p, color: next, borrowed: false };
         }
+        if (p?.poisoned && p.color === t) {
+          const rounds = (p.poisonRounds ?? 1) - 1;
+          if (rounds <= 0) {
+            if (p.shielded) {
+              nb[r][c] = { ...p, shielded: false, shieldTurn: undefined, poisoned: false, poisonRounds: undefined };
+            } else {
+              nb[r][c] = null;
+            }
+          } else {
+            nb[r][c] = { ...p, poisonRounds: rounds };
+          }
+        }
       }
     }
 

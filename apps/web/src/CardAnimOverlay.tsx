@@ -252,6 +252,75 @@ function paintFreeze(ctx: CanvasRenderingContext2D, W: number, H: number, t: num
   }
 }
 
+// ─── POISON ───────────────────────────────────────────────────────────────────
+function paintPoison(ctx: CanvasRenderingContext2D, W: number, H: number, t: number, ps: Particle[], label = '') {
+  const cx = W / 2, cy = H / 2;
+  const ease = easeOut(Math.min(t * 2, 1));
+
+  // Toxic green vignette
+  const vign = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.7);
+  vign.addColorStop(0, `rgba(6, 78, 59, ${0.75 * ease})`);
+  vign.addColorStop(0.6, `rgba(4, 47, 46, ${0.4 * ease})`);
+  vign.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = vign;
+  ctx.fillRect(0, 0, W, H);
+
+  // Toxic bubbling ripples / caustic shockwaves
+  for (let r = 0; r < 4; r++) {
+    const rt = clamp((t - r * 0.08) / 0.55, 0, 1);
+    if (rt <= 0) continue;
+    const radius = lerp(15, 230 + r * 45, easeOut(rt));
+    const fade = (1 - rt) * 0.6;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(74, 222, 128, ${fade})`;
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = '#22c55e';
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Central skull & bubbling cauldron icon bloom
+  const burstT = easeOut(Math.min(t * 2.2, 1));
+  if (burstT > 0) {
+    const fade = t > 0.65 ? 1 - (t - 0.65) / 0.35 : 1;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.font = `${Math.floor(82 * burstT)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#22c55e';
+    ctx.shadowBlur = 45;
+    ctx.globalAlpha = fade;
+    ctx.fillText('🧪', 0, -20);
+    ctx.restore();
+  }
+
+  ps.forEach(p => drawParticle(ctx, p));
+
+  // Banner text
+  if (t > 0.15 && t < 0.88) {
+    const tt = (t - 0.15) / 0.73;
+    const ta = tt < 0.25 ? tt / 0.25 : 1 - (tt - 0.25) / 0.75;
+    ctx.save();
+    ctx.font = 'bold 42px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#22c55e';
+    ctx.shadowBlur = 30;
+    ctx.fillStyle = `rgba(167, 243, 208, ${ta})`;
+    ctx.fillText('POISONED!', cx, cy + 85);
+    ctx.font = 'bold 17px "Segoe UI", sans-serif';
+    ctx.fillStyle = `rgba(74, 222, 128, ${ta})`;
+    ctx.shadowBlur = 12;
+    ctx.fillText(label || 'Dies based on piece value (pawns 1, knights 3, fused combined)', cx, cy + 125);
+    ctx.restore();
+  }
+}
+
 // ─── BOMB EXPLODE ─────────────────────────────────────────────────────────────
 function paintBombExplode(ctx: CanvasRenderingContext2D, W: number, H: number, t: number, ps: Particle[]) {
   const cx = W/2, cy = H/2;
@@ -1009,6 +1078,8 @@ function seedParticles(anim: CardAnimType, W: number, H: number): Particle[] {
     burst(60,cx,cy-20,['#4ade80','#f0fdf4'],['star','circle'],1.5,5.5);
   else if (anim==='freeze')
     burst(50,cx,cy,['#93c5fd','#e0f2fe','#bfdbfe'],['hex','circle','star'],2,7,0.08);
+  else if (anim==='poison')
+    burst(65,cx,cy-20,['#22c55e','#86efac','#4ade80','#15803d','#facc15'],['circle','hex','star'],2,8,0.12);
   else if (anim==='gambler_win'||anim==='gambler_lose') {
     const isW=anim==='gambler_win';
     burst(80,cx,cy-20,isW?['#2ecc71','#f1c40f']:['#e74c3c','#e67e22'],['star','card','circle'],2,8);
@@ -1115,6 +1186,7 @@ export const CardAnimOverlay: React.FC<Props> = ({ anim, label='', onDone }) => 
       switch (anim) {
         case 'shield':         paintShield(ctx,W,H,t,psRef.current); break;
         case 'freeze':         paintFreeze(ctx,W,H,t,psRef.current); break;
+        case 'poison':         paintPoison(ctx,W,H,t,psRef.current,label); break;
         case 'bomb_explode':   paintBombExplode(ctx,W,H,t,psRef.current); break;
         case 'lava_kill':      paintLavaKill(ctx,W,H,t,psRef.current); break;
         case 'swap':           paintSwap(ctx,W,H,t,psRef.current,label); break;

@@ -678,6 +678,10 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
             ctx.filter = 'sepia(100%) hue-rotate(185deg) brightness(0.55) saturate(3.0) contrast(1.4)';
             ctx.shadowColor = '#38bdf8';
             ctx.shadowBlur = 18 + Math.sin(now / 380) * 8;
+          } else if (p.poisoned) {
+            ctx.filter = 'sepia(80%) hue-rotate(85deg) brightness(0.9) saturate(2.6)';
+            ctx.shadowColor = '#22c55e';
+            ctx.shadowBlur = 18 + Math.sin(now / 350) * 8;
           } else if (p.shielded) {
             ctx.shadowColor = '#4ade80';
             ctx.shadowBlur = 16 + Math.sin(now / 400) * 8;
@@ -1048,6 +1052,83 @@ export const BoardCanvas = React.memo(function BoardCanvas(props: BoardCanvasPro
             ctx.beginPath();
             ctx.arc(cxB, cyB, RB, 0, Math.PI * 2);
             ctx.stroke();
+            ctx.restore();
+          }
+
+          // ── POISONED overlay: toxic emerald aura, bubbling vapor, and skull countdown badge ──
+          if (p.poisoned) {
+            const cxP = x + SQ / 2, cyP = y + SQ / 2;
+            const RP = SQ * 0.46;
+
+            // 1. Pulsating toxic pool aura at base of piece
+            const glowP = 0.22 + Math.sin(now / 350) * 0.10;
+            const gradP = ctx.createRadialGradient(cxP, cyP, RP * 0.2, cxP, cyP, RP * 1.15);
+            gradP.addColorStop(0, 'rgba(34,197,94,0)');
+            gradP.addColorStop(0.5, `rgba(34,197,94,${glowP})`);
+            gradP.addColorStop(1, 'rgba(34,197,94,0)');
+            ctx.fillStyle = gradP;
+            ctx.beginPath();
+            ctx.arc(cxP, cyP, RP * 1.15, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 2. Rising toxic bubbles
+            for (let bi = 0; bi < 3; bi++) {
+              const cycle = 1600;
+              const seed = (now + (ri * 8 + ci) * 500 + bi * 530) % cycle;
+              const progress = seed / cycle;
+              const bubbleY = y + SQ * 0.8 - progress * (SQ * 0.65);
+              const drift = Math.sin(now / 200 + bi * 2.1) * 6;
+              const bubbleX = x + SQ * 0.3 + bi * (SQ * 0.2) + drift;
+              const bubbleAlpha = Math.sin(progress * Math.PI) * 0.75;
+              const bubbleRadius = 2 + (bi % 2) * 1.2;
+
+              ctx.beginPath();
+              ctx.arc(bubbleX, bubbleY, bubbleRadius, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(134,239,172,${bubbleAlpha})`;
+              ctx.shadowColor = '#22c55e';
+              ctx.shadowBlur = 6;
+              ctx.fill();
+              ctx.shadowBlur = 0;
+            }
+
+            // 3. Toxic rotating mist ring
+            ctx.save();
+            ctx.strokeStyle = `rgba(74,222,128,${0.5 + Math.sin(now / 400) * 0.25})`;
+            ctx.lineWidth = 1.5;
+            ctx.shadowColor = '#22c55e';
+            ctx.shadowBlur = 8;
+            ctx.setLineDash([3, 5]);
+            ctx.beginPath();
+            ctx.arc(cxP, cyP, RP * 0.95, (now / 1500) % (Math.PI * 2), (now / 1500) % (Math.PI * 2) + Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+
+            // 4. Skull Countdown Badge: sleek glowing pill in top-right
+            const rounds = p.poisonRounds ?? 1;
+            const badgeW = 28;
+            const badgeH = 16;
+            const badgeX = x + SQ - badgeW - 3;
+            const badgeY = y + 3;
+
+            ctx.save();
+            // Background pill
+            ctx.beginPath();
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 8);
+            ctx.fillStyle = 'rgba(6, 78, 59, 0.9)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(74, 222, 128, 0.8)';
+            ctx.lineWidth = 1.2;
+            ctx.shadowColor = '#22c55e';
+            ctx.shadowBlur = 8;
+            ctx.stroke();
+
+            // Text inside badge: ☠ 3
+            ctx.font = 'bold 9px system-ui, sans-serif';
+            ctx.fillStyle = '#a7f3d0';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowBlur = 4;
+            ctx.fillText(`☠${rounds}`, badgeX + badgeW / 2, badgeY + badgeH / 2 + 0.5);
             ctx.restore();
           }
 

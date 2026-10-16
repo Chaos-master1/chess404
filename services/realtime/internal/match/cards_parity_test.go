@@ -38,6 +38,7 @@ var expectedMechanics = []string{
 	"borrow", "mindcontrol", "parasite", "lavaground", "blackhole",
 	"fakepiece", "gambler", "bigsacrifice", "smallsacrifice",
 	"mirror", "radar", "undo", "joker", "reverse", "cheater", "unabomber", "invisible",
+	"poison",
 }
 
 func TestCardCatalogMetadataComplete(t *testing.T) {

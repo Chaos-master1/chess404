@@ -31,6 +31,7 @@ const CARDS:Card[] = [
   {name:'Swap Me',         mechanic:'swapme',          type:'spell',rarity:'common',   icon:'🔄',dropRate:40,desc:'Exchange positions of two of YOUR pieces. No check. No king.'},
   {name:'Jump',            mechanic:'jump',            type:'spell',rarity:'common',   icon:'🦘',dropRate:40,desc:'Jump one of your pieces over exactly 1 piece along its movement lines (can capture). Not king or knight.'},
   {name:'Small Sacrifice', mechanic:'smallsacrifice',  type:'spell',rarity:'common',   icon:'🩸',dropRate:40,desc:'Sacrifice pieces totaling 6+ pts to draw 2 cards.'},
+  {name:'Poison',          mechanic:'poison',          type:'spell',rarity:'common',   icon:'🧪',dropRate:40,desc:'Poison any piece (not king). Dies after rounds equal to piece value (pawns 1, knights 3, fused combined).'},
   {name:'Freeze',          mechanic:'freeze',          type:'trap', rarity:'common',   icon:'🧊',dropRate:40,desc:'Freeze one enemy piece — cannot move for 1 turn. Not king.'},
   {name:'Promote',         mechanic:'promote',         type:'spell',rarity:'common',   icon:'⬆️', dropRate:40,desc:'Promote one of your pieces to a higher value type. Not king.'},
   {name:'Shield',          mechanic:'shield',          type:'trap', rarity:'common',   icon:'🛡️',dropRate:40,desc:'Protect one of your pieces from capture for 1 turn.'},

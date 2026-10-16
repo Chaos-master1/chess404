@@ -118,6 +118,7 @@ var computerPlayableMechanics = map[string]bool{
 	// exclusion below, all of which also have a findBestTarget case but are
 	// NOT actually single-phase).
 	"freeze": true, "sniper": true, "badsniper": true,
+	"poison": true,
 	"mindcontrol": true, "borrow": true, "invisible": true,
 	// The following SIX mechanics are deliberately NOT here even though
 	// findBestTarget (below) has a switch case for each of them: they are
@@ -572,7 +573,7 @@ func (co *ComputerOpponent) HandleSelectTarget(state *contracts.MatchState) *con
 	mechanic := state.PendingCard.Mechanic
 	ownerColor := state.PendingCard.OwnerColor
 
-	if mechanic == "freeze" || mechanic == "sniper" || mechanic == "badsniper" ||
+	if mechanic == "freeze" || mechanic == "poison" || mechanic == "sniper" || mechanic == "badsniper" ||
 		mechanic == "demote" || mechanic == "demotehim" || mechanic == "promote" ||
 		mechanic == "promotehim" || mechanic == "mindcontrol" || mechanic == "borrow" ||
 		mechanic == "parasite" || mechanic == "lavaground" || mechanic == "clone" ||
@@ -641,6 +642,25 @@ func (co *ComputerOpponent) findBestTarget(state *contracts.MatchState, mechanic
 	opponent := oppositeColor(ownerColor)
 
 	switch mechanic {
+	case "poison":
+		bestValue := 0
+		var bestSquare *contracts.Square
+		for r := 0; r < 8; r++ {
+			for c := 0; c < 8; c++ {
+				piece := state.Board[r][c]
+				if piece == nil || piece.Color != opponent || piece.Type == "king" || piece.Poisoned {
+					continue
+				}
+				value := pieceValue(piece.Type)
+				if value > bestValue {
+					bestValue = value
+					sq := contracts.Square{Row: r, Col: c}
+					bestSquare = &sq
+				}
+			}
+		}
+		return bestSquare
+
 	// freeze: enemy non-king, no other precondition (match_cards.go's
 	// "freeze" case: color/type check only). The only mechanic in this
 	// family with nothing else to verify.
@@ -881,6 +901,8 @@ func (co *ComputerOpponent) findBestTarget(state *contracts.MatchState, mechanic
 
 func targetSelectionID(mechanic string) string {
 	switch mechanic {
+	case "poison":
+		return "poison_target"
 	case "freeze":
 		return "freeze_target"
 	case "sniper", "badsniper":

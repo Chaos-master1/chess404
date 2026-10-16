@@ -23,6 +23,20 @@ func pieceValue(pieceType string) int {
 	}
 }
 
+func totalPieceValue(piece *contracts.Piece) int {
+	if piece == nil {
+		return 0
+	}
+	val := pieceValue(piece.Type)
+	if piece.FusedWith != "" {
+		val += pieceValue(piece.FusedWith)
+	}
+	if val <= 0 {
+		return 1
+	}
+	return val
+}
+
 func clampInt(value, minValue, maxValue int) int {
 	if value < minValue {
 		return minValue

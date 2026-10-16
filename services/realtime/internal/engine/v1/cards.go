@@ -53,6 +53,8 @@ func (ce *CardEvaluator) evaluateCard(card contracts.GameCard, state *contracts.
 	}
 
 	switch card.Mechanic {
+	case "poison":
+		score = ce.poisonValue(state, color)
 	case "freeze":
 		score = ce.freezeValue(state, color)
 	case "shield":
@@ -217,6 +219,23 @@ func (ce *CardEvaluator) BestCardToPlay(state *contracts.MatchState, isWhite boo
 	}
 
 	return best
+}
+
+func (ce *CardEvaluator) poisonValue(state *contracts.MatchState, color string) int {
+	opponent := oppositeColor(color)
+	bestValue := 0
+	for r := 0; r < 8; r++ {
+		for c := 0; c < 8; c++ {
+			piece := state.Board[r][c]
+			if piece != nil && piece.Color == opponent && piece.Type != "king" && !piece.Poisoned {
+				value := pieceValue(piece.Type)
+				if value > bestValue {
+					bestValue = value
+				}
+			}
+		}
+	}
+	return bestValue / 3
 }
 
 func (ce *CardEvaluator) freezeValue(state *contracts.MatchState, color string) int {
