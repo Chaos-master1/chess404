@@ -60,19 +60,19 @@ var cardPool = []struct {
 	mechanic Mechanic
 	rarity   Rarity
 }{
-	{"freeze", RarityCommon}, {"shield", RarityCommon}, {"sniper", RarityEpic},
+	{"freeze", RarityCommon}, {"shield", RarityCommon}, {"sniper", RarityLegendary},
 	{"badsniper", RarityTrash}, {"promote", RarityCommon}, {"demote", RarityTrash},
-	{"promotehim", RarityTrash}, {"demotehim", RarityRare}, {"teleport", RarityRare},
+	{"promotehim", RarityTrash}, {"demotehim", RarityRare}, {"teleport", RarityEpic},
 	{"jump", RarityCommon}, {"doublemove_diff", RarityRare}, {"doublemove_same", RarityRare},
 	{"swapme", RarityCommon}, {"swapus", RarityRare}, {"swaphim", RarityRare},
-	{"borrow", RarityEpic}, {"mindcontrol", RarityLegendary}, {"parasite", RarityEpic},
-	{"clone", RarityEpic}, {"lavaground", RarityRare}, {"fog_village", RarityCommon},
+	{"borrow", RarityEpic}, {"mindcontrol", RarityLegendary}, {"parasite", RarityCommon},
+	{"clone", RarityEpic}, {"lavaground", RarityCommon}, {"fog_village", RarityCommon},
 	{"invisible", RarityRare}, {"unabomber", RarityEpic}, {"halffuse", RarityCommon},
 	{"fullfusion", RarityRare}, {"fortress", RarityEpic}, {"reverse", RarityEpic},
 	{"undo", RarityEpic}, {"mirror", RarityRare}, {"fakepiece", RarityRare},
 	{"blackhole", RarityEpic}, {"smallsacrifice", RarityCommon}, {"bigsacrifice", RarityEpic},
-	{"gambler", RarityTrash}, {"radar", RarityRare}, {"cheater", RarityRare},
-	{"joker", RarityRare},
+	{"gambler", RarityTrash}, {"radar", RarityCommon}, {"cheater", RarityLegendary},
+	{"joker", RarityLegendary}, {"poison", RarityCommon},
 }
 
 // cardWeights[i] is cardPool[i]'s exact per-card draw probability (its
