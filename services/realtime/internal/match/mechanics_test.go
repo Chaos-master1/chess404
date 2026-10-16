@@ -102,7 +102,7 @@ func TestCardPoison(t *testing.T) {
 
 	// White moves a piece (e.g. pawn a2-a3: (1,0) to (2,0))
 	if _, err := applyTestIntent(service, contracts.PlayerIntent{
-		Type: "move", MatchID: "test_poison", PlayerID: "white_player",
+		Type: "make_move", MatchID: "test_poison", PlayerID: "white_player",
 		From: &contracts.Square{Row: 1, Col: 0}, To: &contracts.Square{Row: 2, Col: 0},
 	}, now.Add(6*time.Second)); err != nil {
 		t.Fatalf("white move: %v", err)
@@ -115,7 +115,7 @@ func TestCardPoison(t *testing.T) {
 
 	// Black moves another pawn (b7-b6: (6,1) to (5,1))
 	if _, err := applyTestIntent(service, contracts.PlayerIntent{
-		Type: "move", MatchID: "test_poison", PlayerID: "black_player",
+		Type: "make_move", MatchID: "test_poison", PlayerID: "black_player",
 		From: &contracts.Square{Row: 6, Col: 1}, To: &contracts.Square{Row: 5, Col: 1},
 	}, now.Add(7*time.Second)); err != nil {
 		t.Fatalf("black move: %v", err)
