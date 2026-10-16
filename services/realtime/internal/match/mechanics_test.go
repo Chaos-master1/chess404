@@ -520,43 +520,60 @@ func TestCardJump(t *testing.T) {
 		t.Fatal("expected card consumed")
 	}
 
-	// Test 2: Test that jumping outside own half is rejected
-	snapshot2 := createTestMatch(service, contracts.CreateMatchRequest{MatchID: "test_jump_half"}, now)
+	// Test 2: Test knight is rejected, direction validity, and exactly one piece in between
+	snapshot2 := createTestMatch(service, contracts.CreateMatchRequest{MatchID: "test_jump_validation"}, now)
 	cardID2 := cardIDByMechanic(t, snapshot2.Match.WhiteHand, "jump")
-	state2 := service.getMatchContainer("test_jump_half").state
+	state2 := service.getMatchContainer("test_jump_validation").state
 	state2.Board = emptyBoard()
 	state2.Board[0][0] = &contracts.Piece{Type: "king", Color: "white"}
-	state2.Board[7][7] = &contracts.Piece{Type: "king", Color: "black"}
+	state2.Board[7][0] = &contracts.Piece{Type: "king", Color: "black"}
 	state2.Board[1][1] = &contracts.Piece{Type: "knight", Color: "white"}
+	state2.Board[2][2] = &contracts.Piece{Type: "bishop", Color: "white"}
+	state2.Board[3][3] = &contracts.Piece{Type: "pawn", Color: "black"}
+	state2.Board[4][4] = &contracts.Piece{Type: "rook", Color: "black"}
 
 	if _, err := applyTestIntent(service, contracts.PlayerIntent{
-		Type: "play_card", MatchID: "test_jump_half", PlayerID: "white_player", CardID: cardID2,
+		Type: "play_card", MatchID: "test_jump_validation", PlayerID: "white_player", CardID: cardID2,
 	}, now.Add(time.Second)); err != nil {
 		t.Fatalf("play_card: %v", err)
 	}
-	// Knight selection succeeds (original vision allows knight jump)
+	// Knight selection must be rejected
 	if _, err := applyTestIntent(service, contracts.PlayerIntent{
-		Type: "select_target", MatchID: "test_jump_half", PlayerID: "white_player",
+		Type: "select_target", MatchID: "test_jump_validation", PlayerID: "white_player",
 		Target: &contracts.Square{Row: 1, Col: 1},
-	}, now.Add(2*time.Second)); err != nil {
-		t.Fatalf("knight source should succeed: %v", err)
+	}, now.Add(2*time.Second)); err == nil {
+		t.Fatal("expected knight source to be rejected")
 	}
-	// Jumping to row 5 (Black half) must be rejected
+	// Bishop selection succeeds
 	if _, err := applyTestIntent(service, contracts.PlayerIntent{
-		Type: "select_target", MatchID: "test_jump_half", PlayerID: "white_player",
-		Target: &contracts.Square{Row: 5, Col: 1},
-	}, now.Add(3*time.Second)); err == nil {
-		t.Fatal("expected jumping outside own half to be rejected")
+		Type: "select_target", MatchID: "test_jump_validation", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 2, Col: 2},
+	}, now.Add(3*time.Second)); err != nil {
+		t.Fatalf("bishop source should succeed: %v", err)
 	}
-	// Jumping to row 2 (own half) succeeds
+	// Non-diagonal destination rejected for bishop
 	if _, err := applyTestIntent(service, contracts.PlayerIntent{
-		Type: "select_target", MatchID: "test_jump_half", PlayerID: "white_player",
-		Target: &contracts.Square{Row: 2, Col: 3},
-	}, now.Add(4*time.Second)); err != nil {
-		t.Fatalf("jumping knight within own half should succeed: %v", err)
+		Type: "select_target", MatchID: "test_jump_validation", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 2, Col: 5},
+	}, now.Add(4*time.Second)); err == nil {
+		t.Fatal("expected horizontal move for bishop to be rejected")
 	}
-	if p := service.getMatchContainer("test_jump_half").state.Board[2][3]; p == nil || p.Type != "knight" {
-		t.Fatalf("expected knight at (2,3), got %#v", p)
+	// Jumping with 0 pieces in between rejected
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "select_target", MatchID: "test_jump_validation", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 1, Col: 3},
+	}, now.Add(5*time.Second)); err == nil {
+		t.Fatal("expected jump with 0 pieces in between to be rejected")
+	}
+	// Diagonal jump over pawn at (3,3) to capture rook at (4,4) succeeds
+	if _, err := applyTestIntent(service, contracts.PlayerIntent{
+		Type: "select_target", MatchID: "test_jump_validation", PlayerID: "white_player",
+		Target: &contracts.Square{Row: 4, Col: 4},
+	}, now.Add(6*time.Second)); err != nil {
+		t.Fatalf("bishop jump over pawn to capture rook should succeed: %v", err)
+	}
+	if p := service.getMatchContainer("test_jump_validation").state.Board[4][4]; p == nil || p.Type != "bishop" || p.Color != "white" {
+		t.Fatalf("expected white bishop at (4,4), got %#v", p)
 	}
 }
 

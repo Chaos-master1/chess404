@@ -137,7 +137,7 @@ var starterCardsLegacy = []contracts.GameCard{
 		Color:    "#1a2e1a",
 		Accent:   "#4ade80",
 		Icon:     "\U0001F998",
-		Desc:     "Move one of your pieces to any empty square in YOUR half. Not king.",
+		Desc:     "Jump one of your pieces over exactly 1 piece along its movement lines (can capture). Not king or knight.",
 	},
 	{
 		ID:       "doublemove_diff",

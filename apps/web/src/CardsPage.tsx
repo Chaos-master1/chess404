@@ -29,7 +29,7 @@ const CARDS:Card[] = [
   {name:'Promote Him',     mechanic:'promotehim',      type:'spell',rarity:'trash',    icon:'📈',dropRate:5, desc:'Promote enemy piece to higher value. Not king.'},
   {name:'Half Fuse',       mechanic:'halffuse',        type:'spell',rarity:'common',   icon:'⚗️',dropRate:40,desc:'Fuse two adjacent pieces (value ≤5) into one. Not king.'},
   {name:'Swap Me',         mechanic:'swapme',          type:'spell',rarity:'common',   icon:'🔄',dropRate:40,desc:'Exchange positions of two of YOUR pieces. No check. No king.'},
-  {name:'Jump',            mechanic:'jump',            type:'spell',rarity:'common',   icon:'🦘',dropRate:40,desc:'Move one of your pieces to any empty square in YOUR half. Not king.'},
+  {name:'Jump',            mechanic:'jump',            type:'spell',rarity:'common',   icon:'🦘',dropRate:40,desc:'Jump one of your pieces over exactly 1 piece along its movement lines (can capture). Not king or knight.'},
   {name:'Small Sacrifice', mechanic:'smallsacrifice',  type:'spell',rarity:'common',   icon:'🩸',dropRate:40,desc:'Sacrifice pieces totaling 6+ pts to draw 2 cards.'},
   {name:'Freeze',          mechanic:'freeze',          type:'trap', rarity:'common',   icon:'🧊',dropRate:40,desc:'Freeze one enemy piece — cannot move for 1 turn. Not king.'},
   {name:'Promote',         mechanic:'promote',         type:'spell',rarity:'common',   icon:'⬆️', dropRate:40,desc:'Promote one of your pieces to a higher value type. Not king.'},

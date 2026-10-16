@@ -708,15 +708,13 @@ export function useCardInteraction(props: UseCardInteractionProps) {
 
     // ─── JUMP ───
     if (mechanic === 'jump') {
-      const halfStart = playerColor === 'white' ? 0 : 4;
-      const halfEnd   = playerColor === 'white' ? 3 : 7;
       if (step === 1) {
-        if (!piece || piece.color !== playerColor || piece.type === 'king') {
-          setCardMsg('🦘 Click YOUR piece to jump (not king)');
+        if (!piece || piece.color !== playerColor || piece.type === 'king' || piece.type === 'knight') {
+          setCardMsg('🦘 Click YOUR piece to jump (not king or knight)');
           return;
         }
-        setCardMsg('🦘 Now click an empty square in YOUR half of the board');
-        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, from: { row, col } } } : null);
+        setCardMsg('🦘 Now click a square to jump to — must have exactly 1 piece in between');
+        setCardPending(prev => prev ? { ...prev, step: 2, data: { ...prev.data, from: { row, col }, pieceType: piece.type, pieceColor: piece.color } } : null);
         void sendAuthoritativeTarget({ row, col }).catch(err => {
           const message = err instanceof Error ? err.message : 'Step 1 selection failed';
           setCardMsg(message);
@@ -727,34 +725,61 @@ export function useCardInteraction(props: UseCardInteractionProps) {
       if (step === 2) {
         const from = (data.from as Sq) || (cardPending.data.from as Sq);
         if (!from) { setCardMsg('🦘 Click YOUR piece first'); return; }
-        if (piece) { setCardMsg('🦘 Target square must be EMPTY!'); return; }
-        if (row < halfStart || row > halfEnd) {
-          setCardMsg('🦘 Must jump to YOUR half of the board!');
-          return;
+        const src = b[from.row]?.[from.col];
+        const pt = (data.pieceType as PieceType | undefined) ?? src?.type;
+        const pc = (data.pieceColor as PieceColor | undefined) ?? src?.color ?? playerColor;
+        if (piece && piece.color === playerColor) { setCardMsg('🦘 Cannot land on your own piece!'); return; }
+        if (piece && piece.type === 'king') { setCardMsg('🦘 Cannot jump onto the king!'); return; }
+
+        const dr = row - from.row, dc = col - from.col;
+        const diag = Math.abs(dr) === Math.abs(dc), straight = dr === 0 || dc === 0;
+        let dirOk = false;
+        if (pt === 'bishop') dirOk = diag;
+        else if (pt === 'rook') dirOk = straight;
+        else if (pt === 'queen') dirOk = diag || straight;
+        else if (pt === 'pawn') {
+          const fwd = pc === 'white' ? 1 : -1;
+          // straight forward 1 or 2 squares, OR diagonal forward 2 squares (need room for 1 piece in between)
+          dirOk = (dc === 0 && (dr === fwd || dr === fwd * 2)) || (Math.abs(dc) === 2 && dr === fwd * 2);
         }
+        if (!dirOk) { setCardMsg(`🦘 That direction is invalid for a ${pt}!`); return; }
+
+        // Must have exactly 1 piece in between
+        const sr = Math.sign(dr), sc = Math.sign(dc);
+        let count = 0;
+        let r = from.row + sr, c = from.col + sc;
+        while (r !== row || c !== col) {
+          if (b[r][c]) count++;
+          r += sr; c += sc;
+        }
+        if (count !== 1) { setCardMsg('🦘 Must have exactly 1 piece in between!'); return; }
+        // Pawn straight jump must land on empty square
+        if (pt === 'pawn' && dc === 0 && piece) { setCardMsg('🦘 Pawn can only jump straight to an empty square!'); return; }
+
         const nb: Board = b.map(r => r.map(p => p ? { ...p } : null));
-        const src = nb[from.row][from.col]!;
-        nb[row][col] = src;
+        nb[row][col] = nb[from.row][from.col];
         nb[from.row][from.col] = null;
         const kp  = findKing(nb, playerColor);
         const okp = findKing(nb, opp);
         if (kp && isAttackedWithFusion(nb, kp.row, kp.col, opp)) {
-          setCardMsg('🦘 Jump would leave your king in check!');
+          setCardMsg('🦘 That jump would leave your king in check!');
           return;
         }
         if (okp && isAttackedWithFusion(nb, okp.row, okp.col, playerColor)) {
-          setCardMsg('🦘 Cannot jump there — would put enemy king in check!');
+          setCardMsg('🦘 Cannot jump there — would put the enemy king in check!');
           return;
         }
 
-        triggerJumpAnim(from, { row, col }, src.type, playerColor, false);
-        playMoveSound('move');
+        const isCapture = Boolean(piece);
+        const action = isCapture ? `captured ${piece!.type} on` : 'jumped to';
+        triggerJumpAnim(from, { row, col }, pt ?? 'pawn', playerColor, isCapture);
+        playMoveSound(isCapture ? 'capture' : 'move');
 
         if (authoritativeMatchIdRef.current) {
           void sendAuthoritativeTarget({ row, col }).then(() => {
             setCardPending(null);
             setSelectedCard(null);
-            setCardMsg(`🦘 Jumped to ${FILES[col]}${RANKS[row]}`);
+            setCardMsg(`🦘 ${src?.type ?? 'Piece'} ${action} ${FILES[col]}${RANKS[row]}!`);
             setTimeout(() => setCardMsg(''), 2500);
           }).catch(err => {
             const message = err instanceof Error ? err.message : 'Jump failed';
@@ -765,7 +790,7 @@ export function useCardInteraction(props: UseCardInteractionProps) {
           setBoard(nb);
           setCardPending(null);
           setSelectedCard(null);
-          setCardMsg(`🦘 Jumped to ${FILES[col]}${RANKS[row]}`);
+          setCardMsg(`🦘 ${src?.type ?? 'Piece'} ${action} ${FILES[col]}${RANKS[row]}!`);
           setTimeout(() => setCardMsg(''), 2500);
           finishCardUse(card, playerColor);
         }
@@ -1758,13 +1783,39 @@ export function useCardInteraction(props: UseCardInteractionProps) {
       case 'promotehim':
       case 'demotehim':  return step === 1 && piece && piece.type !== 'king' ? 'rgba(245,158,11,0.55)' : null;
       case 'jump': {
-        const halfStart = playerColor === 'white' ? 0 : 4;
-        const halfEnd   = playerColor === 'white' ? 3 : 7;
-        if (step === 1 && piece?.color === playerColor && piece.type !== 'king') return 'rgba(74,222,128,0.55)';
+        if (step === 1 && piece?.color === playerColor && piece.type !== 'king' && piece.type !== 'knight') return 'rgba(74,222,128,0.55)';
         if (step === 2) {
           const from = data.from as Sq | undefined;
+          const pt = (data.pieceType as PieceType | undefined) ?? (from ? board[from.row]?.[from.col]?.type : undefined);
+          const pc = (data.pieceColor as PieceColor | undefined) ?? playerColor;
           if (from && row === from.row && col === from.col) return 'rgba(245,158,11,0.6)';
-          if (!piece && row >= halfStart && row <= halfEnd) return 'rgba(74,222,128,0.35)';
+          if (from && pt && pc && piece?.color !== playerColor) {
+            const dr = row - from.row, dc = col - from.col;
+            if (dr === 0 && dc === 0) return null;
+            const diag = Math.abs(dr) === Math.abs(dc), straight = dr === 0 || dc === 0;
+            let dirOk = false;
+            if (pt === 'bishop') dirOk = diag;
+            else if (pt === 'rook') dirOk = straight;
+            else if (pt === 'queen') dirOk = diag || straight;
+            else if (pt === 'pawn') {
+              const fwd = pc === 'white' ? 1 : -1;
+              dirOk = (dc === 0 && (dr === fwd || dr === fwd * 2)) || (Math.abs(dc) === 2 && dr === fwd * 2);
+            }
+            if (!dirOk) return null;
+            const sr = Math.sign(dr), sc = Math.sign(dc);
+            let count = 0;
+            let r = from.row + sr, c = from.col + sc;
+            while (r !== row || c !== col) {
+              if (board[r][c]) count++;
+              r += sr; c += sc;
+            }
+            if (count === 1) {
+              if (pt === 'pawn' && dc === 0) return !piece ? 'rgba(74,222,128,0.45)' : null;
+              if (pt === 'pawn' && Math.abs(dc) === 2) return piece?.type === 'king' ? null : (piece ? 'rgba(248,113,113,0.6)' : 'rgba(74,222,128,0.45)');
+              if (piece?.type === 'king') return null;
+              return piece ? 'rgba(248,113,113,0.6)' : 'rgba(74,222,128,0.45)';
+            }
+          }
         }
         return null;
       }

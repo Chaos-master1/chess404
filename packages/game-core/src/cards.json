@@ -107,7 +107,7 @@
     "color": "#1a2e1a",
     "accent": "#4ade80",
     "icon": "🦘",
-    "desc": "Move one of your pieces to any empty square in YOUR half. Not king."
+    "desc": "Jump one of your pieces over exactly 1 piece along its movement lines (can capture). Not king or knight."
   },
   {
     "id": "doublemove_diff",

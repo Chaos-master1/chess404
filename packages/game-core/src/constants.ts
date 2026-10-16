@@ -72,7 +72,7 @@ export const CARD_TARGET_MESSAGES: Partial<Record<CardMechanic, string>> = {
   badsniper: 'Click your piece (not king) to remove it',
   promote: 'Click your piece to promote (not king)',
   demote: 'Click your piece to demote (not king)',
-  jump: 'Click your piece to jump (not king)',
+  jump: 'Click your piece to jump (not king or knight)',
   teleport: 'Click your piece to teleport (not king)',
   swapme: 'Click the first of your pieces to swap (not king)',
   swapus: 'Click your piece to swap with enemy (not king)',
