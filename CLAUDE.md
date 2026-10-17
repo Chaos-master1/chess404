@@ -117,9 +117,11 @@ Full-platform pass per the approved 5-phase plan; evidence in
   handoff soaks 20 pairs 6.2s / 100 pairs 18s, 0 stuck/leaks/429s; axe
   WCAG A/AA smoke on all 16 routes — 0 critical, 1 serious finding
   (/cards scrollable-region-focusable, sole a11y backlog item).
-- **Ops:** Railway GitHub auto-deploy is DEAD since Oct 5 — ship with
-  `railway up -s <service>` and verify `railway deployment list` (see
-  checklist §3 recurrence note). The daily backup workflow REGRESSED:
+- **Ops:** Railway GitHub auto-deploy RESTORED 2026-10-18 — `gateway` and
+  `platform-service` had lost their `main` deployment triggers (web and
+  match-service still had theirs). Recreated via `deploymentTriggerCreate`;
+  push of `2686c04` auto-built all four to SUCCESS. If a service stops
+  building on push, query `repoTriggers` (checklist §3). The daily backup workflow REGRESSED:
   run 37623044600 no-opped with secrets empty again — owner must re-set
   the five BACKUP_* secrets (checklist §2 regression note).
 - **Documented, not patched:** v1 engine occasionally submits an illegal

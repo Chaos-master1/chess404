@@ -85,6 +85,13 @@ fire on subsequent pushes — treat `railway up` as the deploy mechanism of
 record until the Railway webhook is re-authorized (dashboard → service →
 Settings → Source → re-connect repo).
 
+**Resolved 2026-10-18:** the root cause was missing deployment triggers, not
+the webhook. `gateway` and `platform-service` had no `repoTriggers` (web and
+match-service did, and were auto-deploying). Both were recreated with
+`railway api` → `deploymentTriggerCreate` (branch `main`, repo
+`Chaos-master1/chess404`, production env); the push of `2686c04` then
+auto-built all four services to SUCCESS.
+
 ## 4. Moderation admin — RESOLVED 2026-10-05
 
 `PLATFORM_ADMIN_HANDLES=lazy-to-move` is set on `platform-service` in

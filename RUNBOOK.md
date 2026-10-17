@@ -22,18 +22,21 @@ pre-deploy proof for a new candidate—it exercises the old release. Run the
 live scenarios below only after Railway reports the intended commit as
 successfully deployed.
 
-## How to deploy (Railway has no auto-deploy)
+## How to deploy
 
-After pushing to `main`, Railway does not necessarily build. Check and trigger:
+Pushing to `main` auto-deploys all four services (triggers restored 2026-10-18).
+Verify every service converged on the pushed commit:
 
 ```bash
-# via MCP or dashboard:
-# list-services → get-status → list-deployments (look for branch main, status SUCCESS, recent timestamp)
-# if a service is still on an old commit (e.g. a8ae5bc vs main 5913cec), re-point it:
-# railway connect_service_source(projectId, serviceId, repo="Chaos-master1/chess404", branch="main")
+railway deployment list -s <service>   # status SUCCESS on the new commit
 ```
 
-Every service should converge on the same `main` commit within a few minutes. Watch its build log; a second `connect` after a transient `FAILED` usually succeeds.
+If a service did not build, it has probably lost its deployment trigger. Check
+`repoTriggers` via `railway api` and recreate it with `deploymentTriggerCreate`
+(branch `main`, repo `Chaos-master1/chess404`); `railway up -s <service>` ships
+immediately as a fallback.
+
+Every service should converge on the same `main` commit within a few minutes. Watch its build log; a redeploy after a transient `FAILED` usually succeeds.
 
 ## Mandatory live gate after deploy
 
