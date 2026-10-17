@@ -469,7 +469,7 @@ export default function CardsPage({onNavigate, embedded = false}:CardsPageProps)
           left:`${5+i*6.5}%`, bottom:`${5+((i*41)%65)}%`,
           width:i%4===0?2:1, height:i%4===0?2:1,
           borderRadius:'50%', background:'rgba(255,190,80,0.55)',
-          animation:`stars ${3.2+i*0.35}s ease-in infinite`,
+          animation:`stars ${3.2+i*0.35}s linear infinite`,
           animationDelay:`${i*0.45}s`,
         }}/>
       ))}

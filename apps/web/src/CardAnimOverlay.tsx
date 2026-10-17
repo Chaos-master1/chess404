@@ -1407,7 +1407,6 @@ export const CardAnimOverlay: React.FC<Props> = ({ anim, label='', onDone }) => 
       tickParticles(psRef.current, dt);
 
       // Paint
-      // ── TEMPORARILY DISABLED ─────────────────────────────────────────────
       switch (anim) {
         case 'shield':         paintShield(ctx,W,H,t,psRef.current); break;
         case 'freeze':         paintFreeze(ctx,W,H,t,psRef.current); break;
@@ -1427,7 +1426,6 @@ export const CardAnimOverlay: React.FC<Props> = ({ anim, label='', onDone }) => 
         case 'gambler_win':
         case 'gambler_lose':     paintGambler(ctx,W,H,t,isWin,psRef.current,label); break;
       }
-      // ── END TEMPORARILY DISABLED ──────────────────────────────────────────
 
       if (t < 1) {
         rafRef.current = requestAnimationFrame(tick);

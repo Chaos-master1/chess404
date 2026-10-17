@@ -53,9 +53,11 @@ function resolveMatchServiceWsBase(): string {
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const nonce = (await headers()).get('x-nonce') ?? '';
+  // Forces per-request rendering so Next stamps the middleware CSP nonce on its scripts;
+  // a nonce on <html> itself is inert and browsers blank it, causing a hydration mismatch.
+  await headers();
   return (
-    <html lang="en" className={`${inter.variable} ${jetBrainsMono.variable}`} nonce={nonce}>
+    <html lang="en" className={`${inter.variable} ${jetBrainsMono.variable}`}>
       <head>
         <link rel="manifest" href="/manifest.json" />
       </head>
