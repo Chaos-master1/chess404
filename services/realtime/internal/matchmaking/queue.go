@@ -42,6 +42,11 @@ const (
 	defaultPairingRecoveryTTL = 60 * time.Second
 	defaultCancelledTicketTTL = 30 * time.Second
 	defaultMaxRatingDiff      = 400
+	// A queued ticket is only offered as an opponent if its client polled
+	// within this window. Visible clients poll every 2.5s, hidden tabs every
+	// 5s, and 429 backoff stretches that to 20s; anything quieter is a closed
+	// tab whose pairing would open a room nobody joins.
+	defaultQueuedLivenessTTL = 30 * time.Second
 )
 
 // allowedQueueClockSeconds lists the time controls the queue offers. Anything
@@ -105,6 +110,7 @@ type Ticket struct {
 	Rating         int          `json:"rating"`
 	CreatedAt      time.Time    `json:"createdAt"`
 	UpdatedAt      time.Time    `json:"updatedAt"`
+	LastSeenAt     time.Time    `json:"lastSeenAt,omitempty"`
 	MatchedAt      *time.Time   `json:"matchedAt,omitempty"`
 	MatchedWith    string       `json:"matchedWith,omitempty"`
 	SeatColor      string       `json:"seatColor,omitempty"`
@@ -135,6 +141,7 @@ type Service struct {
 	creator            MatchCreator
 	now                func() time.Time
 	queuedTTL          time.Duration
+	queuedLivenessTTL  time.Duration
 	matchedRecoveryTTL time.Duration
 	pairingRecoveryTTL time.Duration
 	cancelledTicketTTL time.Duration
@@ -237,6 +244,7 @@ func newService(store ticketStore) *Service {
 		inFlight:           make(map[string]bool),
 		now:                time.Now,
 		queuedTTL:          queuedTTLFromEnv(),
+		queuedLivenessTTL:  defaultQueuedLivenessTTL,
 		matchedRecoveryTTL: defaultMatchedRecoveryTTL,
 		pairingRecoveryTTL: defaultPairingRecoveryTTL,
 		cancelledTicketTTL: defaultCancelledTicketTTL,
@@ -378,6 +386,7 @@ func (s *Service) EnqueueWithAccount(queue QueueName, modeID contracts.MatchMode
 			// to the enqueuing client" contract (a re-enqueuer IS enqueuing).
 			active.CancelSecret = "cxl_" + randomToken(16)
 			active.UpdatedAt = now
+			active.LastSeenAt = now
 			s.tickets[active.TicketID] = active
 			if err := s.persistLocked(); err != nil {
 				s.mu.Unlock()
@@ -408,6 +417,7 @@ func (s *Service) EnqueueWithAccount(queue QueueName, modeID contracts.MatchMode
 		Rating:         rating,
 		CreatedAt:      now,
 		UpdatedAt:      now,
+		LastSeenAt:     now,
 		CancelSecret:   "cxl_" + randomToken(16),
 	}
 
@@ -425,6 +435,74 @@ func (s *Service) EnqueueWithAccount(queue QueueName, modeID contracts.MatchMode
 		// issued ticket itself, not the redacted projection.
 		return ticket, nil
 	}
+	return s.pairLocked(ticket, opponent, now)
+}
+
+// Poll is the owning client's status read. It doubles as the liveness
+// heartbeat that keeps a queued ticket matchable, and it retries pairing:
+// pairing otherwise only runs at enqueue time, so a waiter that was skipped
+// while stale (throttled background tab) would never meet a player who queued
+// meanwhile.
+func (s *Service) Poll(ticketID string) (Ticket, bool) {
+	s.mu.Lock()
+	now := s.nowUTC()
+	s.recoverStalePairingsLocked(now)
+	if s.pruneExpiredLocked(now) {
+		if err := s.persistLocked(); err != nil {
+			log.Printf("warning: failed to persist after pruning: %v", err)
+		}
+	}
+	ticket, ok := s.tickets[ticketID]
+	if !ok {
+		s.mu.Unlock()
+		return Ticket{}, false
+	}
+	if ticket.Status != StatusQueued && ticket.Status != StatusPairing {
+		s.mu.Unlock()
+		return ticket.PublicView(), true
+	}
+	// In-memory only: a restart briefly reads every ticket as stale until its
+	// next poll, which is harmless, while persisting would write per poll.
+	ticket.LastSeenAt = now
+	s.tickets[ticketID] = ticket
+	if ticket.Status == StatusPairing {
+		s.mu.Unlock()
+		return ticket.PublicView(), true
+	}
+	opponent, found := s.findMatchCandidateLocked(
+		ticket.Queue,
+		normalizeModeID(ticket.ModeID),
+		ticket.GuestID,
+		ticket.Rating,
+		normalizeClockSeconds(ticket.ClockSeconds),
+		normalizeClockIncrement(ticket.ClockIncrement),
+	)
+	if !found {
+		s.mu.Unlock()
+		return ticket.PublicView(), true
+	}
+	if _, err := s.pairLocked(ticket, opponent, now); err != nil {
+		// Already rolled back to queued; the client just keeps polling.
+		log.Printf("matchmaking: poll-triggered pairing for ticket %s failed: %v", ticketID, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.tickets[ticketID]
+	if !ok {
+		return Ticket{}, false
+	}
+	return current.PublicView(), true
+}
+
+// pairLocked runs the two-phase pairing of ticket (new or already queued)
+// against a queued opponent. Must be called with s.mu held; returns with s.mu
+// released.
+func (s *Service) pairLocked(ticket, opponent Ticket, now time.Time) (Ticket, error) {
+	guestID := ticket.GuestID
+	queue := ticket.Queue
+	modeID := normalizeModeID(ticket.ModeID)
+	clockSeconds := normalizeClockSeconds(ticket.ClockSeconds)
+	clockIncrement := normalizeClockIncrement(ticket.ClockIncrement)
 
 	// Belt-and-braces against re-entrant enqueues from the same guest while
 	// the pairing is mid-flight (the pairing reservation is the real guard).
@@ -465,6 +543,8 @@ func (s *Service) EnqueueWithAccount(queue QueueName, modeID contracts.MatchMode
 	}
 
 	// Phase 1: reserve both tickets as pairing while still under the lock.
+	priorTicket, ticketExisted := s.tickets[ticket.TicketID]
+	priorOpponent := s.tickets[opponent.TicketID]
 	ticket.Status = StatusPairing
 	ticket.AssignedRoom = roomID
 	ticket.UpdatedAt = now
@@ -474,8 +554,13 @@ func (s *Service) EnqueueWithAccount(queue QueueName, modeID contracts.MatchMode
 	s.tickets[ticket.TicketID] = ticket
 	s.tickets[opponent.TicketID] = opponent
 	if err := s.persistLocked(); err != nil {
-		delete(s.tickets, ticket.TicketID)
-		delete(s.tickets, opponent.TicketID)
+		if ticketExisted {
+			s.tickets[ticket.TicketID] = priorTicket
+		} else {
+			delete(s.tickets, ticket.TicketID)
+		}
+		s.tickets[opponent.TicketID] = priorOpponent
+		delete(s.inFlight, guestID)
 		s.mu.Unlock()
 		return Ticket{}, err
 	}
@@ -767,6 +852,9 @@ func (s *Service) findMatchCandidateLocked(queue QueueName, modeID contracts.Mat
 		if normalizeClockSeconds(ticket.ClockSeconds) != clockSeconds || normalizeClockIncrement(ticket.ClockIncrement) != clockIncrement {
 			continue
 		}
+		if !s.ticketLiveLocked(ticket, now) {
+			continue
+		}
 		diff := ticket.Rating - rating
 		if diff < 0 {
 			diff = -diff
@@ -785,6 +873,16 @@ func (s *Service) findMatchCandidateLocked(queue QueueName, modeID contracts.Mat
 		return Ticket{}, false
 	}
 	return candidates[0], true
+}
+
+// ticketLiveLocked reports whether the ticket's client polled recently.
+// Tickets persisted before LastSeenAt existed fall back to UpdatedAt.
+func (s *Service) ticketLiveLocked(ticket Ticket, now time.Time) bool {
+	seen := ticket.LastSeenAt
+	if seen.IsZero() {
+		seen = ticket.UpdatedAt
+	}
+	return seen.Add(s.queuedLivenessTTL).After(now)
 }
 
 func (s *Service) findActiveTicketForGuestLocked(guestID string) (Ticket, bool) {

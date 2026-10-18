@@ -435,7 +435,7 @@ func buildMatchmakingMux(service *matchmaking.Service, internalToken string) *ht
 		}
 		switch r.Method {
 		case http.MethodGet:
-			ticket, ok := service.Get(ticketID)
+			ticket, ok := service.Poll(ticketID)
 			if !ok {
 				http.NotFound(w, r)
 				return
