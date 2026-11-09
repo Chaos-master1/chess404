@@ -21,3 +21,7 @@ services:
         value: memory
       - key: MATCHMAKING_TICKET_STORE_BACKEND
         value: memory
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
