@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: chess404-backend
+    runtime: docker
+    dockerfilePath: ./deploy/render/Dockerfile
+    dockerContext: .
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: INTERNAL_SERVICE_TOKEN
+        generateValue: true
+      - key: PLATFORM_POSTGRES_URL
+        value: postgresql://neondb_owner:npg_4Jbrczo0LXgv@ep-tiny-rain-bd7y1hiv-pooler.c-8.us-east-2.aws.neon.tech/neondb?sslmode=require
+      - key: ALLOWED_ORIGINS
+        value: "https://chess404.vercel.app,http://localhost:3000"
+      - key: MATCH_STATE_BACKEND
+        value: memory
+      - key: MATCH_CLAIM_STORE_BACKEND
+        value: memory
+      - key: RATE_LIMIT_BACKEND
+        value: memory
+      - key: MATCHMAKING_TICKET_STORE_BACKEND
+        value: memory
