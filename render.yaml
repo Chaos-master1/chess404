@@ -22,6 +22,6 @@ services:
       - key: MATCHMAKING_TICKET_STORE_BACKEND
         value: memory
       - key: SENTRY_DSN
-        sync: false
+        value: https://67152f6b2833d6fffb3778fc85b443a0@o4512201340813312.ingest.de.sentry.io/4512217592758352
       - key: SENTRY_ENVIRONMENT
         value: production
