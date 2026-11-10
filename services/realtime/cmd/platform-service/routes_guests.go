@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -35,14 +36,14 @@ func registerGuestRoutes(mux *http.ServeMux, archive *platform.MatchArchiveStore
 		switch {
 		case strings.TrimSpace(payload.GuestID) != "" && strings.TrimSpace(payload.SessionToken) != "":
 			session, err = guests.ResumeGuestByToken(payload.GuestID, payload.SessionToken)
-			if err == platform.ErrUnauthorizedGuestSession && strings.TrimSpace(payload.SessionSecret) != "" {
+			if (errors.Is(err, platform.ErrUnauthorizedGuestSession) || errors.Is(err, os.ErrNotExist)) && strings.TrimSpace(payload.SessionSecret) != "" {
 				session, err = guests.EnsureGuest(payload.GuestID, payload.SessionSecret)
 			}
 		default:
 			session, err = guests.EnsureGuest(payload.GuestID, payload.SessionSecret)
 		}
 		if err != nil {
-			if err == platform.ErrUnauthorizedGuestSession {
+			if errors.Is(err, platform.ErrUnauthorizedGuestSession) || errors.Is(err, os.ErrNotExist) {
 				http.Error(w, `{"error":"unauthorized guest session"}`, http.StatusUnauthorized)
 				return
 			}
