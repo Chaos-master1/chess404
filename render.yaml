@@ -13,14 +13,8 @@ services:
         value: postgresql://neondb_owner:npg_4Jbrczo0LXgv@ep-tiny-rain-bd7y1hiv-pooler.c-8.us-east-2.aws.neon.tech/neondb?sslmode=require
       - key: ALLOWED_ORIGINS
         value: "https://chess404-indol.vercel.app,https://chess404-houssemdrira97-1057s-projects.vercel.app,https://chess404.vercel.app,http://localhost:3000"
-      - key: MATCH_STATE_BACKEND
-        value: memory
-      - key: MATCH_CLAIM_STORE_BACKEND
-        value: memory
-      - key: RATE_LIMIT_BACKEND
-        value: memory
-      - key: MATCHMAKING_TICKET_STORE_BACKEND
-        value: memory
+      - key: REDIS_URL
+        sync: false
       - key: SENTRY_DSN
         value: https://67152f6b2833d6fffb3778fc85b443a0@o4512201340813312.ingest.de.sentry.io/4512217592758352
       - key: SENTRY_ENVIRONMENT
