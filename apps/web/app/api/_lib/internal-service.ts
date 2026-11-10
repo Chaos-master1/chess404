@@ -290,7 +290,12 @@ export function filterResponseHeaders(headers: Headers): Headers {
   const next = new Headers();
   headers.forEach((value, key) => {
     const lower = key.toLowerCase();
-    if (lower === 'content-length' || lower === 'connection' || lower === 'transfer-encoding') {
+    if (
+      lower === 'content-length' ||
+      lower === 'connection' ||
+      lower === 'transfer-encoding' ||
+      lower === 'content-encoding'
+    ) {
       return;
     }
     next.set(key, value);
