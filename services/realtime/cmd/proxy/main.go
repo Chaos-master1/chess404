@@ -69,25 +69,37 @@ func main() {
 		path := r.URL.Path
 		isWebSocket := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 
-		// 1. WebSocket or live match rooms -> match-service
-		if isWebSocket || strings.HasPrefix(path, "/api/matches") {
+		// 1. WebSocket or /ws endpoint -> match-service
+		if isWebSocket || strings.HasSuffix(path, "/ws") {
 			matchProxy.ServeHTTP(w, r)
 			return
 		}
 
-		// 2. Platform endpoints (accounts, profiles, history, rankings) -> platform-service
+		// 2. Gateway-proxied match intents & presence (cookie credential injection) -> gateway
+		if strings.HasPrefix(path, "/api/matches/") && (strings.HasSuffix(path, "/intents") || strings.HasSuffix(path, "/presence")) {
+			gatewayProxy.ServeHTTP(w, r)
+			return
+		}
+
+		// 3. Direct match rooms & tokens -> match-service
+		if path == "/api/matches" || strings.HasPrefix(path, "/api/matches/") {
+			matchProxy.ServeHTTP(w, r)
+			return
+		}
+
+		// 4. Platform endpoints (accounts, profiles, history, rankings) -> platform-service
 		if strings.HasPrefix(path, "/api/platform") {
 			platformProxy.ServeHTTP(w, r)
 			return
 		}
 
-		// 3. Matchmaking endpoints (queues, tickets) -> matchmaking-service
-		if strings.HasPrefix(path, "/api/matchmaking") {
+		// 5. Matchmaking endpoints (/api/queues/*, /api/status, /api/matchmaking/*) -> matchmaking-service
+		if strings.HasPrefix(path, "/api/queues") || path == "/api/status" || strings.HasPrefix(path, "/api/matchmaking") {
 			matchmakingProxy.ServeHTTP(w, r)
 			return
 		}
 
-		// 4. Everything else -> gateway (bootstrap, auth, challenges, system status)
+		// 6. Everything else -> gateway (bootstrap, private-matches, challenges, system status)
 		gatewayProxy.ServeHTTP(w, r)
 	})
 
