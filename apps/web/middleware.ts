@@ -8,7 +8,7 @@ function safeOrigin(raw: string | undefined | null): string | null {
   if (trimmed.includes('${{') || /:\s*$/.test(trimmed)) return null;
   try {
     const u = new URL(trimmed);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    if (u.protocol !== 'http:' && u.protocol !== 'https:' && u.protocol !== 'ws:' && u.protocol !== 'wss:') return null;
     if (!u.host) return null;
     return `${u.protocol}//${u.host}`;
   } catch {
